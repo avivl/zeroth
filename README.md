@@ -53,7 +53,7 @@ task test
 task ci
 ```
 
-Go 1.22+. The UI under `web/` is a Vite + React scaffold and is not required for `go build`.
+Requires Go 1.27 (see `go.mod`). The UI under `web/` is a Vite + React scaffold and is not required for `go build`.
 
 ## License
 

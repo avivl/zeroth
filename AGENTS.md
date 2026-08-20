@@ -105,7 +105,7 @@ go build ./...
 - Do not add a test dependency until the package under test has behavior that needs it.
 - `evals/` is not `go test` and not CI.
 
-Go 1.22. Do not add a module dependency unless the package that needs it is being implemented.
+Go 1.27. Do not add a module dependency unless the package that needs it is being implemented.
 
 ## Style
 
