@@ -1,0 +1,11 @@
+# Human review is required on these paths. There is no exception for
+# agent-authored PRs. Do not add bots, GitHub Apps, or Cursor agents as
+# owners, and do not put them on a ruleset bypass list.
+#
+# Branch protection on main must require a pull request, the `ci` check,
+# review from code owners, and squash merge only. The git SHA is the
+# version; this repository does not stamp a semver.
+
+/internal/policy/ @avivl
+/internal/plan/ @avivl
+/pkg/api/ @avivl

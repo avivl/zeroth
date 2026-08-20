@@ -58,7 +58,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 - **Deny by default.** Missing grant, expired lease, or unknown scope is a deny. Do not add implicit allow, "fail open," or a debug backdoor.
 - **No I/O.** Policy does not read disk, network, environment, or the store. Callers pass facts in; policy returns a decision. Persistence is `internal/store`. Lease runtime is `internal/lease`.
 - **Distinct named ID types.** `ScopeID`, `GrantID`, `LeaseID`, `SessionID`, and the rest are different types. Do not use `string` or `int64` where an ID is required. Do not make the types aliases of each other.
-- **Human review on every change.** Agents do not modify `internal/policy`. If an issue seems to need a policy change, stop and say so. A human writes or reviews the patch.
+- **Human review on every change.** Agents do not modify `internal/policy`. If an issue seems to need a policy change, stop and say so. A human writes or reviews the patch. CODEOWNERS requires a human on `internal/policy/`, `internal/plan/`, and `pkg/api/`, with no exception for agent-authored PRs.
 
 A path that applies a consequential action without the plan lifecycle (draft, cross-exam, approve, apply) is a defect. Autonomy tiers change how much a session may do, not whether a plan exists.
 
@@ -98,7 +98,9 @@ go vet ./...
 go build ./...
 ```
 
-`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs lint, `go test -race ./...`, and build. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`).
+`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs lint, `go test -race ./...`, conformance, secret scan, web build, and Go build. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`).
+
+GitHub Actions (`.github/workflows/ci.yml`) is the required check, named `ci`. Every PR runs race tests, conformance, `go vet` + staticcheck, a secret scan over the diff (no allowlist file), and `web/` build plus tests. Path filtering: `web/`-only PRs skip Go; `internal/`-only PRs skip web; `pkg/api/` changes always run both. The git SHA is the version; do not add a semver inside the repo.
 
 - Prefer table tests. The port `conformance_test.go` files are the pattern: a slice of cases, `t.Run`, `t.Parallel()`.
 - Kernel packages (`policy`, and the plan/session/lease invariants once they have behavior) get property tests (`testing/quick` in the standard library, or an equivalent). Properties that must hold: deny by default, leases cannot outlive their window, named ID types are not interchangeable.
@@ -119,7 +121,7 @@ Go 1.27. Do not add a module dependency unless the package that needs it is bein
 - Small, one concern. Do not bundle a kernel change with a UI tweak.
 - Docs for the change land in the same PR: `doc.go`, architecture/PRD/plan if shape changed, this file if a convention changed.
 - Link the Linear issue.
-- Squash merge.
+- Squash merge. `main` requires a PR, the `ci` check, and code-owner review. There is no bypass for agent-authored PRs.
 - ADRs are `docs/adr/Z-NNNN-slug.md`. License is MIT ([ADR-Z-0002](docs/adr/Z-0002-mit-license.md)). Repo is public ([ADR-Z-0001](docs/adr/Z-0001-public-from-day-one.md)).
 
 ## What not to do

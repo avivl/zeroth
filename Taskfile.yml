@@ -49,12 +49,16 @@ tasks:
     cmds:
       - go test -race {{.PACKAGES}} -run Conformance
 
-  lint:
-    desc: go vet, staticcheck, plus the web lint
-    deps: [web:deps]
+  lint:go:
+    desc: go vet and staticcheck
     cmds:
       - go vet ./...
       - go run {{.STATICCHECK}} ./...
+
+  lint:
+    desc: go vet, staticcheck, plus the web lint
+    deps: [lint:go, web:deps]
+    cmds:
       - "{{.PNPM}} --dir web run lint"
 
   generate:
@@ -70,10 +74,62 @@ tasks:
     cmds:
       - "{{.PNPM}} --dir web run dev"
 
-  secretscan:
-    desc: Run the secret scanner over the tree
+  web:test:
+    desc: Typecheck and test web/
+    deps: [web:deps]
     cmds:
-      - go run {{.GITLEAKS}} detect --source . --no-git
+      - "{{.PNPM}} --dir web run test"
+
+  web:build:
+    desc: Production build of web/
+    deps: [web:deps]
+    cmds:
+      - "{{.PNPM}} --dir web run build"
+
+  secretscan:
+    desc: Secret scanner over the worktree, or added lines in GITLEAKS_DIFF_RANGE
+    cmds:
+      - |
+        set -eu
+        if [ -n "${GITLEAKS_DIFF_RANGE:-}" ]; then
+          _scan_base=$(printf '%s\n' "${GITLEAKS_DIFF_RANGE}" | awk '{print $1}')
+          _scan_head=$(printf '%s\n' "${GITLEAKS_DIFF_RANGE}" | awk '{print $2}')
+          _scan_extra=$(printf '%s\n' "${GITLEAKS_DIFF_RANGE}" | awk '{print $3}')
+          if [ -z "${_scan_base}" ] || [ -z "${_scan_head}" ] || [ -n "${_scan_extra}" ]; then
+            echo "secretscan: GITLEAKS_DIFF_RANGE must be two SHAs, got: ${GITLEAKS_DIFF_RANGE}" >&2
+            exit 2
+          fi
+          added=$(git diff -U0 --diff-filter=ACMR "${_scan_base}" "${_scan_head}" | grep -E '^\+' | grep -vE '^\+\+\+' || true)
+          if [ -z "${added}" ]; then
+            echo "secretscan: no added lines in ${GITLEAKS_DIFF_RANGE}"
+            exit 0
+          fi
+          printf '%s\n' "${added}" | go run {{.GITLEAKS}} detect --no-banner --redact --exit-code 1 --verbose --pipe
+        else
+          go run {{.GITLEAKS}} detect --no-banner --redact --exit-code 1 --verbose --source . --no-git
+        fi
+
+  secretscan:smoke:
+    desc: Fail closed. A known fake GitHub PAT must be a finding
+    cmds:
+      - |
+        set -eu
+        tmp=$(mktemp -d)
+        trap 'rm -rf "${tmp}"' EXIT
+        # Assemble at runtime so this file is not itself a finding.
+        printf '%s\n' "ghp""_""0123456789abcdefghijklmnopqrstuvwxyz" > "${tmp}/canary.txt"
+        set +e
+        go run {{.GITLEAKS}} detect --source "${tmp}" --no-git --no-banner --redact --exit-code 1
+        code=$?
+        set -e
+        if [ "${code}" -eq 0 ]; then
+          echo "secretscan:smoke: scanner missed a fake GitHub PAT" >&2
+          exit 1
+        fi
+        if [ "${code}" -ne 1 ]; then
+          echo "secretscan:smoke: unexpected exit ${code}" >&2
+          exit 1
+        fi
 
   vet:
     desc: go vet ./...
@@ -81,10 +137,14 @@ tasks:
       - go vet ./...
 
   ci:
-    desc: Local stand-in for CI (lint, test, build)
+    desc: Local stand-in for GitHub CI (lint, race tests, conformance, secretscan, web build)
     cmds:
       - task: lint
       - task: test
+      - task: conformance
+      - task: secretscan:smoke
+      - task: secretscan
+      - task: web:build
       - task: build
 
   web:deps:

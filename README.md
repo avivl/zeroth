@@ -51,6 +51,8 @@ task lint  # go vet, staticcheck, and the web lint
 
 `task --list` shows the rest (`conformance`, `generate`, `secretscan`, and the local `ci` stand-in).
 
+GitHub Actions runs those same checks on every PR (`.github/workflows/ci.yml`). `web/`-only PRs skip Go; `internal/`-only PRs skip web; `pkg/api/` always runs both. Version is the git SHA.
+
 The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`).
 
 ## License

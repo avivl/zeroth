@@ -1,3 +1,10 @@
+# Every PR: race tests, conformance, vet + staticcheck, secret scan over
+# the diff, web build and tests. Path filtering: web/-only skips Go,
+# internal/-only skips web, pkg/api/ always runs both.
+#
+# The required check for branch protection is the aggregator job `ci`.
+# Version is the git SHA. This workflow does not stamp or publish a semver.
+
 name: ci
 
 on:
@@ -5,17 +12,135 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  go:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.classify.outputs.go }}
+      web: ${{ steps.classify.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: classify
+        name: Classify paths
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/classify-paths.sh
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            .github/scripts/classify-paths.sh --all
+            exit 0
+          fi
+          # Tree diff of the PR merge commit against its base: the files
+          # that would land, without needing a merge-base walk.
+          .github/scripts/classify-paths.sh \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.sha }}"
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.27.0"
-      - name: Build
-        run: go build ./...
-      - name: Test
-        run: go test -race ./...
-      - name: Vet
-        run: go vet ./...
+          go-version-file: go.mod
+          cache: true
+      - uses: go-task/setup-task@v1
+        with:
+          version: 3.53.1
+      - name: Race tests
+        run: task test
+      - name: Conformance
+        run: task conformance
+      - name: Vet and staticcheck
+        run: task lint:go
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Enable pnpm
+        run: corepack enable
+      - uses: go-task/setup-task@v1
+        with:
+          version: 3.53.1
+      - name: Web tests
+        run: task web:test
+      - name: Web build
+        run: task web:build
+
+  secretscan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: go-task/setup-task@v1
+        with:
+          version: 3.53.1
+      - name: Scanner fails closed
+        run: task secretscan:smoke
+      - name: Secret scan over the diff
+        env:
+          GITLEAKS_DIFF_RANGE: ${{ github.event_name == 'pull_request' && format('{0} {1}', github.event.pull_request.base.sha, github.sha) || format('{0} {1}', github.event.before, github.sha) }}
+        run: |
+          set -euo pipefail
+          before="${{ github.event.before }}"
+          if [ "${{ github.event_name }}" = "push" ] && { [ -z "${before}" ] || [ "${before}" = "0000000000000000000000000000000000000000" ]; }; then
+            unset GITLEAKS_DIFF_RANGE
+          fi
+          task secretscan
+
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    if: always() && !cancelled()
+    needs: [changes, go, web, secretscan]
+    steps:
+      - name: Require constituent jobs
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          GO: ${{ needs.go.result }}
+          WEB: ${{ needs.web.result }}
+          SECRETSCAN: ${{ needs.secretscan.result }}
+        run: |
+          set -euo pipefail
+          echo "changes=${CHANGES} go=${GO} web=${WEB} secretscan=${SECRETSCAN}"
+          allowed() { [ "$1" = success ] || [ "$1" = skipped ]; }
+          if [ "${CHANGES}" != success ]; then
+            echo "path classification failed" >&2
+            exit 1
+          fi
+          if [ "${SECRETSCAN}" != success ]; then
+            echo "secret scan failed or did not run" >&2
+            exit 1
+          fi
+          if ! allowed "${GO}" || ! allowed "${WEB}"; then
+            echo "go or web job failed" >&2
+            exit 1
+          fi
+          if [ "${GO}" = skipped ] && [ "${WEB}" = skipped ]; then
+            echo "both go and web skipped; path filter should not do that" >&2
+            exit 1
+          fi
