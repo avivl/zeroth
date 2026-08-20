@@ -1,0 +1,29 @@
+version: "3"
+
+tasks:
+  default:
+    desc: Build all Go packages
+    cmds:
+      - task: build
+
+  build:
+    desc: go build ./...
+    cmds:
+      - go build ./...
+
+  test:
+    desc: go test ./...
+    cmds:
+      - go test ./...
+
+  vet:
+    desc: go vet ./...
+    cmds:
+      - go vet ./...
+
+  ci:
+    desc: Local stand-in for CI
+    cmds:
+      - task: vet
+      - task: test
+      - task: build

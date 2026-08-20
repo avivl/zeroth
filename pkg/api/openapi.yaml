@@ -1,0 +1,34 @@
+openapi: 3.1.0
+info:
+  title: Zeroth API
+  version: 0.0.0
+  description: |
+    Local control-plane API for Zeroth. Stage 1 is single-player and binds
+    locally. This spec is the canonical contract; Go stubs and the TypeScript
+    client are generated from it, not hand-written.
+  license:
+    name: MIT
+    identifier: MIT
+  contact:
+    url: https://github.com/avivl/zeroth
+paths:
+  /health:
+    get:
+      summary: Liveness
+      operationId: health
+      responses:
+        "200":
+          description: Daemon is up
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
