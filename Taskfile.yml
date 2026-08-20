@@ -71,7 +71,7 @@ tasks:
       - "{{.PNPM}} --dir web run dev"
 
   secretscan:
-    desc: Run the secret scanner over the tree
+    desc: Run the secret scanner over the working tree (no allowlist)
     cmds:
       - go run {{.GITLEAKS}} detect --source . --no-git
 
@@ -81,11 +81,22 @@ tasks:
       - go vet ./...
 
   ci:
-    desc: Local stand-in for CI (lint, test, build)
+    desc: Local stand-in for CI (lint, test, conformance, secretscan, web, build)
     cmds:
       - task: lint
       - task: test
+      - task: conformance
+      - task: secretscan
+      - task: web:verify
       - task: build
+
+  web:verify:
+    internal: true
+    desc: Web tests and production build
+    deps: [web:deps]
+    cmds:
+      - "{{.PNPM}} --dir web run test"
+      - "{{.PNPM}} --dir web run build"
 
   web:deps:
     internal: true

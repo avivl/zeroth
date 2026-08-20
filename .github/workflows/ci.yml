@@ -1,3 +1,6 @@
+# Trunk-based CI. Main stays green. The required check is the gate job `ci`.
+# Path-filtered jobs may skip; the gate still runs so branch protection can
+# require one stable name. pkg/api is the contract: those changes run everything.
 name: ci
 
 on:
@@ -5,17 +8,160 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  GOTOOLCHAIN: go1.27.0
+  # Pinned to match Taskfile.yml. Bump both together.
+  STATICCHECK: honnef.co/go/tools/cmd/staticcheck@v0.8.0
+  GITLEAKS_VERSION: "8.21.2"
+  GITLEAKS_LINUX_X64_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
+
 jobs:
-  go:
+  changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      # Push to main always runs both. PRs use path filters.
+      go: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.go }}
+      web: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.web }}
+    steps:
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            go:
+              - "**/*.go"
+              - "go.mod"
+              - "go.sum"
+              - "Taskfile.yml"
+              - "pkg/api/**"
+              - ".github/workflows/ci.yml"
+            web:
+              - "web/**"
+              - "package.json"
+              - "pnpm-lock.yaml"
+              - "pnpm-workspace.yaml"
+              - "pkg/api/**"
+              - ".github/workflows/ci.yml"
+
+  go:
+    needs: changes
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.0"
-      - name: Build
-        run: go build ./...
-      - name: Test
+      - name: Test (race)
         run: go test -race ./...
+      - name: Conformance
+        run: |
+          set -euo pipefail
+          packages=$(find . \( -name node_modules -o -name .git \) -prune -o -name conformance_test.go -exec dirname {} \; | sort -u | tr '\n' ' ')
+          if [ -z "${packages// }" ]; then
+            echo "no conformance_test.go files found"
+            exit 1
+          fi
+          # Word-split the directory list from find. Directories have no spaces.
+          # shellcheck disable=SC2086
+          go test -race ${packages} -run Conformance
       - name: Vet
         run: go vet ./...
+      - name: staticcheck
+        run: go run ${{ env.STATICCHECK }} ./...
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm --dir web run lint
+      - name: Test
+        run: pnpm --dir web run test
+      - name: Build
+        run: pnpm --dir web run build
+
+  secretscan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "${archive}" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_LINUX_X64_SHA256}  ${archive}" | sha256sum -c -
+          mkdir -p "${HOME}/.local/bin"
+          tar -xzf "${archive}" -C "${HOME}/.local/bin" gitleaks
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+      - name: Scan the diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          # No allowlist file. A finding fails the job.
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
+            git fetch --no-tags --prune origin "${BASE}" "${HEAD}"
+            gitleaks detect --verbose --redact --log-opts="${BASE}..${HEAD}"
+          elif [ "${BASE}" = "0000000000000000000000000000000000000000" ]; then
+            gitleaks detect --verbose --redact --log-opts="${HEAD}"
+          else
+            gitleaks detect --verbose --redact --log-opts="${BASE}..${HEAD}"
+          fi
+
+  # Stable required check. Path-filtered jobs may skip; this job still reports.
+  ci:
+    name: ci
+    if: ${{ !cancelled() }}
+    needs: [changes, go, web, secretscan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All required jobs passed
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          GO: ${{ needs.go.result }}
+          WEB: ${{ needs.web.result }}
+          SECRETSCAN: ${{ needs.secretscan.result }}
+        run: |
+          set -euo pipefail
+          echo "changes=${CHANGES} go=${GO} web=${WEB} secretscan=${SECRETSCAN}"
+          fail=0
+          for result in "${CHANGES}" "${SECRETSCAN}"; do
+            if [ "${result}" != "success" ]; then
+              fail=1
+            fi
+          done
+          for result in "${GO}" "${WEB}"; do
+            if [ "${result}" != "success" ] && [ "${result}" != "skipped" ]; then
+              fail=1
+            fi
+          done
+          exit "${fail}"

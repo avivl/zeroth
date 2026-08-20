@@ -1,0 +1,10 @@
+# Human review is required on the kernel, the plan lifecycle, and the
+# public API contract. There is no exception for agent-authored PRs:
+# do not add a wildcard owner, a bot owner, or a bypass for these paths.
+#
+# Branch protection on main must require a PR, the `ci` check, review
+# from code owners, and squash merge only.
+
+/internal/policy/ @avivl
+/internal/plan/ @avivl
+/pkg/api/ @avivl

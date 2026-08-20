@@ -53,6 +53,8 @@ task lint  # go vet, staticcheck, and the web lint
 
 The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`).
 
+PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests, conformance, `go vet`, staticcheck, a secret scan over the diff, and the `web/` build and tests. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. The commit SHA is the version. There is no semver in this repository.
+
 ## License
 
 [MIT](LICENSE) © 2026 Aviv Laufer
