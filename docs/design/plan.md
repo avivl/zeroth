@@ -47,6 +47,8 @@ These are locked unless an ADR supersedes them.
 5. **Stage 1 is local and single-player.** No cloud deployment, no multiplayer.
 6. **One implementation per port in stage 1.** Docker, Claude Code, Linear, SQLite. The interfaces exist so a second implementation can be added without rewriting the kernel.
 7. **Plan-then-apply is mandatory** for consequential actions. Autonomy tiers change how much a session may do, not whether a plan exists.
+8. **Trunk-based development.** Short-lived branches, squash merge onto `main`, `main` always green. A PR is required. CI is required. CODEOWNERS require a human on `internal/policy/`, `internal/plan/`, and `pkg/api/`, including agent-authored PRs. See `.github/workflows/ci.yml` and `.github/CODEOWNERS`.
+9. **The SHA is the version.** Identify builds by git commit SHA. Do not add semver tags or a product version constant inside the repo.
 
 ## 7. Non-goals until stage 2
 

@@ -8,4 +8,4 @@ Stage 1 is single-player and talks to `zerothd` on the same machine. [Beautiful 
 task web
 ```
 
-Or, from this directory, `pnpm install` and `pnpm run dev`. Lint is `pnpm run lint` (`tsc -b`), also run by `task lint` from the repo root.
+Or, from this directory, `pnpm install` and `pnpm run dev`. Lint is `pnpm run lint` (`tsc -b`), also run by `task lint` from the repo root. Tests are `pnpm run test` (vitest).

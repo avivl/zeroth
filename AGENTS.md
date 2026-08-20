@@ -98,7 +98,7 @@ go vet ./...
 go build ./...
 ```
 
-`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs lint, `go test -race ./...`, and build. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`).
+`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs lint, `go test -race ./...`, conformance, secretscan, the web tests and build, and `go build ./...`. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`). GitHub Actions CI lives in `.github/workflows/ci.yml`. Path filtering skips Go on `web/`-only PRs and web on `internal/`-only PRs. `pkg/api/` changes run everything.
 
 - Prefer table tests. The port `conformance_test.go` files are the pattern: a slice of cases, `t.Run`, `t.Parallel()`.
 - Kernel packages (`policy`, and the plan/session/lease invariants once they have behavior) get property tests (`testing/quick` in the standard library, or an equivalent). Properties that must hold: deny by default, leases cannot outlive their window, named ID types are not interchangeable.
@@ -130,3 +130,4 @@ Go 1.27. Do not add a module dependency unless the package that needs it is bein
 - **Do not widen an egress allowlist to make a test pass.** Use a fake, a fixture, or skip. Do not add a domain to CI, the sandbox, or the agent environment because a test wanted the network.
 - **Do not apply without a plan.** No harness shortcut, UI button, or CLI flag that mutates the world outside draft, cross-exam, approve, apply.
 - **Do not hand-write generated API clients.**
+- **Do not add a CODEOWNERS exception for agent-authored PRs.** Human review is required on `internal/policy/`, `internal/plan/`, and `pkg/api/`.
