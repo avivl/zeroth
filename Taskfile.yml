@@ -1,5 +1,7 @@
 version: "3"
 
+# Requires Go 1.27 (see go.mod).
+
 tasks:
   default:
     desc: Build all Go packages
@@ -21,9 +23,14 @@ tasks:
     cmds:
       - go vet ./...
 
+  lint:
+    desc: go vet ./...
+    cmds:
+      - task: vet
+
   ci:
     desc: Local stand-in for CI
     cmds:
-      - task: vet
+      - task: lint
       - task: test
       - task: build
