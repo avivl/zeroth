@@ -18,6 +18,7 @@ If you arrived looking for a SaaS agent runtime you can roll out to a team, you 
 
 ## Docs
 
+- [AGENTS.md](AGENTS.md): harness-facing memory (canonical for coding agents)
 - [Product requirements](docs/prd/zeroth.md)
 - [Architecture](docs/design/architecture.md)
 - [Plan](docs/design/plan.md) — §6 is the decision log (decision 4: public from day one)
@@ -41,7 +42,7 @@ zeroth/
 
 ```bash
 go build ./...
-go test ./...
+go test -race ./...
 ```
 
 If you have [Task](https://taskfile.dev):
