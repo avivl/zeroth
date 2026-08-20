@@ -4,6 +4,10 @@ Agents work at machine speed. Humans keep control of consequential actions.
 
 Zeroth is a control plane for AI agents. Autonomy is earned tier by tier, plans are proposed before they are applied, and every action is signed and auditable. The name is from Asimov: the Three Laws were incomplete, so a Zeroth Law was added above them — not another rule in the list, but the constraint that outranks the rest. Everything else in this repository is a First Law. **Human control is the Zeroth.**
 
+## Why "Zeroth"?
+
+In Asimov's robot stories, the Three Laws were eventually found to be incomplete. A Zeroth Law was added above them, not as another rule in the list but as the one that outranks the rest and constrains what the others are permitted to do. Zeroth takes its name from that idea. Agents here are fast, autonomous, and increasingly capable, and none of that is allowed to override the governing constraint: a human stays in control of consequential actions. Autonomy is earned tier by tier, plans are proposed before they are applied, and every action is signed and auditable. Everything else in this project is a First Law. Human control is the Zeroth.
+
 ## What this is
 
 Stage 1 is **local and single-player**. You run a daemon (`zerothd`) and a CLI (`zeroth`) on your own machine. The kernel is policy (scopes, grants, leases). The workflow is plan-then-apply: draft, cross-exam, approve, apply. Sandbox, harness, tracker, and store are ports with one implementation each (Docker, Claude Code, Linear, SQLite). The UI is Vite + React. The repo is public and MIT licensed from day one.
