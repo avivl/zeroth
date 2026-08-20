@@ -98,7 +98,7 @@ go vet ./...
 go build ./...
 ```
 
-`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs vet, `go test -race ./...`, and build.
+`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs vet, `go test -race ./...`, and build. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`).
 
 - Prefer table tests. The port `conformance_test.go` files are the pattern: a slice of cases, `t.Run`, `t.Parallel()`.
 - Kernel packages (`policy`, and the plan/session/lease invariants once they have behavior) get property tests (`testing/quick` in the standard library, or an equivalent). Properties that must hold: deny by default, leases cannot outlive their window, named ID types are not interchangeable.
