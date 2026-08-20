@@ -44,3 +44,9 @@ web/dist-ssr/
 
 # OS
 .DS_Store
+
+# Task checksum cache
+.task/
+
+# TypeScript incremental build
+*.tsbuildinfo

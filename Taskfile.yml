@@ -1,17 +1,21 @@
 # https://taskfile.dev
 version: "3"
 
+# Requires Go 1.27 (see go.mod).
+
 vars:
-  # Pinned so a clean clone with Go 1.22 does not float onto toolchains
-  # that need a newer compiler.
-  STATICCHECK: honnef.co/go/tools/cmd/staticcheck@v0.5.1
-  OAPI_CODEGEN: github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.4.1
+  # Pinned so a clean clone does not float onto incompatible tool versions.
+  STATICCHECK: honnef.co/go/tools/cmd/staticcheck@v0.8.0
+  OAPI_CODEGEN: github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0
   GITLEAKS: github.com/zricethezav/gitleaks/v8@v8.21.2
   TS_CLIENT: swagger-typescript-api@13.12.6
   PNPM: corepack pnpm
 
 env:
   COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  # go run <tool>@ver follows the tool's go.mod; pin the repo toolchain so
+  # staticcheck can load packages that require Go 1.27.
+  GOTOOLCHAIN: go1.27.0
 
 tasks:
   default:
@@ -77,9 +81,9 @@ tasks:
       - go vet ./...
 
   ci:
-    desc: Local stand-in for CI (vet, test, build)
+    desc: Local stand-in for CI (lint, test, build)
     cmds:
-      - task: vet
+      - task: lint
       - task: test
       - task: build
 

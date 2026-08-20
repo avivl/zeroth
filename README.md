@@ -40,7 +40,7 @@ zeroth/
 
 ## Develop
 
-You need Go 1.22+, Node, Docker, and [Task](https://taskfile.dev). A newcomer needs four commands:
+You need Go 1.27, Node, Docker, and [Task](https://taskfile.dev). A newcomer needs four commands:
 
 ```bash
 task up    # zerothd with SQLite and the docker sandbox driver
@@ -51,7 +51,7 @@ task lint  # go vet, staticcheck, and the web lint
 
 `task --list` shows the rest (`conformance`, `generate`, `secretscan`, and the local `ci` stand-in).
 
-The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Go 1.22+.
+The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`).
 
 ## License
 
