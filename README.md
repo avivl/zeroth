@@ -32,28 +32,26 @@ zeroth/
 ├── cmd/zerothd/     daemon
 ├── cmd/zeroth/      CLI + headless entry point
 ├── internal/        kernel + ports (not importable from outside the module)
-├── pkg/api/         OpenAPI spec; generated stubs and TS client will live here
-├── web/             Vite + React
+├── pkg/api/         OpenAPI spec; generated stubs and TS client under gen/
+├── web/             Vite + React (pnpm workspace)
 ├── docs/            adr, prd, design, spike
 └── evals/           offline evaluations
 ```
 
 ## Develop
 
-```bash
-go build ./...
-go test -race ./...
-```
-
-If you have [Task](https://taskfile.dev):
+You need Go 1.27, Node, Docker, and [Task](https://taskfile.dev). A newcomer needs four commands:
 
 ```bash
-task build
-task test
-task ci
+task up    # zerothd with SQLite and the docker sandbox driver
+task web   # Vite dev server for web/
+task test  # go test -race ./...
+task lint  # go vet, staticcheck, and the web lint
 ```
 
-Requires Go 1.27 (see `go.mod`). The UI under `web/` is a Vite + React scaffold and is not required for `go build`.
+`task --list` shows the rest (`conformance`, `generate`, `secretscan`, and the local `ci` stand-in).
+
+The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`).
 
 ## License
 

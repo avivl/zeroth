@@ -2,4 +2,8 @@
 
 `openapi.yaml` is the contract.
 
-Generated Go stubs and the TypeScript client will live under `gen/` once code generation is wired. Do not hand-write those packages.
+```bash
+task generate
+```
+
+writes Go server stubs to `gen/go/` and the TypeScript client to `gen/ts/`. Do not hand-write those packages.

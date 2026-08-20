@@ -1,0 +1,7 @@
+# Config for `task generate`. Output is stdlib-only (net/http) so the
+# generated package does not add module dependencies.
+package: gen
+output: pkg/api/gen/go/server.go
+generate:
+  models: true
+  std-http-server: true
