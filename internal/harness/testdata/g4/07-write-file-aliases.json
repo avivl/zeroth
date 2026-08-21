@@ -1,0 +1,1 @@
+{"effects":[{"op":"write","file":"README.md","payload":"# demo\nVersion: 2\n"},{"op":"write","file":"greet.go","payload":"package greet\n\nfunc Greet(name string) string { return \"hello, \" + name }\n"},{"op":"write","file":"main.go","payload":"package main\n\nfunc main() { println(greet.Greet(\"zeroth\")) }\n"}]}

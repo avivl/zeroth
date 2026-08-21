@@ -1,0 +1,5 @@
+Sure.
+
+{"effects":[{"op":"modify","target":"README.md","diff":" # demo\n+Version: 2"},{"op":"modify","target":"greet.go","diff":"+func Greet(name string) string { return \"hello, \" + name }"},{"op":"modify","target":"main.go","diff":"-fmt.Println(greet.Hello())\n+fmt.Println(greet.Greet(\"zeroth\"))"}]}
+
+I did not apply these.

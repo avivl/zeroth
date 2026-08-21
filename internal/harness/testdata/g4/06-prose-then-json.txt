@@ -1,0 +1,3 @@
+I will not write files. Proposed effects:
+
+{"effects":[{"op":"create","target":"README.md","diff":"# demo\nVersion: 2\n"},{"op":"modify","target":"greet.go","diff":"add Greet(name string) string"},{"op":"modify","target":"main.go","diff":"print Greet(\"zeroth\") instead of Hello()"}]}
