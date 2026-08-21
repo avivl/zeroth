@@ -45,10 +45,16 @@ Each port is an interface in `internal/<name>` with one implementation in a subp
 
 Stage 1 is local and single-player, so the store is SQLite and the daemon binds locally (`127.0.0.1:8420` by default, overridable with `ZEROTH_ADDR` or `zerothd --addr`). There is no remote control plane.
 
+## Cross-cutting
+
+- **Logging:** Zap via `internal/logging`. No package-level global. `internal/policy` does not log; callers pass facts in and may log the decision.
+- **CLI and config:** Cobra command trees for `cmd/zeroth` and `cmd/zerothd`. Viper loads `zerothd` startup config (flags > `ZEROTH_*` env > yaml file > defaults).
+- **Resilience:** Failsafe-go via `internal/resilience`. See [resilience.md](resilience.md). Drivers that talk to docker, a subprocess, or a tracker API reuse that pattern.
+
 ## Surfaces
 
-- `cmd/zerothd` — long-running process.
-- `cmd/zeroth` — CLI and headless entry point (same kernel, no GUI required).
+- `cmd/zerothd` — long-running process (Cobra root, Viper config, Zap logs).
+- `cmd/zeroth` — CLI and headless entry point (Cobra: `version`, stubs for `run` / `attach` / `bg`).
 - `pkg/api` — OpenAPI spec (`openapi.yaml`); Go stubs and the TypeScript client are generated from it. Stage 1 surface: runs (steer, background, foreground, stop, events WebSocket, on-demand checkpoints), plans (list, approve, request-changes, branch, apply), agents (including read-only leases), approvals, memory (including proposals), audit verify, and checkpoint restore (forks a new run). Apply is `POST /plans/{id}/apply` after approve. Cross-exam is automatic and appears on the plan resource, not as an operator endpoint. A flow that cannot be expressed here does not ship on the web UI or the CLI.
 - `web/` — Vite + React. Intended to use [Beautiful UI](https://www.beautifului.dev/) primitives (MIT). The generated TypeScript client is HTTP; live run events use a thin WebSocket wrapper around the generated `RunEvent` type.
 
