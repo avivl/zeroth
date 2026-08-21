@@ -43,14 +43,14 @@ Each port is an interface in `internal/<name>` with one implementation in a subp
 | tracker | `Provider` | `linear` |
 | store | `Store` | `sqlite` |
 
-Stage 1 is local and single-player, so the store is SQLite and the daemon binds locally. There is no remote control plane.
+Stage 1 is local and single-player, so the store is SQLite and the daemon binds locally (`127.0.0.1:8420` by default, overridable with `ZEROTH_ADDR` or `zerothd --addr`). There is no remote control plane.
 
 ## Surfaces
 
 - `cmd/zerothd` — long-running process.
 - `cmd/zeroth` — CLI and headless entry point (same kernel, no GUI required).
-- `pkg/api` — OpenAPI spec (`openapi.yaml`); Go stubs and the TypeScript client are generated from it. Stage 1 surface: runs (steer, background, events WebSocket), plans (approve, request-changes, branch), agents, approvals, memory (including proposals), audit verify, and checkpoint restore. Apply is a daemon transition after approve, not a client operation. A flow that cannot be expressed here does not ship on the web UI or the CLI.
-- `web/` — Vite + React. Intended to use [Beautiful UI](https://www.beautifului.dev/) primitives (MIT).
+- `pkg/api` — OpenAPI spec (`openapi.yaml`); Go stubs and the TypeScript client are generated from it. Stage 1 surface: runs (steer, background, foreground, stop, events WebSocket, on-demand checkpoints), plans (list, approve, request-changes, branch, apply), agents (including read-only leases), approvals, memory (including proposals), audit verify, and checkpoint restore (forks a new run). Apply is `POST /plans/{id}/apply` after approve. Cross-exam is automatic and appears on the plan resource, not as an operator endpoint. A flow that cannot be expressed here does not ship on the web UI or the CLI.
+- `web/` — Vite + React. Intended to use [Beautiful UI](https://www.beautifului.dev/) primitives (MIT). The generated TypeScript client is HTTP; live run events use a thin WebSocket wrapper around the generated `RunEvent` type.
 
 ## Trust boundary
 

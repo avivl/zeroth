@@ -9,8 +9,8 @@ import (
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
 )
 
-// stage1Paths is the product surface from Linear 42-17. A view that cannot
-// be expressed against these paths does not ship on the web UI or the CLI.
+// stage1Paths is the product surface. A view that cannot be expressed
+// against these paths does not ship on the web UI or the CLI.
 // /health is operational liveness, not a product view, but is part of the spec.
 var stage1Paths = []string{
 	"/health",
@@ -19,12 +19,18 @@ var stage1Paths = []string{
 	"/runs/{id}/events",
 	"/runs/{id}/steer",
 	"/runs/{id}/background",
+	"/runs/{id}/foreground",
+	"/runs/{id}/stop",
+	"/runs/{id}/checkpoints",
+	"/plans",
 	"/plans/{id}",
 	"/plans/{id}/approve",
 	"/plans/{id}/request-changes",
 	"/plans/{id}/branch",
+	"/plans/{id}/apply",
 	"/agents",
 	"/agents/{id}",
+	"/agents/{id}/leases",
 	"/approvals",
 	"/memory",
 	"/memory/proposals",
@@ -57,13 +63,19 @@ func TestStage1Operations(t *testing.T) {
 		"getRunEvents",
 		"steerRun",
 		"backgroundRun",
+		"foregroundRun",
+		"stopRun",
+		"createRunCheckpoint",
+		"listPlans",
 		"getPlan",
 		"approvePlan",
 		"requestPlanChanges",
 		"branchPlan",
+		"applyPlan",
 		"listAgents",
 		"getAgent",
 		"patchAgent",
+		"listAgentLeases",
 		"listApprovals",
 		"listMemory",
 		"createMemory",
@@ -78,6 +90,54 @@ func TestStage1Operations(t *testing.T) {
 	for _, op := range ops {
 		if !strings.Contains(spec, "operationId: "+op+"\n") {
 			t.Errorf("openapi.yaml missing operationId %s", op)
+		}
+	}
+}
+
+func TestBindAddressIsDocumented(t *testing.T) {
+	t.Parallel()
+	spec := readSpec(t)
+	if !strings.Contains(spec, "http://127.0.0.1:8420") {
+		t.Error("openapi.yaml must document default bind 127.0.0.1:8420")
+	}
+	if !strings.Contains(spec, "ZEROTH_ADDR") {
+		t.Error("openapi.yaml must document ZEROTH_ADDR")
+	}
+}
+
+func TestKnownRunEventTypesAreDocumented(t *testing.T) {
+	t.Parallel()
+	spec := readSpec(t)
+	block := schemaBlock(spec, "RunEvent:")
+	if !strings.Contains(block, "Known values:") {
+		t.Fatal("RunEvent.type description must list known values")
+	}
+	for _, kind := range []string{
+		"log",
+		"tool_call",
+		"tool_result",
+		"plan_drafted",
+		"cross_exam_verdict",
+		"checkpoint_created",
+		"effect_applied",
+		"status_changed",
+		"error",
+	} {
+		if !strings.Contains(block, kind) {
+			t.Errorf("RunEvent.type description missing known value %s", kind)
+		}
+	}
+}
+
+func TestCreateRunHasNoSandboxField(t *testing.T) {
+	t.Parallel()
+	block := schemaBlock(readSpec(t), "CreateRunRequest:")
+	if block == "" {
+		t.Fatal("CreateRunRequest schema missing")
+	}
+	for _, banned := range []string{"sandbox", "driver", "docker"} {
+		if strings.Contains(strings.ToLower(block), banned) {
+			t.Errorf("CreateRunRequest must not include %q (stage 1 driver is not selectable)", banned)
 		}
 	}
 }
@@ -98,11 +158,28 @@ func TestGeneratedArtifactsExist(t *testing.T) {
 
 func TestGeneratedIDKindsAreDistinct(t *testing.T) {
 	t.Parallel()
-	runT := reflect.TypeOf(gen.RunID(""))
-	planT := reflect.TypeOf(gen.PlanID(""))
-	agentT := reflect.TypeOf(gen.AgentID(""))
-	if runT == planT || runT == agentT || planT == agentT {
-		t.Fatalf("generated ID kinds are interchangeable: RunID=%s PlanID=%s AgentID=%s", runT, planT, agentT)
+	kinds := []reflect.Type{
+		reflect.TypeOf(gen.RunID("")),
+		reflect.TypeOf(gen.PlanID("")),
+		reflect.TypeOf(gen.AgentID("")),
+		reflect.TypeOf(gen.ApprovalID("")),
+		reflect.TypeOf(gen.MemoryID("")),
+		reflect.TypeOf(gen.MemoryProposalID("")),
+		reflect.TypeOf(gen.AuditID("")),
+		reflect.TypeOf(gen.CheckpointID("")),
+		reflect.TypeOf(gen.LeaseID("")),
+		reflect.TypeOf(gen.GrantID("")),
+		reflect.TypeOf(gen.ScopeID("")),
+	}
+	for i, left := range kinds {
+		if left.Kind() == reflect.String && left.Name() == "string" {
+			t.Fatalf("generated ID kind %d is a string alias, want a defined type", i)
+		}
+		for j, right := range kinds {
+			if i < j && left == right {
+				t.Fatalf("generated ID kinds are interchangeable: %s and %s", left, right)
+			}
+		}
 	}
 }
 
@@ -119,4 +196,20 @@ func hasPath(spec, path string) bool {
 	quoted := "  \"" + path + "\":\n"
 	unquoted := "  " + path + ":\n"
 	return strings.Contains(spec, quoted) || strings.Contains(spec, unquoted)
+}
+
+func schemaBlock(spec, heading string) string {
+	idx := strings.Index(spec, "    "+heading)
+	if idx < 0 {
+		return ""
+	}
+	rest := spec[idx+len("    "+heading):]
+	// Next sibling schema is indented exactly four spaces. Nested fields
+	// are indented further, so "\n    " alone would match them too.
+	for i := 0; i+5 < len(rest); i++ {
+		if rest[i] == '\n' && rest[i+1:i+5] == "    " && rest[i+5] != ' ' && rest[i+5] != '\t' {
+			return spec[idx : idx+len("    "+heading)+i]
+		}
+	}
+	return spec[idx:]
 }

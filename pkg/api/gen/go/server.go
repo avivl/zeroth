@@ -35,21 +35,6 @@ func (e AgentStatus) Valid() bool {
 	}
 }
 
-// Defines values for ApprovalKind.
-const (
-	ApprovalKindPlan ApprovalKind = "plan"
-)
-
-// Valid indicates whether the value is a known member of the ApprovalKind enum.
-func (e ApprovalKind) Valid() bool {
-	switch e {
-	case ApprovalKindPlan:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for ApprovalStatus.
 const (
 	ApprovalStatusApproved         ApprovalStatus = "approved"
@@ -75,6 +60,7 @@ func (e ApprovalStatus) Valid() bool {
 const (
 	AuditResourceTypeAgent      AuditResourceType = "agent"
 	AuditResourceTypeCheckpoint AuditResourceType = "checkpoint"
+	AuditResourceTypeLease      AuditResourceType = "lease"
 	AuditResourceTypeMemory     AuditResourceType = "memory"
 	AuditResourceTypePlan       AuditResourceType = "plan"
 	AuditResourceTypeRun        AuditResourceType = "run"
@@ -86,6 +72,8 @@ func (e AuditResourceType) Valid() bool {
 	case AuditResourceTypeAgent:
 		return true
 	case AuditResourceTypeCheckpoint:
+		return true
+	case AuditResourceTypeLease:
 		return true
 	case AuditResourceTypeMemory:
 		return true
@@ -155,6 +143,30 @@ func (e MemoryProposalStatus) Valid() bool {
 	}
 }
 
+// Defines values for PlanEffectType.
+const (
+	PlanEffectTypeCreate         PlanEffectType = "create"
+	PlanEffectTypeDestroy        PlanEffectType = "destroy"
+	PlanEffectTypeMemoryProposal PlanEffectType = "memory_proposal"
+	PlanEffectTypeModify         PlanEffectType = "modify"
+)
+
+// Valid indicates whether the value is a known member of the PlanEffectType enum.
+func (e PlanEffectType) Valid() bool {
+	switch e {
+	case PlanEffectTypeCreate:
+		return true
+	case PlanEffectTypeDestroy:
+		return true
+	case PlanEffectTypeMemoryProposal:
+		return true
+	case PlanEffectTypeModify:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PlanStatus.
 const (
 	PlanStatusAbandoned        PlanStatus = "abandoned"
@@ -199,6 +211,7 @@ const (
 	RunStatusFailed          RunStatus = "failed"
 	RunStatusPending         RunStatus = "pending"
 	RunStatusRunning         RunStatus = "running"
+	RunStatusStopped         RunStatus = "stopped"
 	RunStatusWaitingApproval RunStatus = "waiting_approval"
 )
 
@@ -217,6 +230,8 @@ func (e RunStatus) Valid() bool {
 		return true
 	case RunStatusRunning:
 		return true
+	case RunStatusStopped:
+		return true
 	case RunStatusWaitingApproval:
 		return true
 	default:
@@ -226,7 +241,8 @@ func (e RunStatus) Valid() bool {
 
 // Agent defines model for Agent.
 type Agent struct {
-	Config *AgentConfig `json:"config,omitempty"`
+	// AutonomyTier Default autonomy tier for new runs of this agent. Unknown tiers deny by default.
+	AutonomyTier *string `json:"autonomy_tier,omitempty"`
 
 	// CreatedAt RFC 3339 timestamp in UTC.
 	CreatedAt time.Time `json:"created_at"`
@@ -236,17 +252,15 @@ type Agent struct {
 
 	// Id Opaque agent id. Not interchangeable with other id kinds.
 	Id     AgentID     `json:"id"`
+	Model  *string     `json:"model,omitempty"`
 	Name   string      `json:"name"`
 	Status AgentStatus `json:"status"`
 
+	// Tools Tool names this agent may be offered. Policy still denies by default; this is not a grant.
+	Tools *[]string `json:"tools,omitempty"`
+
 	// UpdatedAt RFC 3339 timestamp in UTC.
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// AgentConfig defines model for AgentConfig.
-type AgentConfig struct {
-	Instructions *string `json:"instructions,omitempty"`
-	Model        *string `json:"model,omitempty"`
 }
 
 // AgentID Opaque agent id. Not interchangeable with other id kinds.
@@ -260,13 +274,22 @@ type AgentList struct {
 
 // AgentPatch defines model for AgentPatch.
 type AgentPatch struct {
-	Config *AgentConfig `json:"config,omitempty"`
-	Name   *string      `json:"name,omitempty"`
-	Status *AgentStatus `json:"status,omitempty"`
+	// AutonomyTier Explicit operator tier change. Stage 1 does not auto-promote.
+	AutonomyTier *string   `json:"autonomy_tier,omitempty"`
+	Model        *string   `json:"model,omitempty"`
+	Name         *string   `json:"name,omitempty"`
+	Tools        *[]string `json:"tools,omitempty"`
 }
 
 // AgentStatus defines model for AgentStatus.
 type AgentStatus string
+
+// ApplyPlanResponse defines model for ApplyPlanResponse.
+type ApplyPlanResponse struct {
+	// AuditId Audit entry produced by this apply.
+	AuditId AuditID `json:"audit_id"`
+	Plan    Plan    `json:"plan"`
+}
 
 // Approval defines model for Approval.
 type Approval struct {
@@ -276,20 +299,19 @@ type Approval struct {
 	// Id Opaque approval id. Not interchangeable with other id kinds.
 	Id ApprovalID `json:"id"`
 
-	// Kind Stage 1 approvals are plan approvals.
-	Kind ApprovalKind `json:"kind"`
+	// Kind Subject kind. Open string (same rule as RunEvent.type).
+	// Clients must tolerate unknown kinds. Deep-link via plan_id
+	// and run_id to the resource that accepts the decision.
+	Kind string `json:"kind"`
 
 	// PlanId Opaque plan id. Not interchangeable with other id kinds.
-	PlanId PlanID `json:"plan_id"`
+	PlanId *PlanID `json:"plan_id,omitempty"`
 
 	// RunId Opaque run id. Not interchangeable with other id kinds.
-	RunId   RunID          `json:"run_id"`
+	RunId   *RunID         `json:"run_id,omitempty"`
 	Status  ApprovalStatus `json:"status"`
 	Summary *string        `json:"summary,omitempty"`
 }
-
-// ApprovalKind Stage 1 approvals are plan approvals.
-type ApprovalKind string
 
 // ApprovalID Opaque approval id. Not interchangeable with other id kinds.
 type ApprovalID string
@@ -378,6 +400,12 @@ type CheckpointList struct {
 	NextCursor *string      `json:"next_cursor,omitempty"`
 }
 
+// CreateCheckpointRequest defines model for CreateCheckpointRequest.
+type CreateCheckpointRequest struct {
+	// Label Optional operator label for this snapshot.
+	Label *string `json:"label,omitempty"`
+}
+
 // CreateMemoryRequest defines model for CreateMemoryRequest.
 type CreateMemoryRequest struct {
 	Content string     `json:"content"`
@@ -392,12 +420,27 @@ type CreateRunRequest struct {
 	// AgentId Opaque agent id. Not interchangeable with other id kinds.
 	AgentId AgentID `json:"agent_id"`
 
-	// Background If true, start the run backgrounded.
-	Background *bool  `json:"background,omitempty"`
-	Goal       string `json:"goal"`
+	// Prompt Optional operator prompt. Not required to create the run.
+	Prompt *string `json:"prompt,omitempty"`
 
-	// IssueRef Optional tracker issue id to attach to the run.
-	IssueRef *string `json:"issue_ref,omitempty"`
+	// TrackerRef Optional tracker issue id to attach to the run.
+	TrackerRef      *string          `json:"tracker_ref,omitempty"`
+	WorkspaceSource *WorkspaceSource `json:"workspace_source,omitempty"`
+}
+
+// CrossExam defines model for CrossExam.
+type CrossExam struct {
+	// At RFC 3339 timestamp in UTC when cross-exam completed.
+	At time.Time `json:"at"`
+
+	// Reasoning Why the reviewer reached this verdict.
+	Reasoning string `json:"reasoning"`
+
+	// ReviewerModel Model that performed the cross-exam.
+	ReviewerModel string `json:"reviewer_model"`
+
+	// Verdict Outcome of the automatic cross-exam. Open string; clients must tolerate unknown verdicts.
+	Verdict string `json:"verdict"`
 }
 
 // Error defines model for Error.
@@ -409,6 +452,9 @@ type Error struct {
 	Message string `json:"message"`
 }
 
+// GrantID Opaque grant id. Not interchangeable with other id kinds.
+type GrantID string
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -416,6 +462,35 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// Lease defines model for Lease.
+type Lease struct {
+	// AgentId Opaque agent id. Not interchangeable with other id kinds.
+	AgentId AgentID `json:"agent_id"`
+
+	// ExpiresAt RFC 3339 timestamp in UTC. A lease cannot outlive this window.
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// GrantId Opaque grant id. Not interchangeable with other id kinds.
+	GrantId GrantID `json:"grant_id"`
+
+	// Id Opaque lease id. Not interchangeable with other id kinds.
+	Id LeaseID `json:"id"`
+
+	// MintedAt RFC 3339 timestamp in UTC.
+	MintedAt *time.Time `json:"minted_at,omitempty"`
+
+	// ScopeId Opaque scope id. Not interchangeable with other id kinds.
+	ScopeId ScopeID `json:"scope_id"`
+}
+
+// LeaseID Opaque lease id. Not interchangeable with other id kinds.
+type LeaseID string
+
+// LeaseList defines model for LeaseList.
+type LeaseList struct {
+	Items []Lease `json:"items"`
+}
 
 // MemoryEntry defines model for MemoryEntry.
 type MemoryEntry struct {
@@ -482,10 +557,11 @@ type MemoryProposalStatus string
 // Plan defines model for Plan.
 type Plan struct {
 	// CreatedAt RFC 3339 timestamp in UTC.
-	CreatedAt time.Time `json:"created_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	CrossExam *CrossExam `json:"cross_exam,omitempty"`
 
-	// CrossExam Structured challenge of the draft, when cross-exam has run.
-	CrossExam *string `json:"cross_exam,omitempty"`
+	// Effects Structured diffs the operator reviews before apply.
+	Effects []PlanEffect `json:"effects"`
 
 	// Id Opaque plan id. Not interchangeable with other id kinds.
 	Id PlanID `json:"id"`
@@ -499,29 +575,51 @@ type Plan struct {
 	// RunId Opaque run id. Not interchangeable with other id kinds.
 	RunId RunID `json:"run_id"`
 
-	// Status Plan lifecycle. Apply is a daemon transition after approve, not a client operation.
-	Status  PlanStatus  `json:"status"`
-	Steps   *[]PlanStep `json:"steps,omitempty"`
-	Summary string      `json:"summary"`
+	// SecretScanFindings Secretscan results. Omitted until the gate has run. Empty
+	// means it ran and found nothing. Non-empty findings block
+	// apply; the payload never includes the secret itself.
+	SecretScanFindings *[]SecretScanFinding `json:"secret_scan_findings,omitempty"`
+
+	// Status Plan lifecycle. Apply is POST /plans/{id}/apply after approve.
+	Status PlanStatus `json:"status"`
+
+	// Summary Human-readable rationale for the plan. Not a substitute for effects.
+	Summary string `json:"summary"`
 
 	// UpdatedAt RFC 3339 timestamp in UTC.
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// PlanEffect defines model for PlanEffect.
+type PlanEffect struct {
+	// CostEstimate Harness-supplied cost hint (tokens, time, or other). Not a billing field.
+	CostEstimate *string `json:"cost_estimate,omitempty"`
+
+	// Diff Unified diff or proposed content. Never a secret value.
+	Diff *string `json:"diff,omitempty"`
+
+	// Path Workspace path this effect touches. For memory_proposal, a memory key.
+	Path *string `json:"path,omitempty"`
+
+	// PreconditionHash Hash of the pre-apply state this effect assumes. Apply rechecks it.
+	PreconditionHash *string        `json:"precondition_hash,omitempty"`
+	Type             PlanEffectType `json:"type"`
+}
+
+// PlanEffectType defines model for PlanEffectType.
+type PlanEffectType string
+
 // PlanID Opaque plan id. Not interchangeable with other id kinds.
 type PlanID string
 
-// PlanStatus Plan lifecycle. Apply is a daemon transition after approve, not a client operation.
-type PlanStatus string
-
-// PlanStep defines model for PlanStep.
-type PlanStep struct {
-	Detail *string `json:"detail,omitempty"`
-
-	// Kind Step kind (open string so the kernel can add kinds without a spec bump).
-	Kind  *string `json:"kind,omitempty"`
-	Title string  `json:"title"`
+// PlanList defines model for PlanList.
+type PlanList struct {
+	Items      []Plan  `json:"items"`
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
+
+// PlanStatus Plan lifecycle. Apply is POST /plans/{id}/apply after approve.
+type PlanStatus string
 
 // RequestChangesRequest defines model for RequestChangesRequest.
 type RequestChangesRequest struct {
@@ -541,22 +639,25 @@ type Run struct {
 
 	// FinishedAt RFC 3339 timestamp in UTC.
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	Goal       string     `json:"goal"`
 
 	// Id Opaque run id. Not interchangeable with other id kinds.
 	Id RunID `json:"id"`
 
-	// IssueRef Optional tracker issue id (for example a Linear issue id). This API does not proxy the tracker.
-	IssueRef *string `json:"issue_ref,omitempty"`
-
 	// PlanId Opaque plan id. Not interchangeable with other id kinds.
 	PlanId *PlanID `json:"plan_id,omitempty"`
+
+	// Prompt Operator prompt that started the run, when one was given.
+	Prompt *string `json:"prompt,omitempty"`
 
 	// Status Lifecycle of a run. Unknown values must be treated as non-terminal.
 	Status RunStatus `json:"status"`
 
+	// TrackerRef Optional tracker issue id (for example a Linear issue id). This API does not proxy the tracker.
+	TrackerRef *string `json:"tracker_ref,omitempty"`
+
 	// UpdatedAt RFC 3339 timestamp in UTC.
-	UpdatedAt time.Time `json:"updated_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	WorkspaceSource *WorkspaceSource `json:"workspace_source,omitempty"`
 }
 
 // RunEvent defines model for RunEvent.
@@ -574,7 +675,10 @@ type RunEvent struct {
 	// RunId Opaque run id. Not interchangeable with other id kinds.
 	RunId RunID `json:"run_id"`
 
-	// Type Event kind. Clients must tolerate unknown types; the log grows with the kernel.
+	// Type Event kind. Open string; new types will be added and clients
+	// must tolerate unknowns. Known values: log, tool_call,
+	// tool_result, plan_drafted, cross_exam_verdict,
+	// checkpoint_created, effect_applied, status_changed, error.
 	Type string `json:"type"`
 }
 
@@ -597,10 +701,31 @@ type RunList struct {
 // RunStatus Lifecycle of a run. Unknown values must be treated as non-terminal.
 type RunStatus string
 
+// ScopeID Opaque scope id. Not interchangeable with other id kinds.
+type ScopeID string
+
+// SecretScanFinding defines model for SecretScanFinding.
+type SecretScanFinding struct {
+	Line *int   `json:"line,omitempty"`
+	Path string `json:"path"`
+
+	// Rule Detector name. The matched secret is not included.
+	Rule string `json:"rule"`
+}
+
 // SteerRequest defines model for SteerRequest.
 type SteerRequest struct {
 	// Message Operator guidance to inject into the live run.
 	Message string `json:"message"`
+}
+
+// WorkspaceSource defines model for WorkspaceSource.
+type WorkspaceSource struct {
+	// Ref Git ref (branch, tag, or SHA). The daemon default applies when omitted.
+	Ref *string `json:"ref,omitempty"`
+
+	// Repo Repository URL or local path to check out for the run.
+	Repo string `json:"repo"`
 }
 
 // Cursor defines model for Cursor.
@@ -686,6 +811,21 @@ type ListMemoryProposalsParams struct {
 	Status *MemoryProposalStatus `form:"status,omitempty" json:"status,omitempty"`
 }
 
+// ListPlansParams defines parameters for ListPlans.
+type ListPlansParams struct {
+	// Cursor Opaque page cursor from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// Limit Page size. The daemon defaults this when omitted.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// RunId If set, only plans for this run.
+	RunId *RunID `form:"run_id,omitempty" json:"run_id,omitempty"`
+
+	// Status If set, only plans in this status.
+	Status *PlanStatus `form:"status,omitempty" json:"status,omitempty"`
+}
+
 // ListRunsParams defines parameters for ListRuns.
 type ListRunsParams struct {
 	// Cursor Opaque page cursor from a previous next_cursor.
@@ -725,6 +865,9 @@ type RequestPlanChangesJSONRequestBody RequestChangesRequest
 // CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
 type CreateRunJSONRequestBody CreateRunRequest
 
+// CreateRunCheckpointJSONRequestBody defines body for CreateRunCheckpoint for application/json ContentType.
+type CreateRunCheckpointJSONRequestBody CreateCheckpointRequest
+
 // SteerRunJSONRequestBody defines body for SteerRun for application/json ContentType.
 type SteerRunJSONRequestBody SteerRequest
 
@@ -739,6 +882,9 @@ type ServerInterface interface {
 	// PatchAgent Patch agent config
 	// (PATCH /agents/{id})
 	PatchAgent(w http.ResponseWriter, r *http.Request, id AgentID)
+	// ListAgentLeases List current leases for an agent
+	// (GET /agents/{id}/leases)
+	ListAgentLeases(w http.ResponseWriter, r *http.Request, id AgentID)
 	// ListApprovals List approvals
 	// (GET /approvals)
 	ListApprovals(w http.ResponseWriter, r *http.Request, params ListApprovalsParams)
@@ -772,9 +918,15 @@ type ServerInterface interface {
 	// RejectMemoryProposal Reject a memory proposal
 	// (POST /memory/proposals/{id}/reject)
 	RejectMemoryProposal(w http.ResponseWriter, r *http.Request, id MemoryProposalID)
+	// ListPlans List plans
+	// (GET /plans)
+	ListPlans(w http.ResponseWriter, r *http.Request, params ListPlansParams)
 	// GetPlan Get a plan
 	// (GET /plans/{id})
 	GetPlan(w http.ResponseWriter, r *http.Request, id PlanID)
+	// ApplyPlan Apply an approved plan
+	// (POST /plans/{id}/apply)
+	ApplyPlan(w http.ResponseWriter, r *http.Request, id PlanID)
 	// ApprovePlan Approve a plan
 	// (POST /plans/{id}/approve)
 	ApprovePlan(w http.ResponseWriter, r *http.Request, id PlanID)
@@ -796,12 +948,21 @@ type ServerInterface interface {
 	// BackgroundRun Background a run
 	// (POST /runs/{id}/background)
 	BackgroundRun(w http.ResponseWriter, r *http.Request, id RunID)
+	// CreateRunCheckpoint Create an on-demand checkpoint
+	// (POST /runs/{id}/checkpoints)
+	CreateRunCheckpoint(w http.ResponseWriter, r *http.Request, id RunID)
 	// GetRunEvents Replay recent events, then live tail
 	// (GET /runs/{id}/events)
 	GetRunEvents(w http.ResponseWriter, r *http.Request, id RunID, params GetRunEventsParams)
+	// ForegroundRun Foreground a run
+	// (POST /runs/{id}/foreground)
+	ForegroundRun(w http.ResponseWriter, r *http.Request, id RunID)
 	// SteerRun Steer a run
 	// (POST /runs/{id}/steer)
 	SteerRun(w http.ResponseWriter, r *http.Request, id RunID)
+	// StopRun Stop a run
+	// (POST /runs/{id}/stop)
+	StopRun(w http.ResponseWriter, r *http.Request, id RunID)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -902,6 +1063,32 @@ func (siw *ServerInterfaceWrapper) PatchAgent(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAgentLeases operation middleware
+func (siw *ServerInterfaceWrapper) ListAgentLeases(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AgentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgentLeases(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1364,6 +1551,78 @@ func (siw *ServerInterfaceWrapper) RejectMemoryProposal(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ListPlans operation middleware
+func (siw *ServerInterfaceWrapper) ListPlans(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPlansParams
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "run_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "run_id", r.URL.Query(), &params.RunId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "run_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "run_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPlans(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPlan operation middleware
 func (siw *ServerInterfaceWrapper) GetPlan(w http.ResponseWriter, r *http.Request) {
 
@@ -1381,6 +1640,32 @@ func (siw *ServerInterfaceWrapper) GetPlan(w http.ResponseWriter, r *http.Reques
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyPlan operation middleware
+func (siw *ServerInterfaceWrapper) ApplyPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id PlanID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyPlan(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1606,6 +1891,32 @@ func (siw *ServerInterfaceWrapper) BackgroundRun(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// CreateRunCheckpoint operation middleware
+func (siw *ServerInterfaceWrapper) CreateRunCheckpoint(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRunCheckpoint(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRunEvents operation middleware
 func (siw *ServerInterfaceWrapper) GetRunEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -1648,6 +1959,32 @@ func (siw *ServerInterfaceWrapper) GetRunEvents(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ForegroundRun operation middleware
+func (siw *ServerInterfaceWrapper) ForegroundRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ForegroundRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SteerRun operation middleware
 func (siw *ServerInterfaceWrapper) SteerRun(w http.ResponseWriter, r *http.Request) {
 
@@ -1665,6 +2002,32 @@ func (siw *ServerInterfaceWrapper) SteerRun(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SteerRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopRun operation middleware
+func (siw *ServerInterfaceWrapper) StopRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopRun(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1801,13 +2164,19 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/runs/{id}/events", wrapper.GetRunEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/steer", wrapper.SteerRun)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/background", wrapper.BackgroundRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/foreground", wrapper.ForegroundRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/stop", wrapper.StopRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/checkpoints", wrapper.CreateRunCheckpoint)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/plans", wrapper.ListPlans)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/plans/{id}", wrapper.GetPlan)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/approve", wrapper.ApprovePlan)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/request-changes", wrapper.RequestPlanChanges)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/branch", wrapper.BranchPlan)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/apply", wrapper.ApplyPlan)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents", wrapper.ListAgents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{id}", wrapper.GetAgent)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/agents/{id}", wrapper.PatchAgent)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{id}/leases", wrapper.ListAgentLeases)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/approvals", wrapper.ListApprovals)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/memory", wrapper.ListMemory)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/memory", wrapper.CreateMemory)
