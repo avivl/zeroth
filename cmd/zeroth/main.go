@@ -3,10 +3,16 @@
 // Talk to a local zerothd, or run headless workflows against the same kernel.
 package main
 
-import "os"
+import (
+	"context"
+	"os"
+	"os/signal"
+)
 
 func main() {
-	if err := newRoot().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := newRoot().ExecuteContext(ctx); err != nil {
 		os.Exit(1)
 	}
 }
