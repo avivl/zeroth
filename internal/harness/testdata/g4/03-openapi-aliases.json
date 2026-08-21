@@ -1,0 +1,1 @@
+{"effects":[{"type":"modify","path":"README.md","content":"# demo\nVersion: 2\n"},{"type":"modify","path":"greet.go","diff":"+Greet"},{"type":"modify","path":"main.go","diff":"+Greet(\"zeroth\")"}]}
