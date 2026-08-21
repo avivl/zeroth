@@ -29,6 +29,7 @@ func NewMemory() *Memory { return &Memory{} }
 func (*Memory) Name() string { return "memory" }
 
 var _ Driver = (*Memory)(nil)
+var _ Instance = (*memoryInstance)(nil)
 
 // Start unpacks req.Workspace.TarPath and returns an instance rooted
 // at that tree.
@@ -71,6 +72,7 @@ type memoryInstance struct {
 	dir       string
 
 	mu      sync.Mutex
+	killed  bool
 	stopped bool
 }
 
@@ -80,10 +82,14 @@ func (i *memoryInstance) SessionID() session.ID { return i.sessionID }
 func (i *memoryInstance) Exec(ctx context.Context, argv []string) (ExecResult, error) {
 	i.mu.Lock()
 	stopped := i.stopped
+	killed := i.killed
 	dir := i.dir
 	i.mu.Unlock()
 	if stopped {
 		return ExecResult{}, fmt.Errorf("sandbox memory exec: stopped")
+	}
+	if killed {
+		return ExecResult{}, fmt.Errorf("sandbox memory exec: killed")
 	}
 	if len(argv) == 0 {
 		return ExecResult{}, fmt.Errorf("sandbox memory exec: empty argv")
@@ -100,6 +106,56 @@ func (i *memoryInstance) Exec(ctx context.Context, argv []string) (ExecResult, e
 		return ExecResult{}, fmt.Errorf("sandbox memory exec: %w", err)
 	}
 	return res, nil
+}
+
+func (i *memoryInstance) ExportTar(ctx context.Context, w io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("sandbox memory export: %w", err)
+	}
+	i.mu.Lock()
+	stopped := i.stopped
+	dir := i.dir
+	i.mu.Unlock()
+	if stopped {
+		return fmt.Errorf("sandbox memory export: stopped")
+	}
+	if err := writeTar(ctx, dir, w); err != nil {
+		return fmt.Errorf("sandbox memory export: %w", err)
+	}
+	return nil
+}
+
+func (i *memoryInstance) ImportTar(ctx context.Context, r io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("sandbox memory import: %w", err)
+	}
+	i.mu.Lock()
+	stopped := i.stopped
+	dir := i.dir
+	i.mu.Unlock()
+	if stopped {
+		return fmt.Errorf("sandbox memory import: stopped")
+	}
+	if err := clearDir(dir); err != nil {
+		return fmt.Errorf("sandbox memory import: %w", err)
+	}
+	if err := readTar(ctx, dir, r); err != nil {
+		return fmt.Errorf("sandbox memory import: %w", err)
+	}
+	return nil
+}
+
+func (i *memoryInstance) Kill(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("sandbox memory kill: %w", err)
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.stopped {
+		return fmt.Errorf("sandbox memory kill: stopped")
+	}
+	i.killed = true
+	return nil
 }
 
 func (i *memoryInstance) Stop(ctx context.Context) error {
