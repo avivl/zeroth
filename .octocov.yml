@@ -1,0 +1,35 @@
+# Coverage on every PR and every merge to main. Local-first: no Codecov or
+# Coveralls account, no upload token, no third-party retention. octocov runs
+# inside GitHub Actions and commits its own badge.
+#
+# Threshold is the diff versus main, not an absolute floor. An absolute number
+# is premature (packages are at very different maturity) and would compete with
+# internal/policy's own 100% branch-coverage bar.
+#
+# report.datastores is required: octocov will not store a report if report: has
+# only an if: condition. The artifact is what the next PR diffs against.
+coverage:
+  paths:
+    - coverage.out
+  badge:
+    path: docs/coverage.svg
+  acceptable: diff >= 0%
+codeToTestRatio:
+  code:
+    - '**/*.go'
+    - '!**/*_test.go'
+  test:
+    - '**/*_test.go'
+diff:
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+comment:
+  if: is_pull_request
+  updatePrevious: true
+report:
+  if: is_default_branch
+  datastores:
+    - artifact://${GITHUB_REPOSITORY}
+push:
+  if: is_default_branch
+  message: 'Update coverage badge [skip ci]'

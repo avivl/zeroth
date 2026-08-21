@@ -16,6 +16,8 @@
 coverage.*
 *.coverprofile
 profile.cov
+# octocov commits the README badge. coverage.* would otherwise ignore it.
+!docs/coverage.svg
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
