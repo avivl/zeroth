@@ -182,12 +182,17 @@ func (i *instance) read(stdout io.Reader, stderr *bytes.Buffer) {
 
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
-	var transcript strings.Builder
 	for sc.Scan() {
 		line := sc.Text()
-		transcript.WriteString(line)
-		transcript.WriteByte('\n')
-		for _, ev := range ex.handleLine(line) {
+		evs := ex.handleLine(line)
+		i.mu.Lock()
+		i.transcript.WriteString(line)
+		i.transcript.WriteByte('\n')
+		if ex.session != "" {
+			i.session = ex.session
+		}
+		i.mu.Unlock()
+		for _, ev := range evs {
 			i.emit(ev)
 		}
 	}
@@ -202,7 +207,6 @@ func (i *instance) read(stdout io.Reader, stderr *bytes.Buffer) {
 	}
 
 	i.mu.Lock()
-	i.transcript.WriteString(transcript.String())
 	if ex.session != "" {
 		i.session = ex.session
 	}
