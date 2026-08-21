@@ -1,7 +1,15 @@
-# Config for `task generate`. Output is stdlib-only (net/http) so the
-# generated package does not add module dependencies.
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.8.0/configuration-schema.json
+# Config for `task generate`. The server interface is stdlib net/http.
+# Path and query binding in the generated wrapper imports
+# github.com/oapi-codegen/runtime (pinned in go.mod).
+#
+# old-aliasing keeps named string schemas as defined types (`type RunID string`)
+# instead of aliases (`type RunID = string`), so generated ID kinds are not
+# interchangeable. That matches ADR-Z-0001 at the HTTP boundary.
 package: gen
 output: pkg/api/gen/go/server.go
 generate:
   models: true
   std-http-server: true
+compatibility:
+  old-aliasing: true

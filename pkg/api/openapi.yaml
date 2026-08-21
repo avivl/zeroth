@@ -6,14 +6,43 @@ info:
     Local control-plane API for Zeroth. Stage 1 is single-player and binds
     locally. This spec is the canonical contract; Go stubs and the TypeScript
     client are generated from it, not hand-written.
+
+    A flow that cannot be expressed through this API ships on neither the
+    web UI nor the CLI. That is what keeps a later Slack surface from becoming
+    a second implementation of everything.
+
+    Apply is not a client operation. The human gate is approve (or request
+    changes, or branch). The daemon applies an approved plan; clients watch
+    the run and the plan.
   license:
     name: MIT
     identifier: MIT
   contact:
     url: https://github.com/avivl/zeroth
+servers:
+  - url: /
+    description: Relative to the local zerothd origin. Stage 1 binds on the operator's machine.
+tags:
+  - name: health
+    description: Daemon liveness. Not a product view.
+  - name: runs
+    description: Human-supervised agent runs (sessions).
+  - name: plans
+    description: Plan review. Draft and cross-exam happen inside the daemon.
+  - name: agents
+    description: Local agent records. Config changes are signed audited actions.
+  - name: approvals
+    description: Operator inbox of pending plan approvals.
+  - name: memory
+    description: Store-backed session and agent memory, plus human review of proposals.
+  - name: audit
+    description: Append-only signed trail. Verify checks a record's signature.
+  - name: checkpoints
+    description: Snapshots of run state that the operator can restore.
 paths:
   /health:
     get:
+      tags: [health]
       summary: Liveness
       operationId: health
       responses:
@@ -23,12 +52,1149 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+  /runs:
+    get:
+      tags: [runs]
+      summary: List runs
+      operationId: listRuns
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          description: If set, only runs in this status.
+          schema:
+            $ref: "#/components/schemas/RunStatus"
+        - name: agent_id
+          in: query
+          description: If set, only runs for this agent.
+          schema:
+            $ref: "#/components/schemas/AgentID"
+      responses:
+        "200":
+          description: A page of runs, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+    post:
+      tags: [runs]
+      summary: Start a run
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRunRequest"
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  "/runs/{id}":
+    get:
+      tags: [runs]
+      summary: Get a run
+      operationId: getRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  "/runs/{id}/events":
+    get:
+      tags: [runs]
+      summary: Replay recent events, then live tail
+      description: |
+        The event log is the source of truth for a run, not chat residue.
+
+        Query parameter last selects how many recent events to replay.
+
+        A WebSocket upgrade on this path replays those events, then tails
+        live. Each WebSocket message is a JSON RunEvent.
+
+        Without Upgrade, this GET returns the same replay window as JSON so
+        the CLI and tests can read the log without a socket. The generated
+        TypeScript client is that GET helper, not a WebSocket caller.
+      operationId: getRunEvents
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+        - name: last
+          in: query
+          description: How many recent events to replay before live tail. The daemon defaults this when omitted.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Replay window (HTTP). WebSocket clients receive these events, then a live tail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunEventList"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  "/runs/{id}/steer":
+    post:
+      tags: [runs]
+      summary: Steer a run
+      description: Inject operator guidance into a live run. Does not skip plan-then-apply.
+      operationId: steerRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteerRequest"
+      responses:
+        "200":
+          description: Steer accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/runs/{id}/background":
+    post:
+      tags: [runs]
+      summary: Background a run
+      description: Keep the run working without a foreground session. The operator can still steer, review plans, and read events.
+      operationId: backgroundRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Run is backgrounded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/plans/{id}":
+    get:
+      tags: [plans]
+      summary: Get a plan
+      operationId: getPlan
+      parameters:
+        - $ref: "#/components/parameters/PlanID"
+      responses:
+        "200":
+          description: The plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  "/plans/{id}/approve":
+    post:
+      tags: [plans]
+      summary: Approve a plan
+      description: |
+        Human gate on the plan lifecycle. After approve, the daemon applies.
+        There is no client apply operation; a UI or CLI must not invent one.
+      operationId: approvePlan
+      parameters:
+        - $ref: "#/components/parameters/PlanID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveRequest"
+      responses:
+        "200":
+          description: Plan approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/plans/{id}/request-changes":
+    post:
+      tags: [plans]
+      summary: Request changes on a plan
+      operationId: requestPlanChanges
+      parameters:
+        - $ref: "#/components/parameters/PlanID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestChangesRequest"
+      responses:
+        "200":
+          description: Changes requested
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/plans/{id}/branch":
+    post:
+      tags: [plans]
+      summary: Branch a plan
+      description: Create an alternative plan from this one. The original plan is unchanged.
+      operationId: branchPlan
+      parameters:
+        - $ref: "#/components/parameters/PlanID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchPlanRequest"
+      responses:
+        "201":
+          description: Branched plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /agents:
+    get:
+      tags: [agents]
+      summary: List agents
+      operationId: listAgents
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: A page of agents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
+  "/agents/{id}":
+    get:
+      tags: [agents]
+      summary: Get an agent
+      operationId: getAgent
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: The agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [agents]
+      summary: Patch agent config
+      description: |
+        Config changes are themselves signed audited actions. The daemon
+        records and signs the patch; the client does not send a signature.
+      operationId: patchAgent
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentPatch"
+      responses:
+        "200":
+          description: Agent updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /approvals:
+    get:
+      tags: [approvals]
+      summary: List approvals
+      description: Operator inbox. Stage 1 items are plan approvals. Memory proposals are under /memory/proposals.
+      operationId: listApprovals
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          description: If set, only approvals in this status.
+          schema:
+            $ref: "#/components/schemas/ApprovalStatus"
+      responses:
+        "200":
+          description: A page of approvals, oldest pending first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalList"
+  /memory:
+    get:
+      tags: [memory]
+      summary: List memory entries
+      operationId: listMemory
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/MemoryKind"
+        - name: ref_id
+          in: query
+          description: Run id (session memory) or agent id (agent memory).
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: A page of memory entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryList"
+    post:
+      tags: [memory]
+      summary: Write a memory entry
+      description: Operator-authored memory. Agent-proposed memory goes through /memory/proposals.
+      operationId: createMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMemoryRequest"
+      responses:
+        "201":
+          description: Memory stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /memory/proposals:
+    get:
+      tags: [memory]
+      summary: List memory proposals
+      operationId: listMemoryProposals
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/MemoryProposalStatus"
+      responses:
+        "200":
+          description: A page of memory proposals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposalList"
+  "/memory/proposals/{id}/accept":
+    post:
+      tags: [memory]
+      summary: Accept a memory proposal
+      operationId: acceptMemoryProposal
+      parameters:
+        - $ref: "#/components/parameters/MemoryProposalID"
+      responses:
+        "200":
+          description: Proposal accepted; a memory entry was written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposal"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/memory/proposals/{id}/reject":
+    post:
+      tags: [memory]
+      summary: Reject a memory proposal
+      operationId: rejectMemoryProposal
+      parameters:
+        - $ref: "#/components/parameters/MemoryProposalID"
+      responses:
+        "200":
+          description: Proposal rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposal"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /audit:
+    get:
+      tags: [audit]
+      summary: List audit records
+      operationId: listAudit
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: resource_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/AuditResourceType"
+        - name: resource_id
+          in: query
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: A page of audit records, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditList"
+  "/audit/{id}/verify":
+    post:
+      tags: [audit]
+      summary: Verify an audit record
+      description: Re-check the record's secp256k1 Schnorr signature (ADR-Z-0007). Does not rewrite the log.
+      operationId: verifyAudit
+      parameters:
+        - $ref: "#/components/parameters/AuditID"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditVerification"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /checkpoints:
+    get:
+      tags: [checkpoints]
+      summary: List checkpoints
+      operationId: listCheckpoints
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: run_id
+          in: query
+          schema:
+            $ref: "#/components/schemas/RunID"
+      responses:
+        "200":
+          description: A page of checkpoints
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckpointList"
+  "/checkpoints/{id}/restore":
+    post:
+      tags: [checkpoints]
+      summary: Restore a checkpoint
+      description: Restore run state from this checkpoint. Consequential; the daemon records a signed audit event and follows plan-then-apply if the restore mutates the world.
+      operationId: restoreCheckpoint
+      parameters:
+        - $ref: "#/components/parameters/CheckpointID"
+      responses:
+        "200":
+          description: Restore started; the returned run is the restored (or newly forked) run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
 components:
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque page cursor from a previous next_cursor.
+      schema:
+        type: string
+        minLength: 1
+    Limit:
+      name: limit
+      in: query
+      description: Page size. The daemon defaults this when omitted.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+    RunID:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/RunID"
+    PlanID:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/PlanID"
+    AgentID:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/AgentID"
+    MemoryProposalID:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/MemoryProposalID"
+    AuditID:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/AuditID"
+    CheckpointID:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/CheckpointID"
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Policy denied this action (missing grant, expired lease, or unknown scope).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: No resource with that id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: The resource is not in a state that allows this operation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   schemas:
     Health:
       type: object
+      additionalProperties: false
       required: [status]
       properties:
         status:
           type: string
           enum: [ok]
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          description: Machine-readable error code.
+        message:
+          type: string
+          minLength: 1
+          description: Human-readable explanation.
+    RunID:
+      type: string
+      minLength: 1
+      description: Opaque run id. Not interchangeable with other id kinds.
+    PlanID:
+      type: string
+      minLength: 1
+      description: Opaque plan id. Not interchangeable with other id kinds.
+    AgentID:
+      type: string
+      minLength: 1
+      description: Opaque agent id. Not interchangeable with other id kinds.
+    ApprovalID:
+      type: string
+      minLength: 1
+      description: Opaque approval id. Not interchangeable with other id kinds.
+    MemoryID:
+      type: string
+      minLength: 1
+      description: Opaque memory entry id. Not interchangeable with other id kinds.
+    MemoryProposalID:
+      type: string
+      minLength: 1
+      description: Opaque memory proposal id. Not interchangeable with other id kinds.
+    AuditID:
+      type: string
+      minLength: 1
+      description: Opaque audit record id. Not interchangeable with other id kinds.
+    CheckpointID:
+      type: string
+      minLength: 1
+      description: Opaque checkpoint id. Not interchangeable with other id kinds.
+    RunStatus:
+      type: string
+      description: Lifecycle of a run. Unknown values must be treated as non-terminal.
+      enum:
+        - pending
+        - running
+        - waiting_approval
+        - backgrounded
+        - completed
+        - failed
+        - cancelled
+    PlanStatus:
+      type: string
+      description: Plan lifecycle. Apply is a daemon transition after approve, not a client operation.
+      enum:
+        - draft
+        - cross_exam
+        - pending_approval
+        - approved
+        - changes_requested
+        - applying
+        - applied
+        - abandoned
+    AgentStatus:
+      type: string
+      enum:
+        - ready
+        - busy
+        - disabled
+    ApprovalStatus:
+      type: string
+      enum:
+        - pending
+        - approved
+        - changes_requested
+    MemoryKind:
+      type: string
+      enum:
+        - session
+        - agent
+        - operator
+    MemoryProposalStatus:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - rejected
+    AuditResourceType:
+      type: string
+      enum:
+        - run
+        - plan
+        - agent
+        - memory
+        - checkpoint
+    Run:
+      type: object
+      additionalProperties: false
+      required: [id, agent_id, status, goal, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/RunID"
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        plan_id:
+          $ref: "#/components/schemas/PlanID"
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        goal:
+          type: string
+          minLength: 1
+        issue_ref:
+          type: string
+          minLength: 1
+          description: Optional tracker issue id (for example a Linear issue id). This API does not proxy the tracker.
+        autonomy_tier:
+          type: string
+          minLength: 1
+          description: Earned autonomy tier for this run. The kernel interprets the value; unknown tiers deny by default.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+        finished_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    RunList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Run"
+        next_cursor:
+          type: string
+          minLength: 1
+          description: Omitted when there is no next page.
+    CreateRunRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_id, goal]
+      properties:
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        goal:
+          type: string
+          minLength: 1
+        issue_ref:
+          type: string
+          minLength: 1
+          description: Optional tracker issue id to attach to the run.
+        background:
+          type: boolean
+          description: If true, start the run backgrounded.
+    SteerRequest:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+          description: Operator guidance to inject into the live run.
+    RunEvent:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, type, created_at]
+      properties:
+        id:
+          type: string
+          minLength: 1
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        type:
+          type: string
+          minLength: 1
+          description: Event kind. Clients must tolerate unknown types; the log grows with the kernel.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+        plan_id:
+          $ref: "#/components/schemas/PlanID"
+        message:
+          type: string
+          description: Human-readable summary of the event, when one exists.
+    RunEventList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunEvent"
+    Plan:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, status, summary, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/PlanID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        parent_plan_id:
+          $ref: "#/components/schemas/PlanID"
+          description: Set when this plan was created by branch.
+        status:
+          $ref: "#/components/schemas/PlanStatus"
+        summary:
+          type: string
+          minLength: 1
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanStep"
+        cross_exam:
+          type: string
+          description: Structured challenge of the draft, when cross-exam has run.
+        review_comment:
+          type: string
+          description: Latest operator comment from approve or request-changes.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    PlanStep:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        detail:
+          type: string
+        kind:
+          type: string
+          minLength: 1
+          description: Step kind (open string so the kernel can add kinds without a spec bump).
+    ApproveRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+          minLength: 1
+    RequestChangesRequest:
+      type: object
+      additionalProperties: false
+      required: [comment]
+      properties:
+        comment:
+          type: string
+          minLength: 1
+    BranchPlanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        note:
+          type: string
+          minLength: 1
+          description: Why this branch exists.
+    Agent:
+      type: object
+      additionalProperties: false
+      required: [id, name, harness, status, created_at, updated_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/AgentID"
+        name:
+          type: string
+          minLength: 1
+        harness:
+          type: string
+          minLength: 1
+          description: Harness driver name. Stage 1 is claudecode.
+        status:
+          $ref: "#/components/schemas/AgentStatus"
+        config:
+          $ref: "#/components/schemas/AgentConfig"
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+        updated_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    AgentConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          minLength: 1
+        instructions:
+          type: string
+    AgentPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/AgentStatus"
+        config:
+          $ref: "#/components/schemas/AgentConfig"
+    AgentList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        next_cursor:
+          type: string
+          minLength: 1
+    Approval:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, plan_id, run_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ApprovalID"
+        kind:
+          type: string
+          enum: [plan]
+          description: Stage 1 approvals are plan approvals.
+        status:
+          $ref: "#/components/schemas/ApprovalStatus"
+        plan_id:
+          $ref: "#/components/schemas/PlanID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    ApprovalList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Approval"
+        next_cursor:
+          type: string
+          minLength: 1
+    MemoryEntry:
+      type: object
+      additionalProperties: false
+      required: [id, kind, content, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/MemoryID"
+        kind:
+          $ref: "#/components/schemas/MemoryKind"
+        ref_id:
+          type: string
+          minLength: 1
+          description: Run id when kind is session, agent id when kind is agent.
+        content:
+          type: string
+          minLength: 1
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    MemoryList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryEntry"
+        next_cursor:
+          type: string
+          minLength: 1
+    CreateMemoryRequest:
+      type: object
+      additionalProperties: false
+      required: [kind, content]
+      properties:
+        kind:
+          $ref: "#/components/schemas/MemoryKind"
+        ref_id:
+          type: string
+          minLength: 1
+          description: Required when kind is session or agent.
+        content:
+          type: string
+          minLength: 1
+    MemoryProposal:
+      type: object
+      additionalProperties: false
+      required: [id, kind, content, status, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/MemoryProposalID"
+        kind:
+          $ref: "#/components/schemas/MemoryKind"
+        ref_id:
+          type: string
+          minLength: 1
+        run_id:
+          $ref: "#/components/schemas/RunID"
+          description: Run that proposed this memory, when it came from a run.
+        content:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/MemoryProposalStatus"
+        memory_id:
+          $ref: "#/components/schemas/MemoryID"
+          description: Set after accept, when an entry was written.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+        reviewed_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    MemoryProposalList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryProposal"
+        next_cursor:
+          type: string
+          minLength: 1
+    AuditRecord:
+      type: object
+      additionalProperties: false
+      required: [id, action, resource_type, resource_id, signature, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/AuditID"
+        action:
+          type: string
+          minLength: 1
+          description: What happened (open string; clients must tolerate unknown actions).
+        resource_type:
+          $ref: "#/components/schemas/AuditResourceType"
+        resource_id:
+          type: string
+          minLength: 1
+        actor:
+          type: string
+          minLength: 1
+          description: Local operator identity used when signing.
+        signature:
+          type: string
+          minLength: 1
+          description: secp256k1 Schnorr signature, hex-encoded (ADR-Z-0007). Not a credential.
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    AuditList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditRecord"
+        next_cursor:
+          type: string
+          minLength: 1
+    AuditVerification:
+      type: object
+      additionalProperties: false
+      required: [id, valid]
+      properties:
+        id:
+          $ref: "#/components/schemas/AuditID"
+        valid:
+          type: boolean
+        reason:
+          type: string
+          description: Set when valid is false.
+    Checkpoint:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/CheckpointID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        label:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    CheckpointList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Checkpoint"
+        next_cursor:
+          type: string
+          minLength: 1

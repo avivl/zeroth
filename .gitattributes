@@ -1,0 +1,2 @@
+# Generated API clients. Review openapi.yaml; do not hand-edit these files.
+pkg/api/gen/** linguist-generated=true
