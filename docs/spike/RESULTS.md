@@ -30,7 +30,7 @@ synthetic files. Only S.tar is in git. Recreate M and L with
 | G4 | | Workspace ingest of fixture **L** (~5 GB, binary assets). Compression vs M. | Times and ratios recorded. Binaries stay large. | Ingest p50 8.46 s (uncompressed). Compression not measured. | Hydration matrix below |
 | G5 | | Session state machine and append-only event log. Distinct `session.ID`. | Illegal transitions deny. Log is the source of truth. | | |
 | G6 | | Harness touchpoint with Anthropic API key only ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). | Key from env. No consumer OAuth. Key never logged. | | |
-| G7 | [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) | Evaluate ACP as the harness driver protocol. Write [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). | ADR accepted with ACP or a shim. Plan-then-apply still holds. | | |
+| G7 | [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) | Evaluate ACP as the harness driver protocol. Write [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). | ADR accepted with ACP or a shim. Plan-then-apply still holds. | **shim (not ACP)** | [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md) |
 
 ## Checkpoint round-trip (Linear 42-7, Z1-036 / Z1-080)
 
@@ -147,8 +147,9 @@ Pass bar: 9/10 runs produce parseable effects (`op`, `target`, `diff` or
 Credits were topped up after the first pass (PR #17) returned 0/10 with
 `credit balance is too low`. This re-run is the live G4 bar: 10/10
 parseable 3-file effect sets from `claude -p`, no file writes, no
-parser-agent second pass. ACP (G7) is unchanged; a structured
-tool-call channel is not required for this prompt.
+parser-agent second pass. A structured tool-call channel is not
+required for this prompt. G7 recorded the same conclusion as a shim,
+not ACP ([ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md)).
 
 Offline parser corpus (`harness/testdata/g4`, 10 transcripts: clean
 JSON, markdown fences, OpenAPI `type`/`path` aliases, `claude -p

@@ -34,7 +34,7 @@ No em dashes in these files. Use a period, comma, colon, or parentheses.
 | --- | --- | --- |
 | [Z-0001](Z-0001-go-typescript-isolated-kernel.md) | Go and TypeScript, isolated policy kernel with typed IDs | Accepted |
 | [Z-0002](Z-0002-mit-license.md) | MIT License | Accepted |
-| [Z-0003](Z-0003-harness-driver-protocol.md) | Harness driver protocol (ACP or shim) | Proposed (spike [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003)) |
+| [Z-0003](Z-0003-harness-driver-protocol.md) | Harness driver protocol (ACP or shim) | Accepted |
 | [Z-0004](Z-0004-sqlite-first.md) | SQLite first, Postgres at stage 2, one store interface | Accepted |
 | [Z-0005](Z-0005-docker-sandbox.md) | Docker sandbox driver is the reference implementation | Accepted |
 | [Z-0006](Z-0006-linear-tracker.md) | Linear first, GitHub Issues second | Accepted |
