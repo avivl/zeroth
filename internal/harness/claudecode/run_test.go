@@ -112,6 +112,25 @@ func TestSteerAfterExitRestarts(t *testing.T) {
 	waitToken(t, ch, "hello-token", 10*time.Second)
 }
 
+func TestStartWritesPromptOnStdin(t *testing.T) {
+	t.Parallel()
+	d := NewWithBin(buildFake(t))
+	h, err := d.Start(t.Context(), harness.Spec{
+		Workspace: t.TempDir(),
+		Prompt:    "STDINPROMPT please",
+		Env:       []string{apiKeyEnv + "=" + testKey},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Stop(context.Background(), h.ID) })
+	ch, err := d.Stream(t.Context(), h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitToken(t, ch, "from-stdin", 10*time.Second)
+}
+
 func TestStopAfterStopIsNil(t *testing.T) {
 	t.Parallel()
 	d := NewWithBin(buildFake(t))

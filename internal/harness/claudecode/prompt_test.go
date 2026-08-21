@@ -18,7 +18,7 @@ func TestCLIArgsAreG4Shim(t *testing.T) {
 	t.Parallel()
 	args := cliArgs("do the task", "")
 	joined := strings.Join(args, "\x00")
-	for _, want := range []string{"-p", "--output-format", "stream-json", "--bare", "--tools", "--permission-mode", "plan", "--system-prompt"} {
+	for _, want := range []string{"-p", "--output-format", "stream-json", "--include-partial-messages", "--bare", "--tools", "--permission-mode", "plan", "--input-format", "stream-json", "--system-prompt"} {
 		if !containsArg(args, want) {
 			t.Fatalf("missing %q in %v", want, args)
 		}
