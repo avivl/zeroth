@@ -300,18 +300,31 @@ func (i *dockerInstance) cleanupLocked() error {
 		first = fmt.Errorf("sandbox docker unmount: %w", err)
 	}
 	if i.base != "" {
-		if err := os.RemoveAll(i.base); err != nil {
-			if os.Getenv("SPIKE_SANDBOX_SUDO") == "1" {
-				out, err2 := exec.Command("sudo", "-n", "rm", "-rf", i.base).CombinedOutput()
-				if err2 != nil && first == nil {
-					first = fmt.Errorf("sandbox docker cleanup: %w / sudo: %s", err, bytesHead(out, err2))
-				}
-			} else if first == nil {
-				first = fmt.Errorf("sandbox docker cleanup: %w", err)
-			}
+		if err := forceRemoveAll(i.base); err != nil && first == nil {
+			first = fmt.Errorf("sandbox docker cleanup: %w", err)
 		}
 	}
 	return first
+}
+
+// forceRemoveAll deletes dir even when the container wrote files as
+// root. CI runners cannot sudo; docker can still rm from inside.
+func forceRemoveAll(dir string) error {
+	if err := os.RemoveAll(dir); err == nil {
+		return nil
+	}
+	if os.Getenv("SPIKE_SANDBOX_SUDO") == "1" {
+		if _, err := exec.Command("sudo", "-n", "rm", "-rf", dir).CombinedOutput(); err == nil {
+			return nil
+		}
+	}
+	out, err := exec.Command("docker", "run", "--rm", "--network", "none",
+		"--mount", "type=bind,src="+dir+",dst=/wipe",
+		defaultImage, "sh", "-c", "find /wipe -mindepth 1 -delete").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", bytesHead(out, err))
+	}
+	return os.RemoveAll(dir)
 }
 
 // DockerReady reports whether the docker CLI can talk to a daemon.
