@@ -25,9 +25,10 @@ If you arrived looking for a SaaS agent runtime you can roll out to a team, you 
 - [AGENTS.md](AGENTS.md): harness-facing memory (canonical for coding agents)
 - [Product requirements](docs/prd/zeroth.md)
 - [Architecture](docs/design/architecture.md)
-- [Plan](docs/design/plan.md) — §6 is the decision log (decision 4: public from day one)
+- [Plan](docs/design/plan.md): §6 is the project decision log (decision 4: public from day one)
+- [Decision register](docs/prd/zeroth.md#decision-register): index of [ADRs](docs/adr/)
 
-Also: [ADRs](docs/adr/) ([ADR-Z-0002](docs/adr/Z-0002-mit-license.md) chooses MIT), [spikes](docs/spike/), [evals](evals/).
+Also: [ADR-Z-0002](docs/adr/Z-0002-mit-license.md) chooses MIT, [spikes](docs/spike/), [evals](evals/).
 
 ## Layout
 

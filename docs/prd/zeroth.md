@@ -41,6 +41,23 @@ There is no team, no tenant, no hosted account.
 | Policy kernel | Scopes, grants, leases |
 | Ports | Sandbox (Docker), harness (Claude Code), tracker (Linear), store (SQLite) |
 
+## Decision register
+
+This table is an index. The ADRs live in [`docs/adr/`](../adr/), one file per decision, [MADR format](../adr/README.md). Do not put the record back into this document.
+
+| ADR | Decision | Status |
+| --- | --- | --- |
+| [ADR-Z-0001](../adr/Z-0001-go-typescript-isolated-kernel.md) | Core language Go, TypeScript for web; policy kernel isolated with typed IDs | Accepted |
+| [ADR-Z-0002](../adr/Z-0002-mit-license.md) | License MIT | Accepted |
+| [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md) | Harness driver protocol (ACP or shim) | Proposed, decided by spike [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) |
+| [ADR-Z-0004](../adr/Z-0004-sqlite-first.md) | SQLite first, Postgres at stage 2, one store interface | Accepted |
+| [ADR-Z-0005](../adr/Z-0005-docker-sandbox.md) | Docker sandbox driver is the reference implementation | Accepted |
+| [ADR-Z-0006](../adr/Z-0006-linear-tracker.md) | Linear is the first tracker provider, GitHub Issues second | Accepted |
+| [ADR-Z-0007](../adr/Z-0007-secp256k1-schnorr.md) | Signing scheme secp256k1 Schnorr, Nostr compatible | Accepted |
+| [ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md) | Anthropic auth is API key only; per-provider auth matrix, quarterly review | Accepted |
+
+Project-level choices that are not in this register (name, public from day one, stage 1 is local, plan-then-apply) stay in [plan §6](../design/plan.md).
+
 ## Acceptance for this skeleton
 
 The repository tree exists, `go build ./...` succeeds, the license is MIT, and this README-facing PRD / design / plan trio is linked from the root README. Behavior comes later.

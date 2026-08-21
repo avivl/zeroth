@@ -120,7 +120,7 @@ Go 1.27. Do not add a module dependency unless the package that needs it is bein
 - Docs for the change land in the same PR: `doc.go`, architecture/PRD/plan if shape changed, this file if a convention changed.
 - Link the Linear issue.
 - Squash merge.
-- ADRs are `docs/adr/Z-NNNN-slug.md`. License is MIT ([ADR-Z-0002](docs/adr/Z-0002-mit-license.md)). Repo is public ([ADR-Z-0001](docs/adr/Z-0001-public-from-day-one.md)).
+- ADRs are `docs/adr/Z-NNNN-slug.md` ([format](docs/adr/README.md)). License is MIT ([ADR-Z-0002](docs/adr/Z-0002-mit-license.md)). Repo is public ([plan §6, decision 4](docs/design/plan.md)). Core language is Go, TypeScript for web ([ADR-Z-0001](docs/adr/Z-0001-go-typescript-isolated-kernel.md)).
 
 ## What not to do
 

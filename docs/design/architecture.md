@@ -28,7 +28,7 @@ Zeroth is a local control plane. The daemon holds the kernel. Everything that ta
 - **session** — state machine plus event log for one human-supervised run.
 - **plan** — draft, cross-exam, approve, apply. Consequential mutation happens only on apply.
 - **lease** — runtime mint/renew/expire for policy leases.
-- **signer / audit** — attributable, append-only trail.
+- **signer / audit**: attributable, append-only trail. Signatures are secp256k1 Schnorr, Nostr-compatible ([ADR-Z-0007](../adr/Z-0007-secp256k1-schnorr.md)).
 - **secretscan** — a gate on apply, not a linter the operator can skip.
 - **memory** — session and agent memory, store-backed in stage 1.
 
