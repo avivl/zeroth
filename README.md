@@ -56,7 +56,7 @@ task lint  # go vet, staticcheck, and the web lint
 
 `task --list` shows the rest (`conformance`, `generate`, `generate:check`, `secretscan`, and the local `ci` stand-in).
 
-The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`). `zerothd` binds `127.0.0.1:8420` by default (`ZEROTH_ADDR` or `--addr`).
+The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`). `zerothd` binds `127.0.0.1:8420` by default (`ZEROTH_ADDR` or `--addr`). Config is Cobra flags over Viper (env, optional `zeroth.yaml` / `--config`, then defaults). Logs are Zap (`--log-level`, `--log-encoding`). `zeroth version` prints the build SHA.
 
 PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests, conformance, `go vet`, staticcheck, a secret scan over the diff, the `web/` build and tests, and a check that `pkg/api/gen` matches `task generate`. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. The commit SHA is the version. There is no semver in this repository.
 

@@ -34,6 +34,9 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | `internal/signer` | Signing actions and audit records | Key-management product design |
 | `internal/audit` | Append-only signed trail | Rewritable logs, chat residue as source of truth |
 | `internal/secretscan` | Gate on apply for leaked secrets | A skippable linter |
+| `internal/logging` | Zap logger construction (no package-level global) | A logger `internal/policy` can import |
+| `internal/resilience` | Failsafe-go retry, timeout, and circuit breaker | Per-driver retry loops |
+| `internal/version` | Build SHA for `zeroth version` / `zerothd --version` | A semver product constant |
 | `internal/memory` | Session and agent memory (store-backed in stage 1) | Committed generated memory files |
 | `internal/sandbox` | `Driver` port plus `conformance_test.go` | Concrete runtimes (those go in subpackages) |
 | `internal/sandbox/docker` | Stage-1 `Driver` implementation | Changes to the port that are not reflected in conformance tests |
@@ -106,6 +109,17 @@ go build ./...
 - `evals/` is not `go test` and not CI.
 
 Go 1.27. Do not add a module dependency unless the package that needs it is being implemented.
+
+## Standard stack
+
+Do not introduce a second logging, CLI, config, or resilience approach.
+
+- **Zap** (`internal/logging`) is the structured logger for `zerothd` and `zeroth`. Level and encoder are configurable (`console` for local dev, `json` for CI and production). There is no package-level global logger.
+- **Cobra** owns both command trees. `cmd/zeroth` has `version`, plus stubs for `run`, `attach`, and `bg`. `cmd/zerothd` is a Cobra root whose flags are the daemon's startup surface.
+- **Viper** loads `zerothd` startup config with precedence **flags > env (`ZEROTH_*`) > config file > defaults**: bind address, DB path, docker socket, log level, log encoding, signing-key path.
+- **Failsafe-go** (`internal/resilience`) wraps calls that leave the process (retry + timeout, circuit breaker when the same remote is called repeatedly). The worked example is `resilience.DialUnix`, used by `zerothd` to probe the Docker socket. Follow [docs/design/resilience.md](docs/design/resilience.md) in sandbox, harness, and tracker drivers. Do not invent a parallel retry loop.
+
+`internal/policy` stays I/O-free (ADR-Z-0001). It must not import Zap, `internal/logging`, Viper, Cobra, or Failsafe-go. If a decision ever needs a log line, the **caller** injects a logger (or logs after the decision returns). A global Zap logger inside the kernel would be a defect.
 
 ## Style
 
