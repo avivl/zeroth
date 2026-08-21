@@ -49,7 +49,7 @@ This table is an index. The ADRs live in [`docs/adr/`](../adr/), one file per de
 | --- | --- | --- |
 | [ADR-Z-0001](../adr/Z-0001-go-typescript-isolated-kernel.md) | Core language Go, TypeScript for web; policy kernel isolated with typed IDs | Accepted |
 | [ADR-Z-0002](../adr/Z-0002-mit-license.md) | License MIT | Accepted |
-| [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md) | Harness driver protocol (ACP or shim) | Proposed, decided by spike [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) |
+| [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md) | Harness driver protocol (ACP or shim) | Accepted |
 | [ADR-Z-0004](../adr/Z-0004-sqlite-first.md) | SQLite first, Postgres at stage 2, one store interface | Accepted |
 | [ADR-Z-0005](../adr/Z-0005-docker-sandbox.md) | Docker sandbox driver is the reference implementation | Accepted |
 | [ADR-Z-0006](../adr/Z-0006-linear-tracker.md) | Linear is the first tracker provider, GitHub Issues second | Accepted |

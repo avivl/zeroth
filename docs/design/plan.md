@@ -50,6 +50,14 @@ These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z
 8. **Trunk-based development.** Short-lived branches, squash merge onto `main`, `main` always green. A PR is required. CI is required. CODEOWNERS require a human on `internal/policy/`, `internal/plan/`, and `pkg/api/`, including agent-authored PRs. See `.github/workflows/ci.yml` and `.github/CODEOWNERS`.
 9. **The SHA is the version.** Identify builds by git commit SHA. Do not add semver tags or a product version constant inside the repo.
 
+### Open decisions
+
+Spikes close these. The ADR is the record.
+
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | ACP as driver protocol, or the thin shim | Shim. See [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). |
+
 ## 7. Non-goals until stage 2
 
 Hosting, teams, SSO, billing, a marketplace of harnesses, and any design that assumes more than one operator.
