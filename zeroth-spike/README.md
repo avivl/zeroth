@@ -1,3 +1,5 @@
+
+![Zeroth](zeroth-app-icon.svg )
 # zeroth-spike
 
 Throwaway BA-6 confirmation spike. Not a product. No UI, no auth, no Linear.
