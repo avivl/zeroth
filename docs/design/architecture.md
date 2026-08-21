@@ -45,6 +45,8 @@ Each port is an interface in `internal/<name>` with one implementation in a subp
 
 The store port covers sessions, events, plans, approvals, memory entries and proposals, audit records, leases, the checkpoint index, and agents. SQLite is one file in WAL mode. The path is configurable (`zerothd --db-path` / `ZEROTH_DB_PATH`). Schema changes go through Up and Down migrations; a migration without a Down is not done. The event log is append-only and is the source of truth for a session. `internal/store/conformance_test.go` is the contract a later Postgres driver must pass unchanged except for adding its table row (ADR-Z-0004, NFR-4).
 
+The sandbox port is `Driver`: Spawn, Exec, ExportTar, ImportTar, AllowEgress, Kill, and Stop. Spawn starts with egress denied. A checkpoint is a workspace tar (content hash of paths, modes, and bytes, not tar mtimes), not a frozen process. Kill drops in-flight PIDs; the overlay remains until Stop. `internal/sandbox/conformance_test.go` is the contract a later backend must pass unchanged except for adding its table row (Z1-080, NFR-4). Docker is the stage-1 implementation ([ADR-Z-0005](../adr/Z-0005-docker-sandbox.md)).
+
 Stage 1 is local and single-player, so the store is SQLite and the daemon binds locally (`127.0.0.1:8420` by default, overridable with `ZEROTH_ADDR` or `zerothd --addr`). There is no remote control plane.
 
 ## Cross-cutting

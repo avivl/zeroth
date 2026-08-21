@@ -1,5 +1,13 @@
 // Package sandbox defines the Driver port for isolated agent execution.
 //
 // Implementations live in subpackages (docker) and are proven against
-// conformance_test.go rather than ad-hoc tests in the daemon.
+// conformance_test.go rather than ad-hoc tests in the daemon. Adding a
+// second backend is one table row; the cases stay implementation-agnostic
+// (Z1-080, NFR-4).
+//
+// Deny by default: Spawn starts with no egress. AllowEgress is the only
+// way to open destinations, and empty rules put the sandbox back on deny.
+// A checkpoint is a workspace tar (ExportTar / ImportTar), not a frozen
+// process. Kill drops in-flight PIDs; the overlay remains until Stop so a
+// last ExportTar can still run.
 package sandbox
