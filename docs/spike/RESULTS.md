@@ -1,5 +1,19 @@
 # Spike results (BA-6)
 
+## Verdict
+
+**GO.** All seven gates measured, all pass their bars, no redesign trigger. M1 starts on the current sandbox/session design unchanged.
+
+* G1 (sandbox isolation): PASS. Host writes from inside the sandbox fail, canary on the host unchanged.
+* G2/G3/G4 (workspace ingest and checkpoint round-trip, S/M/L): restore p50 1.58s for M (bar < 10s), 6.29s for L (bar < 60s). Kill-and-resume clean, only work since the last checkpoint is lost (50 of 150 ticks), a new write succeeds after restore. One documented, by-design limitation: checkpoint restores workspace files, not a running process, a foreground dev-server must be restarted after restore.
+* G5 (session state machine and event log): PASS. Attach warm p50 5.4ms (bar < 2s), 5 concurrent sessions writing with stall p50 0.089ms / max 5.7ms (bar < 50ms).
+* G6 (harness touchpoint, API-key-only auth): PASS. 10/10 clean structured-effects runs via `claude -p` on ANTHROPIC_API_KEY from the environment (ADR-Z-0008), no consumer OAuth path exercised.
+* G7 (ACP vs shim): decided, ADR-Z-0003 accepted, shim chosen for stage 1, revisit triggers documented.
+
+Egress deny-by-default also measured clean (40us proxy latency delta against a 20ms bar), feeding G6's harness story.
+
+Close the spike with a verdict, not a vibe.
+
 Confirmation spike. Fill a **Result** cell when that gate is run. Empty
 means not measured. This file is not an ADR. Promote a decision into
 [`docs/adr/`](../adr/) when the gate closes.
@@ -28,8 +42,8 @@ synthetic files. Only S.tar is in git. Recreate M and L with
 | G2 | | Workspace ingest of fixture **S** (~10 MB scripts): copy, compress, unpack. | Times recorded. No data loss. | Ingest p50 160 ms (uncompressed). Compression not measured. | Hydration matrix below |
 | G3 | | Workspace ingest of fixture **M** (~500 MB, genuine module cache). Compression vs S. | Times and ratios recorded. Real deps, not synthetic files. | Ingest p50 1.73 s (uncompressed, real prometheus + GOMODCACHE). Compression not measured. | Hydration matrix below |
 | G4 | | Workspace ingest of fixture **L** (~5 GB, binary assets). Compression vs M. | Times and ratios recorded. Binaries stay large. | Ingest p50 8.46 s (uncompressed). Compression not measured. | Hydration matrix below |
-| G5 | | Session state machine and append-only event log. Distinct `session.ID`. | Illegal transitions deny. Log is the source of truth. | | |
-| G6 | | Harness touchpoint with Anthropic API key only ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). | Key from env. No consumer OAuth. Key never logged. | | |
+| G5 | | Session state machine and append-only event log. Distinct `session.ID`. | Illegal transitions deny. Log is the source of truth. | PASS: attach warm p50 5.403ms (bar < 2s), G6 write stall p50 0.089ms / max 5.714ms (bar < 50ms) | [Attach latency and SQLite throughput](#attach-latency-and-sqlite-throughput-linear-42-6) |
+| G6 | | Harness touchpoint with Anthropic API key only ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). | Key from env. No consumer OAuth. Key never logged. | PASS: 10/10 parseable effects via `claude -p` on ANTHROPIC_API_KEY from env, no consumer OAuth ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)) | [Structured effects](#structured-effects-linear-42-8-g4-z1-052) |
 | G7 | [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) | Evaluate ACP as the harness driver protocol. Write [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). | ADR accepted with ACP or a shim. Plan-then-apply still holds. | **shim (not ACP)** | [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md) |
 
 ## Checkpoint round-trip (Linear 42-7, Z1-036 / Z1-080)
