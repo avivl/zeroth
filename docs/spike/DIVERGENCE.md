@@ -17,6 +17,10 @@ to change Z1-036 checkpoint semantics.
 | `--read-only` rootfs | Agent cannot persist outside the workspace | `/tmp` is a tmpfs. Only `/workspace` is in the checkpoint tar. Writes under `/tmp` are lost on restore. | G2 |
 | Exit codes | `Exec` returns the command exit code | Non-zero exit is `ExecResult.ExitCode` with a nil error. Docker CLI failures (daemon down, killed container) are errors. | G1 |
 | Host isolation | Writes from inside the sandbox do not mutate the host | Confirmed: an absolute host path written from `docker exec` does not change the host file. The path is either missing or a different `/tmp`. | G1 |
+| G4 live harness | 10 `claude -p` runs emit parseable effects | API key is present. Claude Code CLI is present. Both `claude -p` and Messages API return `credit balance is too low`. No transcript to parse. Parser agent second pass was not exercised live. | G4 |
+| G4 tools | Claude Code may write files despite the prompt | `--tools ""` and `--permission-mode plan` are the adapter flags that belong with `ProposeEffectsPrompt`. | G4 |
+| G5 leased egress | Per-destination allow in the sandbox network namespace | Empty leases stay `--network none`. Leased destinations are enforced by the HTTP/HTTPS CONNECT proxy (`HTTP_PROXY`). Clients that ignore the proxy are out of scope for stage 1. | G5 |
+| G5 proxy cost | Added latency < 20 ms p50 | Local httptest origin: direct p50 39 us, proxy p50 80 us, delta **40 us**. | G5 |
 
 If G2 restore of fixture M is slower than 10 s p50, try rsync-style
 deltas of the overlay upperdir before changing the checkpoint model.

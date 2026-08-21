@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // RunSource is how a G4 transcript was produced.
@@ -54,7 +55,7 @@ func RunGateG4(ctx context.Context, n int) (GateResult, error) {
 		return out, err
 	}
 	source := SourceMessages
-	if _, err := exec.LookPath("claude"); err == nil {
+	if p := claudePath(); p != "" {
 		source = SourceClaude
 	}
 	out.Source = source
@@ -104,6 +105,10 @@ func runOnce(ctx context.Context, index int, source RunSource, client *MessagesC
 		run.Err = err.Error()
 		return run, nil
 	}
+	if billingLimited(transcript) {
+		run.Err = "anthropic credit balance is too low"
+		return run, nil
+	}
 	after, err := hashDir(dir)
 	if err != nil {
 		return run, err
@@ -138,9 +143,39 @@ func completeOnce(ctx context.Context, source RunSource, client *MessagesClient,
 	return text, SourceMessages, err
 }
 
+func claudePath() string {
+	if p := strings.TrimSpace(os.Getenv("CLAUDE_BIN")); p != "" {
+		return p
+	}
+	if p, err := exec.LookPath("claude"); err == nil {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	candidate := filepath.Join(home, ".local", "bin", "claude")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
+}
+
 func runClaude(ctx context.Context, workspace string) (string, error) {
-	prompt := ProposeEffectsPrompt + "\n\n" + ThreeFileTask
-	cmd := exec.CommandContext(ctx, "claude", "-p", "--output-format", "text", prompt)
+	bin := claudePath()
+	if bin == "" {
+		return "", fmt.Errorf("claude binary not found")
+	}
+	cmd := exec.CommandContext(ctx, bin,
+		"-p",
+		"--output-format", "text",
+		"--bare",
+		"--tools", "",
+		"--permission-mode", "plan",
+		"--no-session-persistence",
+		"--system-prompt", ProposeEffectsPrompt,
+		ThreeFileTask,
+	)
 	cmd.Dir = workspace
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -149,7 +184,11 @@ func runClaude(ctx context.Context, workspace string) (string, error) {
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("claude -p: %w", err)
 	}
-	return stdout.String(), nil
+	out := stdout.String()
+	if billingLimited(out) {
+		return "", fmt.Errorf("claude -p: anthropic credit balance is too low")
+	}
+	return out, nil
 }
 
 func writeThreeFileWorkspace() (dir string, hash [32]byte, err error) {
@@ -185,6 +224,10 @@ func main() {
 		return "", hash, err
 	}
 	return dir, hash, nil
+}
+
+func billingLimited(transcript string) bool {
+	return strings.Contains(strings.ToLower(transcript), "credit balance is too low")
 }
 
 func hashDir(dir string) ([32]byte, error) {

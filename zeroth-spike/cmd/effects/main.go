@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/avivl/zeroth/zeroth-spike/harness"
@@ -37,6 +38,8 @@ func main() {
 	status := "FAIL"
 	if got.Pass {
 		status = "PASS"
+	} else if got.ParseOK == 0 && allBilling(got) {
+		status = "not measured (billing)"
 	}
 	fmt.Printf("| %d | %d | %d | %d | %d | **%s** |\n",
 		len(got.Runs), got.ParseOK, got.ThreeFileOK, got.ParserAgent, got.WroteFiles, status)
@@ -72,4 +75,19 @@ func main() {
 	if !got.Pass {
 		os.Exit(1)
 	}
+}
+
+func allBilling(got harness.GateResult) bool {
+	if len(got.Runs) == 0 {
+		return false
+	}
+	for _, r := range got.Runs {
+		if r.ParseOK || r.Err == "" {
+			return false
+		}
+		if !strings.Contains(strings.ToLower(r.Err), "credit balance is too low") {
+			return false
+		}
+	}
+	return true
 }

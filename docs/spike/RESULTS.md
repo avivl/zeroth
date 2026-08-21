@@ -119,3 +119,85 @@ concurrent sessions appending; a stall is one `Append` (or one batched
 | G6 write stall (5 sessions, unbatched) | no stall > 50 ms | 550 | 0.089 ms | 0.290 ms | 0.503 ms | 5.714 ms | pass |
 
 Host: Linux 6.12, Go 1.27.0, local SQLite WAL via `modernc.org/sqlite`. Unbatched G6 max is 5.7 ms, so batched writes were not measured. Cross-process attach: `spike run` then `spike attach <id>` against `spike serve` (see `cmd/spike/cli_test.go`). Subprocess supervision is `spike run -agent claude` (`claude -p`) when the binary is present; tests use `echo` as the stand-in.
+
+## Structured effects (Linear 42-8, G4, Z1-052)
+
+These G4/G5 numbers are the plan-model gates, not the fixture-L /
+session-machine rows in the table above.
+
+Plan-then-apply needs proposed effects, not in-place writes. The adapter
+text is `harness.ProposeEffectsPrompt`. Flags that belong with it:
+`claude -p --output-format text --bare --tools "" --permission-mode plan
+--no-session-persistence --system-prompt <ProposeEffectsPrompt>`.
+Re-run: `go run ./cmd/effects -runs 10` from `zeroth-spike/`.
+
+Task: change README.md, greet.go, and main.go. Do not write the files.
+Pass bar: 9/10 runs produce parseable effects (`op`, `target`, `diff` or
+`payload`) covering those three paths.
+
+| | |
+| --- | --- |
+| Attempts | 10 |
+| Source | `claude -p`, then Messages API stand-in |
+| Parseable / 3-file set | 0 / 0 |
+| Parser agent used | 0 (no transcript to parse) |
+| Wrote files | 0 |
+| Result | **not measured** |
+
+Every attempt failed before a transcript: Anthropic `credit balance is
+too low` from both `claude -p` and `POST /v1/messages`. That is a
+billing block, not unstructured output. The fail path (parser agent in
+front of the raw transcript) was not exercised live. ACP (G7) stays
+the protocol question; this run does not raise it.
+
+Offline parser corpus (`harness/testdata/g4`, 10 transcripts: clean
+JSON, markdown fences, OpenAPI `type`/`path` aliases, `claude -p
+--output-format json` wrapper, array root, `./` targets): **10/10**
+parseable 3-file sets. That is parser readiness, not the live G4 bar.
+
+### Example effect set
+
+Shape the adapter must emit. Taken from the offline corpus
+(`01-clean.json`), not from a live model run.
+
+```json
+[
+  {
+    "op": "modify",
+    "target": "README.md",
+    "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n # demo\n+Version: 2\n"
+  },
+  {
+    "op": "modify",
+    "target": "greet.go",
+    "diff": "--- a/greet.go\n+++ b/greet.go\n@@ -1,3 +1,5 @@\n package greet\n \n func Hello() string { return \"hi\" }\n+\n+func Greet(name string) string { return \"hello, \" + name }\n"
+  },
+  {
+    "op": "modify",
+    "target": "main.go",
+    "diff": "--- a/main.go\n+++ b/main.go\n@@ -8,5 +8,5 @@\n \n func main() {\n-\tfmt.Println(greet.Hello())\n+\tfmt.Println(greet.Greet(\"zeroth\"))\n }\n"
+  }
+]
+```
+
+## Egress deny-by-default (Linear 42-8, G5, Z1-080 / Z2-111)
+
+Deny by default. Empty leases keep docker `--network none`.
+Per-destination allow is an HTTP/HTTPS CONNECT proxy whose allowlist is
+derived from active leases. A destination that is not listed returns
+403. Enforcement for leased egress is the proxy: clients that ignore
+`HTTP_PROXY` are out of scope for stage 1. That is stated in
+[`architecture.md`](../design/architecture.md).
+
+Measured against a local httptest origin so the number is the proxy
+hop, not WAN noise. Command: `go run ./cmd/egress` (10 warm-up + 110
+samples). Host: Linux 6.12, Go 1.27.0.
+
+| Check | Pass bar | Result |
+| --- | --- | --- |
+| Allow listed destination | HTTP 200 through proxy | yes |
+| Deny unlisted destination | HTTP 403, upstream not reached | yes |
+| Proxy latency delta p50 | < 20 ms (n=110) | **40 us** (direct 39 us, proxy 80 us) |
+
+G5: **PASS**
+
