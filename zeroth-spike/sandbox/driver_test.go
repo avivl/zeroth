@@ -32,18 +32,48 @@ func TestDriverNames(t *testing.T) {
 	}
 }
 
-func TestDockerStartIsStub(t *testing.T) {
+func TestMemoryExportImportKill(t *testing.T) {
 	t.Parallel()
-	id, err := session.ParseID("sess-docker")
+	tarPath := writeHelloTar(t)
+	id, err := session.ParseID("sess-mem-ckpt")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = sandbox.NewDocker().Start(context.Background(), sandbox.StartRequest{
+	inst, err := sandbox.NewMemory().Start(context.Background(), sandbox.StartRequest{
 		SessionID: id,
-		Workspace: sandbox.Workspace{TarPath: "unused.tar"},
+		Workspace: sandbox.Workspace{TarPath: tarPath},
 	})
-	if err == nil {
-		t.Fatal("expected setup stub error")
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Stop(context.Background()) })
+
+	sum, err := sandbox.HashWorkspace(inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := inst.ExportTar(context.Background(), &buf); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if err := inst.Kill(context.Background()); err != nil {
+		t.Fatalf("kill: %v", err)
+	}
+	if _, err := inst.Exec(context.Background(), []string{"cat", "hello.txt"}); err == nil {
+		t.Fatal("exec after kill: expected error")
+	}
+	if err := inst.ImportTar(context.Background(), bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("import after kill: %v", err)
+	}
+	got, err := sandbox.HashWorkspace(inst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != sum {
+		t.Fatalf("hash mismatch after import: %s vs %s", sandbox.HashHex(sum), sandbox.HashHex(got))
+	}
+	if sandbox.OverlayMethod(inst) != "none" {
+		t.Fatalf("overlay = %q", sandbox.OverlayMethod(inst))
 	}
 }
 

@@ -24,10 +24,10 @@ synthetic files. Only S.tar is in git. Recreate M and L with
 
 | Gate | Linear | Question | Pass bar | Result | Evidence |
 | --- | --- | --- | --- | --- | --- |
-| G1 | | Docker sandbox `Driver`: start, exec, stop against a real container. Isolation from the host. | Interface holds. Host writes from inside the sandbox fail. | | |
-| G2 | | Workspace ingest of fixture **S** (~10 MB scripts): copy, compress, unpack. | Times recorded. No data loss. | | |
-| G3 | | Workspace ingest of fixture **M** (~500 MB, genuine module cache). Compression vs S. | Times and ratios recorded. Real deps, not synthetic files. | | |
-| G4 | | Workspace ingest of fixture **L** (~5 GB, binary assets). Compression vs M. | Times and ratios recorded. Binaries stay large. | | |
+| G1 | [42-7](https://linear.app/42-golems/issue/42-7/gate-g2-g3-docker-checkpoint-round-trip-kill-and-resume) | Docker sandbox `Driver`: start, exec, stop against a real container. Isolation from the host. | Interface holds. Host writes from inside the sandbox fail. | **PASS** | `TestDockerStartExecStopIsolation`. `--network none`, `--read-only` rootfs, bind-mount `/workspace`. Host canary unchanged. |
+| G2 | | Workspace ingest of fixture **S** (~10 MB scripts): copy, compress, unpack. | Times recorded. No data loss. | Ingest p50 160 ms (uncompressed). Compression not measured. | Hydration matrix below |
+| G3 | | Workspace ingest of fixture **M** (~500 MB, genuine module cache). Compression vs S. | Times and ratios recorded. Real deps, not synthetic files. | Ingest p50 1.73 s (uncompressed, real prometheus + GOMODCACHE). Compression not measured. | Hydration matrix below |
+| G4 | | Workspace ingest of fixture **L** (~5 GB, binary assets). Compression vs M. | Times and ratios recorded. Binaries stay large. | Ingest p50 8.46 s (uncompressed). Compression not measured. | Hydration matrix below |
 | G5 | | Session state machine and append-only event log. Distinct `session.ID`. | Illegal transitions deny. Log is the source of truth. | | |
 | G6 | | Harness touchpoint with Anthropic API key only ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). | Key from env. No consumer OAuth. Key never logged. | | |
 | G7 | [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) | Evaluate ACP as the harness driver protocol. Write [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). | ADR accepted with ACP or a shim. Plan-then-apply still holds. | | |
