@@ -10,12 +10,20 @@
  * ---------------------------------------------------------------
  */
 
+export enum PlanEffectType {
+  Create = "create",
+  Modify = "modify",
+  Destroy = "destroy",
+  MemoryProposal = "memory_proposal",
+}
+
 export enum AuditResourceType {
   Run = "run",
   Plan = "plan",
   Agent = "agent",
   Memory = "memory",
   Checkpoint = "checkpoint",
+  Lease = "lease",
 }
 
 export enum MemoryProposalStatus {
@@ -42,7 +50,7 @@ export enum AgentStatus {
   Disabled = "disabled",
 }
 
-/** Plan lifecycle. Apply is a daemon transition after approve, not a client operation. */
+/** Plan lifecycle. Apply is POST /plans/{id}/apply after approve. */
 export enum PlanStatus {
   Draft = "draft",
   CrossExam = "cross_exam",
@@ -60,6 +68,7 @@ export enum RunStatus {
   Running = "running",
   WaitingApproval = "waiting_approval",
   Backgrounded = "backgrounded",
+  Stopped = "stopped",
   Completed = "completed",
   Failed = "failed",
   Cancelled = "cancelled",
@@ -130,6 +139,24 @@ export type AuditID = string;
  */
 export type CheckpointID = string;
 
+/**
+ * Opaque lease id. Not interchangeable with other id kinds.
+ * @minLength 1
+ */
+export type LeaseID = string;
+
+/**
+ * Opaque grant id. Not interchangeable with other id kinds.
+ * @minLength 1
+ */
+export type GrantID = string;
+
+/**
+ * Opaque scope id. Not interchangeable with other id kinds.
+ * @minLength 1
+ */
+export type ScopeID = string;
+
 export interface Run {
   /** Opaque run id. Not interchangeable with other id kinds. */
   id: RunID;
@@ -139,13 +166,14 @@ export interface Run {
   plan_id?: PlanID;
   /** Lifecycle of a run. Unknown values must be treated as non-terminal. */
   status: RunStatus;
-  /** @minLength 1 */
-  goal: string;
+  /** Operator prompt that started the run, when one was given. */
+  prompt?: string;
   /**
    * Optional tracker issue id (for example a Linear issue id). This API does not proxy the tracker.
    * @minLength 1
    */
-  issue_ref?: string;
+  tracker_ref?: string;
+  workspace_source?: WorkspaceSource;
   /**
    * Earned autonomy tier for this run. The kernel interprets the value; unknown tiers deny by default.
    * @minLength 1
@@ -177,18 +205,30 @@ export interface RunList {
   next_cursor?: string;
 }
 
+export interface WorkspaceSource {
+  /**
+   * Repository URL or local path to check out for the run.
+   * @minLength 1
+   */
+  repo: string;
+  /**
+   * Git ref (branch, tag, or SHA). The daemon default applies when omitted.
+   * @minLength 1
+   */
+  ref?: string;
+}
+
 export interface CreateRunRequest {
   /** Opaque agent id. Not interchangeable with other id kinds. */
   agent_id: AgentID;
-  /** @minLength 1 */
-  goal: string;
   /**
    * Optional tracker issue id to attach to the run.
    * @minLength 1
    */
-  issue_ref?: string;
-  /** If true, start the run backgrounded. */
-  background?: boolean;
+  tracker_ref?: string;
+  /** Optional operator prompt. Not required to create the run. */
+  prompt?: string;
+  workspace_source?: WorkspaceSource;
 }
 
 export interface SteerRequest {
@@ -205,7 +245,10 @@ export interface RunEvent {
   /** Opaque run id. Not interchangeable with other id kinds. */
   run_id: RunID;
   /**
-   * Event kind. Clients must tolerate unknown types; the log grows with the kernel.
+   * Event kind. Open string; new types will be added and clients
+   * must tolerate unknowns. Known values: log, tool_call,
+   * tool_result, plan_drafted, cross_exam_verdict,
+   * checkpoint_created, effect_applied, status_changed, error.
    * @minLength 1
    */
   type: string;
@@ -231,13 +274,22 @@ export interface Plan {
   run_id: RunID;
   /** Set when this plan was created by branch. */
   parent_plan_id?: PlanID;
-  /** Plan lifecycle. Apply is a daemon transition after approve, not a client operation. */
+  /** Plan lifecycle. Apply is POST /plans/{id}/apply after approve. */
   status: PlanStatus;
-  /** @minLength 1 */
+  /**
+   * Human-readable rationale for the plan. Not a substitute for effects.
+   * @minLength 1
+   */
   summary: string;
-  steps?: PlanStep[];
-  /** Structured challenge of the draft, when cross-exam has run. */
-  cross_exam?: string;
+  /** Structured diffs the operator reviews before apply. */
+  effects: PlanEffect[];
+  cross_exam?: CrossExam;
+  /**
+   * Secretscan results. Omitted until the gate has run. Empty
+   * means it ran and found nothing. Non-empty findings block
+   * apply; the payload never includes the secret itself.
+   */
+  secret_scan_findings?: SecretScanFinding[];
   /** Latest operator comment from approve or request-changes. */
   review_comment?: string;
   /**
@@ -252,15 +304,72 @@ export interface Plan {
   updated_at: string;
 }
 
-export interface PlanStep {
+export interface PlanList {
+  items: Plan[];
   /** @minLength 1 */
-  title: string;
-  detail?: string;
+  next_cursor?: string;
+}
+
+export interface PlanEffect {
+  type: PlanEffectType;
   /**
-   * Step kind (open string so the kernel can add kinds without a spec bump).
+   * Workspace path this effect touches. For memory_proposal, a memory key.
    * @minLength 1
    */
-  kind?: string;
+  path?: string;
+  /** Unified diff or proposed content. Never a secret value. */
+  diff?: string;
+  /**
+   * Hash of the pre-apply state this effect assumes. Apply rechecks it.
+   * @minLength 1
+   */
+  precondition_hash?: string;
+  /**
+   * Harness-supplied cost hint (tokens, time, or other). Not a billing field.
+   * @minLength 1
+   */
+  cost_estimate?: string;
+}
+
+export interface CrossExam {
+  /**
+   * Outcome of the automatic cross-exam. Open string; clients must tolerate unknown verdicts.
+   * @minLength 1
+   */
+  verdict: string;
+  /**
+   * Model that performed the cross-exam.
+   * @minLength 1
+   */
+  reviewer_model: string;
+  /**
+   * Why the reviewer reached this verdict.
+   * @minLength 1
+   */
+  reasoning: string;
+  /**
+   * RFC 3339 timestamp in UTC when cross-exam completed.
+   * @format date-time
+   */
+  at: string;
+}
+
+export interface SecretScanFinding {
+  /** @minLength 1 */
+  path: string;
+  /**
+   * Detector name. The matched secret is not included.
+   * @minLength 1
+   */
+  rule: string;
+  /** @min 1 */
+  line?: number;
+}
+
+export interface ApplyPlanResponse {
+  plan: Plan;
+  /** Audit entry produced by this apply. */
+  audit_id: AuditID;
 }
 
 export interface ApproveRequest {
@@ -292,7 +401,15 @@ export interface Agent {
    */
   harness: string;
   status: AgentStatus;
-  config?: AgentConfig;
+  /** @minLength 1 */
+  model?: string;
+  /** Tool names this agent may be offered. Policy still denies by default; this is not a grant. */
+  tools?: string[];
+  /**
+   * Default autonomy tier for new runs of this agent. Unknown tiers deny by default.
+   * @minLength 1
+   */
+  autonomy_tier?: string;
   /**
    * RFC 3339 timestamp in UTC.
    * @format date-time
@@ -305,17 +422,17 @@ export interface Agent {
   updated_at: string;
 }
 
-export interface AgentConfig {
-  /** @minLength 1 */
-  model?: string;
-  instructions?: string;
-}
-
 export interface AgentPatch {
   /** @minLength 1 */
   name?: string;
-  status?: AgentStatus;
-  config?: AgentConfig;
+  /** @minLength 1 */
+  model?: string;
+  tools?: string[];
+  /**
+   * Explicit operator tier change. Stage 1 does not auto-promote.
+   * @minLength 1
+   */
+  autonomy_tier?: string;
 }
 
 export interface AgentList {
@@ -324,16 +441,46 @@ export interface AgentList {
   next_cursor?: string;
 }
 
+export interface Lease {
+  /** Opaque lease id. Not interchangeable with other id kinds. */
+  id: LeaseID;
+  /** Opaque grant id. Not interchangeable with other id kinds. */
+  grant_id: GrantID;
+  /** Opaque scope id. Not interchangeable with other id kinds. */
+  scope_id: ScopeID;
+  /** Opaque agent id. Not interchangeable with other id kinds. */
+  agent_id: AgentID;
+  /**
+   * RFC 3339 timestamp in UTC. A lease cannot outlive this window.
+   * @format date-time
+   */
+  expires_at: string;
+  /**
+   * RFC 3339 timestamp in UTC.
+   * @format date-time
+   */
+  minted_at?: string;
+}
+
+export interface LeaseList {
+  items: Lease[];
+}
+
 export interface Approval {
   /** Opaque approval id. Not interchangeable with other id kinds. */
   id: ApprovalID;
-  /** Stage 1 approvals are plan approvals. */
-  kind: "plan";
+  /**
+   * Subject kind. Open string (same rule as RunEvent.type).
+   * Clients must tolerate unknown kinds. Deep-link via plan_id
+   * and run_id to the resource that accepts the decision.
+   * @minLength 1
+   */
+  kind: string;
   status: ApprovalStatus;
   /** Opaque plan id. Not interchangeable with other id kinds. */
-  plan_id: PlanID;
+  plan_id?: PlanID;
   /** Opaque run id. Not interchangeable with other id kinds. */
-  run_id: RunID;
+  run_id?: RunID;
   summary?: string;
   /**
    * RFC 3339 timestamp in UTC.
@@ -475,6 +622,14 @@ export interface CheckpointList {
   next_cursor?: string;
 }
 
+export interface CreateCheckpointRequest {
+  /**
+   * Optional operator label for this snapshot.
+   * @minLength 1
+   */
+  label?: string;
+}
+
 export type QueryParamsType = Record<string | number, any>;
 export type ResponseFormat = keyof Omit<Body, "body" | "bodyUsed">;
 
@@ -528,7 +683,7 @@ export enum ContentType {
 }
 
 export class HttpClient<SecurityDataType = unknown> {
-  public baseUrl: string = "/";
+  public baseUrl: string = "http://127.0.0.1:8420";
   private securityData: SecurityDataType | null = null;
   private securityWorker?: ApiConfig<SecurityDataType>["securityWorker"];
   private abortControllers = new Map<CancelToken, AbortController>();
@@ -734,20 +889,22 @@ export class HttpClient<SecurityDataType = unknown> {
  * @title Zeroth API
  * @version 0.0.0
  * @license MIT
- * @baseUrl /
+ * @baseUrl http://127.0.0.1:8420
  * @contact (https://github.com/avivl/zeroth)
  *
  * Local control-plane API for Zeroth. Stage 1 is single-player and binds
- * locally. This spec is the canonical contract; Go stubs and the TypeScript
- * client are generated from it, not hand-written.
+ * locally at 127.0.0.1:8420 by default (ZEROTH_ADDR or zerothd --addr).
+ * This spec is the canonical contract; Go stubs and the TypeScript client
+ * are generated from it, not hand-written.
  *
  * A flow that cannot be expressed through this API ships on neither the
  * web UI nor the CLI. That is what keeps a later Slack surface from becoming
  * a second implementation of everything.
  *
- * Apply is not a client operation. The human gate is approve (or request
- * changes, or branch). The daemon applies an approved plan; clients watch
- * the run and the plan.
+ * Plan lifecycle is draft, automatic cross-exam, approve (or request-changes,
+ * or branch), then apply. Apply is a client operation. Cross-exam is not:
+ * the daemon runs it after every new draft, including drafts produced by
+ * request-changes. There is no operator re-run trigger.
  */
 export class Api<
   SecurityDataType extends unknown,
@@ -807,7 +964,7 @@ export class Api<
       }),
 
     /**
-     * No description
+     * @description Stage 1 has exactly one sandbox driver (Docker). It is not user-selectable and is not a field on this request.
      *
      * @tags runs
      * @name CreateRun
@@ -841,7 +998,7 @@ export class Api<
       }),
 
     /**
-     * @description The event log is the source of truth for a run, not chat residue. Query parameter last selects how many recent events to replay. A WebSocket upgrade on this path replays those events, then tails live. Each WebSocket message is a JSON RunEvent. Without Upgrade, this GET returns the same replay window as JSON so the CLI and tests can read the log without a socket. The generated TypeScript client is that GET helper, not a WebSocket caller.
+     * @description The event log is the source of truth for a run, not chat residue. Query parameter last selects how many recent events to replay. A WebSocket upgrade on this path replays those events, then tails live. Each WebSocket message is a JSON RunEvent. Without Upgrade, this GET returns the same replay window as JSON so the CLI and tests can read the log without a socket. OpenAPI codegen does not emit a WebSocket client. The generated TypeScript helper is this GET. The web UI uses a hand-written wrapper in web/ around the generated RunEvent type. That wrapper is not a second contract.
      *
      * @tags runs
      * @name GetRunEvents
@@ -901,8 +1058,98 @@ export class Api<
         format: "json",
         ...params,
       }),
+
+    /**
+     * @description Bring a backgrounded run back to a foreground session. Mirrors POST /runs/{id}/background.
+     *
+     * @tags runs
+     * @name ForegroundRun
+     * @summary Foreground a run
+     * @request POST:/runs/{id}/foreground
+     */
+    foregroundRun: (id: RunID, params: RequestParams = {}) =>
+      this.request<Run, Error>({
+        path: `/runs/${id}/foreground`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Graceful cancel. The daemon checkpoints on the way out so the run can later resume from that checkpoint via restore (which forks a new run). The original run's audit chain is unchanged.
+     *
+     * @tags runs
+     * @name StopRun
+     * @summary Stop a run
+     * @request POST:/runs/{id}/stop
+     */
+    stopRun: (id: RunID, params: RequestParams = {}) =>
+      this.request<Run, Error>({
+        path: `/runs/${id}/stop`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Operator-requested snapshot of this run. Distinct from the automatic checkpoint apply takes before executing.
+     *
+     * @tags checkpoints
+     * @name CreateRunCheckpoint
+     * @summary Create an on-demand checkpoint
+     * @request POST:/runs/{id}/checkpoints
+     */
+    createRunCheckpoint: (
+      id: RunID,
+      data?: CreateCheckpointRequest,
+      params: RequestParams = {},
+    ) =>
+      this.request<Checkpoint, Error>({
+        path: `/runs/${id}/checkpoints`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
   };
   plans = {
+    /**
+     * No description
+     *
+     * @tags plans
+     * @name ListPlans
+     * @summary List plans
+     * @request GET:/plans
+     */
+    listPlans: (
+      query?: {
+        /**
+         * Opaque page cursor from a previous next_cursor.
+         * @minLength 1
+         */
+        cursor?: string;
+        /**
+         * Page size. The daemon defaults this when omitted.
+         * @min 1
+         * @max 200
+         */
+        limit?: number;
+        /** If set, only plans for this run. */
+        run_id?: RunID;
+        /** If set, only plans in this status. */
+        status?: PlanStatus;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<PlanList, any>({
+        path: `/plans`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
     /**
      * No description
      *
@@ -920,7 +1167,7 @@ export class Api<
       }),
 
     /**
-     * @description Human gate on the plan lifecycle. After approve, the daemon applies. There is no client apply operation; a UI or CLI must not invent one.
+     * @description Human gate on the plan lifecycle. After approve, the plan is eligible for POST /plans/{id}/apply. Approve does not itself mutate the world.
      *
      * @tags plans
      * @name ApprovePlan
@@ -942,7 +1189,7 @@ export class Api<
       }),
 
     /**
-     * No description
+     * @description Operator rejects this draft. The daemon produces a new draft and auto-cross-examines it, same as the original. There is no manual cross-exam re-run.
      *
      * @tags plans
      * @name RequestPlanChanges
@@ -964,7 +1211,7 @@ export class Api<
       }),
 
     /**
-     * @description Create an alternative plan from this one. The original plan is unchanged.
+     * @description Create an alternative plan from this one. The original plan is unchanged. The branch is auto-cross-examined as a new draft.
      *
      * @tags plans
      * @name BranchPlan
@@ -981,6 +1228,22 @@ export class Api<
         method: "POST",
         body: data,
         type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description The world-changing step. The daemon rechecks preconditions, verifies approval, takes a checkpoint, acquires leases, runs secretscan as a non-skippable gate, executes the effects, signs an audit record, and releases leases. Secret-scan findings are also on the plan resource so the operator can see them before calling apply. A non-empty findings list fails this call (409). There is no skip.
+     *
+     * @tags plans
+     * @name ApplyPlan
+     * @summary Apply an approved plan
+     * @request POST:/plans/{id}/apply
+     */
+    applyPlan: (id: PlanID, params: RequestParams = {}) =>
+      this.request<ApplyPlanResponse, Error>({
+        path: `/plans/${id}/apply`,
+        method: "POST",
         format: "json",
         ...params,
       }),
@@ -1035,7 +1298,7 @@ export class Api<
       }),
 
     /**
-     * @description Config changes are themselves signed audited actions. The daemon records and signs the patch; the client does not send a signature.
+     * @description Config changes are themselves signed audited actions. The daemon records and signs the patch; the client does not send a signature. A tier change is an explicit operator action. Stage 1 has no auto-promotion. Leases are not set here; they are minted during apply. Read current leases at GET /agents/{id}/leases.
      *
      * @tags agents
      * @name PatchAgent
@@ -1051,10 +1314,26 @@ export class Api<
         format: "json",
         ...params,
       }),
+
+    /**
+     * @description Read-only view of leases currently held for this agent. Leases are minted automatically during apply, not through this API.
+     *
+     * @tags agents
+     * @name ListAgentLeases
+     * @summary List current leases for an agent
+     * @request GET:/agents/{id}/leases
+     */
+    listAgentLeases: (id: AgentID, params: RequestParams = {}) =>
+      this.request<LeaseList, Error>({
+        path: `/agents/${id}/leases`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
   };
   approvals = {
     /**
-     * @description Operator inbox. Stage 1 items are plan approvals. Memory proposals are under /memory/proposals.
+     * @description Operator inbox. kind is an open string (same rule as RunEvent.type). Decide on the subject resource this item deep-links to, not here. Memory proposals are under /memory/proposals.
      *
      * @tags approvals
      * @name ListApprovals
@@ -1297,7 +1576,7 @@ export class Api<
       }),
 
     /**
-     * @description Restore run state from this checkpoint. Consequential; the daemon records a signed audit event and follows plan-then-apply if the restore mutates the world.
+     * @description Fork a new run from this checkpoint. The original run is not mutated; its audit chain stays immutable. Matches the branch model (two futures in parallel). Consequential work in the new run still goes through plan-then-apply.
      *
      * @tags checkpoints
      * @name RestoreCheckpoint

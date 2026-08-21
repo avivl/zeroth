@@ -4,41 +4,45 @@ info:
   version: 0.0.0
   description: |
     Local control-plane API for Zeroth. Stage 1 is single-player and binds
-    locally. This spec is the canonical contract; Go stubs and the TypeScript
-    client are generated from it, not hand-written.
+    locally at 127.0.0.1:8420 by default (ZEROTH_ADDR or zerothd --addr).
+    This spec is the canonical contract; Go stubs and the TypeScript client
+    are generated from it, not hand-written.
 
     A flow that cannot be expressed through this API ships on neither the
     web UI nor the CLI. That is what keeps a later Slack surface from becoming
     a second implementation of everything.
 
-    Apply is not a client operation. The human gate is approve (or request
-    changes, or branch). The daemon applies an approved plan; clients watch
-    the run and the plan.
+    Plan lifecycle is draft, automatic cross-exam, approve (or request-changes,
+    or branch), then apply. Apply is a client operation. Cross-exam is not:
+    the daemon runs it after every new draft, including drafts produced by
+    request-changes. There is no operator re-run trigger.
   license:
     name: MIT
     identifier: MIT
   contact:
     url: https://github.com/avivl/zeroth
 servers:
-  - url: /
-    description: Relative to the local zerothd origin. Stage 1 binds on the operator's machine.
+  - url: http://127.0.0.1:8420
+    description: |
+      Default zerothd bind. Override with ZEROTH_ADDR or zerothd --addr.
+      Stage 1 is loopback only; this is not a remote control plane.
 tags:
   - name: health
     description: Daemon liveness. Not a product view.
   - name: runs
     description: Human-supervised agent runs (sessions).
   - name: plans
-    description: Plan review. Draft and cross-exam happen inside the daemon.
+    description: Plan review. Draft and cross-exam happen inside the daemon. Apply is the client mutation.
   - name: agents
     description: Local agent records. Config changes are signed audited actions.
   - name: approvals
-    description: Operator inbox of pending plan approvals.
+    description: Operator inbox. Decisions happen on the subject resource, not here.
   - name: memory
     description: Store-backed session and agent memory, plus human review of proposals.
   - name: audit
     description: Append-only signed trail. Verify checks a record's signature.
   - name: checkpoints
-    description: Snapshots of run state that the operator can restore.
+    description: Snapshots of run state. Restore forks a new run; it never rewrites the original.
 paths:
   /health:
     get:
@@ -80,6 +84,9 @@ paths:
     post:
       tags: [runs]
       summary: Start a run
+      description: |
+        Stage 1 has exactly one sandbox driver (Docker). It is not
+        user-selectable and is not a field on this request.
       operationId: createRun
       requestBody:
         required: true
@@ -129,8 +136,12 @@ paths:
         live. Each WebSocket message is a JSON RunEvent.
 
         Without Upgrade, this GET returns the same replay window as JSON so
-        the CLI and tests can read the log without a socket. The generated
-        TypeScript client is that GET helper, not a WebSocket caller.
+        the CLI and tests can read the log without a socket.
+
+        OpenAPI codegen does not emit a WebSocket client. The generated
+        TypeScript helper is this GET. The web UI uses a hand-written
+        wrapper in web/ around the generated RunEvent type. That wrapper
+        is not a second contract.
       operationId: getRunEvents
       parameters:
         - $ref: "#/components/parameters/RunID"
@@ -200,6 +211,105 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+  "/runs/{id}/foreground":
+    post:
+      tags: [runs]
+      summary: Foreground a run
+      description: Bring a backgrounded run back to a foreground session. Mirrors POST /runs/{id}/background.
+      operationId: foregroundRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Run is in the foreground
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/runs/{id}/stop":
+    post:
+      tags: [runs]
+      summary: Stop a run
+      description: |
+        Graceful cancel. The daemon checkpoints on the way out so the
+        run can later resume from that checkpoint via restore (which
+        forks a new run). The original run's audit chain is unchanged.
+      operationId: stopRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      responses:
+        "200":
+          description: Run stopped after a checkpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/runs/{id}/checkpoints":
+    post:
+      tags: [checkpoints]
+      summary: Create an on-demand checkpoint
+      description: |
+        Operator-requested snapshot of this run. Distinct from the
+        automatic checkpoint apply takes before executing.
+      operationId: createRunCheckpoint
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCheckpointRequest"
+      responses:
+        "201":
+          description: Checkpoint created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Checkpoint"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /plans:
+    get:
+      tags: [plans]
+      summary: List plans
+      operationId: listPlans
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+        - name: run_id
+          in: query
+          description: If set, only plans for this run.
+          schema:
+            $ref: "#/components/schemas/RunID"
+        - name: status
+          in: query
+          description: If set, only plans in this status.
+          schema:
+            $ref: "#/components/schemas/PlanStatus"
+      responses:
+        "200":
+          description: A page of plans, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlanList"
   "/plans/{id}":
     get:
       tags: [plans]
@@ -221,8 +331,9 @@ paths:
       tags: [plans]
       summary: Approve a plan
       description: |
-        Human gate on the plan lifecycle. After approve, the daemon applies.
-        There is no client apply operation; a UI or CLI must not invent one.
+        Human gate on the plan lifecycle. After approve, the plan is
+        eligible for POST /plans/{id}/apply. Approve does not itself
+        mutate the world.
       operationId: approvePlan
       parameters:
         - $ref: "#/components/parameters/PlanID"
@@ -251,6 +362,10 @@ paths:
     post:
       tags: [plans]
       summary: Request changes on a plan
+      description: |
+        Operator rejects this draft. The daemon produces a new draft
+        and auto-cross-examines it, same as the original. There is no
+        manual cross-exam re-run.
       operationId: requestPlanChanges
       parameters:
         - $ref: "#/components/parameters/PlanID"
@@ -262,7 +377,7 @@ paths:
               $ref: "#/components/schemas/RequestChangesRequest"
       responses:
         "200":
-          description: Changes requested
+          description: Changes requested; a new draft will be auto-cross-examined
           content:
             application/json:
               schema:
@@ -279,7 +394,7 @@ paths:
     post:
       tags: [plans]
       summary: Branch a plan
-      description: Create an alternative plan from this one. The original plan is unchanged.
+      description: Create an alternative plan from this one. The original plan is unchanged. The branch is auto-cross-examined as a new draft.
       operationId: branchPlan
       parameters:
         - $ref: "#/components/parameters/PlanID"
@@ -296,6 +411,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+  "/plans/{id}/apply":
+    post:
+      tags: [plans]
+      summary: Apply an approved plan
+      description: |
+        The world-changing step. The daemon rechecks preconditions,
+        verifies approval, takes a checkpoint, acquires leases, runs
+        secretscan as a non-skippable gate, executes the effects, signs
+        an audit record, and releases leases.
+
+        Secret-scan findings are also on the plan resource so the
+        operator can see them before calling apply. A non-empty findings
+        list fails this call (409). There is no skip.
+      operationId: applyPlan
+      parameters:
+        - $ref: "#/components/parameters/PlanID"
+      responses:
+        "200":
+          description: Plan applied. The body is the updated plan plus the audit entry this apply produced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyPlanResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
         "403":
@@ -341,6 +487,10 @@ paths:
       description: |
         Config changes are themselves signed audited actions. The daemon
         records and signs the patch; the client does not send a signature.
+
+        A tier change is an explicit operator action. Stage 1 has no
+        auto-promotion. Leases are not set here; they are minted during
+        apply. Read current leases at GET /agents/{id}/leases.
       operationId: patchAgent
       parameters:
         - $ref: "#/components/parameters/AgentID"
@@ -363,11 +513,33 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  "/agents/{id}/leases":
+    get:
+      tags: [agents]
+      summary: List current leases for an agent
+      description: |
+        Read-only view of leases currently held for this agent. Leases
+        are minted automatically during apply, not through this API.
+      operationId: listAgentLeases
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: Current leases
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaseList"
+        "404":
+          $ref: "#/components/responses/NotFound"
   /approvals:
     get:
       tags: [approvals]
       summary: List approvals
-      description: Operator inbox. Stage 1 items are plan approvals. Memory proposals are under /memory/proposals.
+      description: |
+        Operator inbox. kind is an open string (same rule as RunEvent.type).
+        Decide on the subject resource this item deep-links to, not here.
+        Memory proposals are under /memory/proposals.
       operationId: listApprovals
       parameters:
         - $ref: "#/components/parameters/Cursor"
@@ -554,13 +726,17 @@ paths:
     post:
       tags: [checkpoints]
       summary: Restore a checkpoint
-      description: Restore run state from this checkpoint. Consequential; the daemon records a signed audit event and follows plan-then-apply if the restore mutates the world.
+      description: |
+        Fork a new run from this checkpoint. The original run is not
+        mutated; its audit chain stays immutable. Matches the branch
+        model (two futures in parallel). Consequential work in the new
+        run still goes through plan-then-apply.
       operationId: restoreCheckpoint
       parameters:
         - $ref: "#/components/parameters/CheckpointID"
       responses:
-        "200":
-          description: Restore started; the returned run is the restored (or newly forked) run
+        "201":
+          description: New run forked from the checkpoint
           content:
             application/json:
               schema:
@@ -703,6 +879,18 @@ components:
       type: string
       minLength: 1
       description: Opaque checkpoint id. Not interchangeable with other id kinds.
+    LeaseID:
+      type: string
+      minLength: 1
+      description: Opaque lease id. Not interchangeable with other id kinds.
+    GrantID:
+      type: string
+      minLength: 1
+      description: Opaque grant id. Not interchangeable with other id kinds.
+    ScopeID:
+      type: string
+      minLength: 1
+      description: Opaque scope id. Not interchangeable with other id kinds.
     RunStatus:
       type: string
       description: Lifecycle of a run. Unknown values must be treated as non-terminal.
@@ -711,12 +899,13 @@ components:
         - running
         - waiting_approval
         - backgrounded
+        - stopped
         - completed
         - failed
         - cancelled
     PlanStatus:
       type: string
-      description: Plan lifecycle. Apply is a daemon transition after approve, not a client operation.
+      description: Plan lifecycle. Apply is POST /plans/{id}/apply after approve.
       enum:
         - draft
         - cross_exam
@@ -758,10 +947,18 @@ components:
         - agent
         - memory
         - checkpoint
+        - lease
+    PlanEffectType:
+      type: string
+      enum:
+        - create
+        - modify
+        - destroy
+        - memory_proposal
     Run:
       type: object
       additionalProperties: false
-      required: [id, agent_id, status, goal, created_at, updated_at]
+      required: [id, agent_id, status, created_at, updated_at]
       properties:
         id:
           $ref: "#/components/schemas/RunID"
@@ -771,13 +968,15 @@ components:
           $ref: "#/components/schemas/PlanID"
         status:
           $ref: "#/components/schemas/RunStatus"
-        goal:
+        prompt:
           type: string
-          minLength: 1
-        issue_ref:
+          description: Operator prompt that started the run, when one was given.
+        tracker_ref:
           type: string
           minLength: 1
           description: Optional tracker issue id (for example a Linear issue id). This API does not proxy the tracker.
+        workspace_source:
+          $ref: "#/components/schemas/WorkspaceSource"
         autonomy_tier:
           type: string
           minLength: 1
@@ -807,23 +1006,35 @@ components:
           type: string
           minLength: 1
           description: Omitted when there is no next page.
+    WorkspaceSource:
+      type: object
+      additionalProperties: false
+      required: [repo]
+      properties:
+        repo:
+          type: string
+          minLength: 1
+          description: Repository URL or local path to check out for the run.
+        ref:
+          type: string
+          minLength: 1
+          description: Git ref (branch, tag, or SHA). The daemon default applies when omitted.
     CreateRunRequest:
       type: object
       additionalProperties: false
-      required: [agent_id, goal]
+      required: [agent_id]
       properties:
         agent_id:
           $ref: "#/components/schemas/AgentID"
-        goal:
-          type: string
-          minLength: 1
-        issue_ref:
+        tracker_ref:
           type: string
           minLength: 1
           description: Optional tracker issue id to attach to the run.
-        background:
-          type: boolean
-          description: If true, start the run backgrounded.
+        prompt:
+          type: string
+          description: Optional operator prompt. Not required to create the run.
+        workspace_source:
+          $ref: "#/components/schemas/WorkspaceSource"
     SteerRequest:
       type: object
       additionalProperties: false
@@ -846,7 +1057,11 @@ components:
         type:
           type: string
           minLength: 1
-          description: Event kind. Clients must tolerate unknown types; the log grows with the kernel.
+          description: |
+            Event kind. Open string; new types will be added and clients
+            must tolerate unknowns. Known values: log, tool_call,
+            tool_result, plan_drafted, cross_exam_verdict,
+            checkpoint_created, effect_applied, status_changed, error.
         created_at:
           type: string
           format: date-time
@@ -868,7 +1083,7 @@ components:
     Plan:
       type: object
       additionalProperties: false
-      required: [id, run_id, status, summary, created_at, updated_at]
+      required: [id, run_id, status, summary, effects, created_at, updated_at]
       properties:
         id:
           $ref: "#/components/schemas/PlanID"
@@ -882,13 +1097,22 @@ components:
         summary:
           type: string
           minLength: 1
-        steps:
+          description: Human-readable rationale for the plan. Not a substitute for effects.
+        effects:
           type: array
           items:
-            $ref: "#/components/schemas/PlanStep"
+            $ref: "#/components/schemas/PlanEffect"
+          description: Structured diffs the operator reviews before apply.
         cross_exam:
-          type: string
-          description: Structured challenge of the draft, when cross-exam has run.
+          $ref: "#/components/schemas/CrossExam"
+        secret_scan_findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecretScanFinding"
+          description: |
+            Secretscan results. Omitted until the gate has run. Empty
+            means it ran and found nothing. Non-empty findings block
+            apply; the payload never includes the secret itself.
         review_comment:
           type: string
           description: Latest operator comment from approve or request-changes.
@@ -900,20 +1124,86 @@ components:
           type: string
           format: date-time
           description: RFC 3339 timestamp in UTC.
-    PlanStep:
+    PlanList:
       type: object
       additionalProperties: false
-      required: [title]
+      required: [items]
       properties:
-        title:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Plan"
+        next_cursor:
           type: string
           minLength: 1
-        detail:
-          type: string
-        kind:
+    PlanEffect:
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/PlanEffectType"
+        path:
           type: string
           minLength: 1
-          description: Step kind (open string so the kernel can add kinds without a spec bump).
+          description: Workspace path this effect touches. For memory_proposal, a memory key.
+        diff:
+          type: string
+          description: Unified diff or proposed content. Never a secret value.
+        precondition_hash:
+          type: string
+          minLength: 1
+          description: Hash of the pre-apply state this effect assumes. Apply rechecks it.
+        cost_estimate:
+          type: string
+          minLength: 1
+          description: Harness-supplied cost hint (tokens, time, or other). Not a billing field.
+    CrossExam:
+      type: object
+      additionalProperties: false
+      required: [verdict, reviewer_model, reasoning, at]
+      properties:
+        verdict:
+          type: string
+          minLength: 1
+          description: Outcome of the automatic cross-exam. Open string; clients must tolerate unknown verdicts.
+        reviewer_model:
+          type: string
+          minLength: 1
+          description: Model that performed the cross-exam.
+        reasoning:
+          type: string
+          minLength: 1
+          description: Why the reviewer reached this verdict.
+        at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC when cross-exam completed.
+    SecretScanFinding:
+      type: object
+      additionalProperties: false
+      required: [path, rule]
+      properties:
+        path:
+          type: string
+          minLength: 1
+        rule:
+          type: string
+          minLength: 1
+          description: Detector name. The matched secret is not included.
+        line:
+          type: integer
+          minimum: 1
+    ApplyPlanResponse:
+      type: object
+      additionalProperties: false
+      required: [plan, audit_id]
+      properties:
+        plan:
+          $ref: "#/components/schemas/Plan"
+        audit_id:
+          $ref: "#/components/schemas/AuditID"
+          description: Audit entry produced by this apply.
     ApproveRequest:
       type: object
       additionalProperties: false
@@ -953,8 +1243,19 @@ components:
           description: Harness driver name. Stage 1 is claudecode.
         status:
           $ref: "#/components/schemas/AgentStatus"
-        config:
-          $ref: "#/components/schemas/AgentConfig"
+        model:
+          type: string
+          minLength: 1
+        tools:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          description: Tool names this agent may be offered. Policy still denies by default; this is not a grant.
+        autonomy_tier:
+          type: string
+          minLength: 1
+          description: Default autonomy tier for new runs of this agent. Unknown tiers deny by default.
         created_at:
           type: string
           format: date-time
@@ -963,15 +1264,6 @@ components:
           type: string
           format: date-time
           description: RFC 3339 timestamp in UTC.
-    AgentConfig:
-      type: object
-      additionalProperties: false
-      properties:
-        model:
-          type: string
-          minLength: 1
-        instructions:
-          type: string
     AgentPatch:
       type: object
       additionalProperties: false
@@ -979,10 +1271,18 @@ components:
         name:
           type: string
           minLength: 1
-        status:
-          $ref: "#/components/schemas/AgentStatus"
-        config:
-          $ref: "#/components/schemas/AgentConfig"
+        model:
+          type: string
+          minLength: 1
+        tools:
+          type: array
+          items:
+            type: string
+            minLength: 1
+        autonomy_tier:
+          type: string
+          minLength: 1
+          description: Explicit operator tier change. Stage 1 does not auto-promote.
     AgentList:
       type: object
       additionalProperties: false
@@ -995,17 +1295,50 @@ components:
         next_cursor:
           type: string
           minLength: 1
+    Lease:
+      type: object
+      additionalProperties: false
+      required: [id, grant_id, scope_id, agent_id, expires_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/LeaseID"
+        grant_id:
+          $ref: "#/components/schemas/GrantID"
+        scope_id:
+          $ref: "#/components/schemas/ScopeID"
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        expires_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC. A lease cannot outlive this window.
+        minted_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC.
+    LeaseList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Lease"
     Approval:
       type: object
       additionalProperties: false
-      required: [id, kind, status, plan_id, run_id, created_at]
+      required: [id, kind, status, created_at]
       properties:
         id:
           $ref: "#/components/schemas/ApprovalID"
         kind:
           type: string
-          enum: [plan]
-          description: Stage 1 approvals are plan approvals.
+          minLength: 1
+          description: |
+            Subject kind. Open string (same rule as RunEvent.type).
+            Clients must tolerate unknown kinds. Deep-link via plan_id
+            and run_id to the resource that accepts the decision.
         status:
           $ref: "#/components/schemas/ApprovalStatus"
         plan_id:
@@ -1198,3 +1531,11 @@ components:
         next_cursor:
           type: string
           minLength: 1
+    CreateCheckpointRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+          minLength: 1
+          description: Optional operator label for this snapshot.
