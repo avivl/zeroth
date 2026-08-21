@@ -98,7 +98,7 @@ go vet ./...
 go build ./...
 ```
 
-`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs lint, `go test -race ./...`, conformance, secretscan, the web tests and build, and `go build ./...`. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`). GitHub Actions CI lives in `.github/workflows/ci.yml`. Path filtering skips Go on `web/`-only PRs and web on `internal/`-only PRs. `pkg/api/` changes run everything.
+`task ci` is a local stand-in if [Task](https://taskfile.dev) is installed. It runs lint, `task generate:check` (fails if `pkg/api/gen` is stale relative to `openapi.yaml`), `go test -race ./...`, conformance, secretscan, the web tests and build, and `go build ./...`. `task --list` shows the other targets (`up`, `lint`, `conformance`, `generate`, `web`, `secretscan`). GitHub Actions CI lives in `.github/workflows/ci.yml`. Path filtering skips Go on `web/`-only PRs and web on `internal/`-only PRs. `pkg/api/` changes run everything. The generate-staleness job always runs.
 
 - Prefer table tests. The port `conformance_test.go` files are the pattern: a slice of cases, `t.Run`, `t.Parallel()`.
 - Kernel packages (`policy`, and the plan/session/lease invariants once they have behavior) get property tests (`testing/quick` in the standard library, or an equivalent). Properties that must hold: deny by default, leases cannot outlive their window, named ID types are not interchangeable.

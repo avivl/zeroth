@@ -6,9 +6,28 @@
 package gen
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for AgentHarness.
+const (
+	Claudecode AgentHarness = "claudecode"
+)
+
+// Valid indicates whether the value is a known member of the AgentHarness enum.
+func (e AgentHarness) Valid() bool {
+	switch e {
+	case Claudecode:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for HealthStatus.
 const (
@@ -25,6 +44,248 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for MemoryProposalStatus.
+const (
+	Accepted MemoryProposalStatus = "accepted"
+	Pending  MemoryProposalStatus = "pending"
+	Rejected MemoryProposalStatus = "rejected"
+)
+
+// Valid indicates whether the value is a known member of the MemoryProposalStatus enum.
+func (e MemoryProposalStatus) Valid() bool {
+	switch e {
+	case Accepted:
+		return true
+	case Pending:
+		return true
+	case Rejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PlanStatus.
+const (
+	Applied          PlanStatus = "applied"
+	Approved         PlanStatus = "approved"
+	ChangesRequested PlanStatus = "changes_requested"
+	CrossExam        PlanStatus = "cross_exam"
+	Draft            PlanStatus = "draft"
+	PendingApproval  PlanStatus = "pending_approval"
+)
+
+// Valid indicates whether the value is a known member of the PlanStatus enum.
+func (e PlanStatus) Valid() bool {
+	switch e {
+	case Applied:
+		return true
+	case Approved:
+		return true
+	case ChangesRequested:
+		return true
+	case CrossExam:
+		return true
+	case Draft:
+		return true
+	case PendingApproval:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RunStatus.
+const (
+	Backgrounded RunStatus = "backgrounded"
+	Completed    RunStatus = "completed"
+	Failed       RunStatus = "failed"
+	Queued       RunStatus = "queued"
+	Running      RunStatus = "running"
+	Waiting      RunStatus = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the RunStatus enum.
+func (e RunStatus) Valid() bool {
+	switch e {
+	case Backgrounded:
+		return true
+	case Completed:
+		return true
+	case Failed:
+		return true
+	case Queued:
+		return true
+	case Running:
+		return true
+	case Waiting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Agent defines model for Agent.
+type Agent struct {
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt *Timestamp `json:"created_at,omitempty"`
+
+	// Harness Stage 1 has one harness implementation.
+	Harness AgentHarness `json:"harness"`
+
+	// Id Opaque agent identifier. Not interchangeable with other ID kinds.
+	Id   AgentID `json:"id"`
+	Name string  `json:"name"`
+
+	// UpdatedAt RFC 3339 timestamp
+	UpdatedAt *Timestamp `json:"updated_at,omitempty"`
+}
+
+// AgentHarness Stage 1 has one harness implementation.
+type AgentHarness string
+
+// AgentID Opaque agent identifier. Not interchangeable with other ID kinds.
+type AgentID = string
+
+// AgentList defines model for AgentList.
+type AgentList struct {
+	Items      []Agent `json:"items"`
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// Approval defines model for Approval.
+type Approval struct {
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque approval identifier. Not interchangeable with other ID kinds.
+	Id ApprovalID `json:"id"`
+
+	// Kind Subject kind as an opaque string (for example plan or
+	// memory_proposal). A closed enum is not locked.
+	Kind string `json:"kind"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId *RunID `json:"run_id,omitempty"`
+
+	// SubjectId Identifier of the subject resource. Kind-specific.
+	SubjectId string  `json:"subject_id"`
+	Summary   *string `json:"summary,omitempty"`
+}
+
+// ApprovalID Opaque approval identifier. Not interchangeable with other ID kinds.
+type ApprovalID = string
+
+// ApprovalList defines model for ApprovalList.
+type ApprovalList struct {
+	Items      []Approval `json:"items"`
+	NextCursor *string    `json:"next_cursor,omitempty"`
+}
+
+// ApprovePlanRequest defines model for ApprovePlanRequest.
+type ApprovePlanRequest struct {
+	Comment *string `json:"comment,omitempty"`
+}
+
+// AuditID Opaque audit record identifier. Not interchangeable with other ID kinds.
+type AuditID = string
+
+// AuditRecord defines model for AuditRecord.
+type AuditRecord struct {
+	Action string `json:"action"`
+
+	// Id Opaque audit record identifier. Not interchangeable with other ID kinds.
+	Id AuditID `json:"id"`
+
+	// Pubkey x-only secp256k1 public key, hex (ADR-Z-0007). Not a secret.
+	Pubkey *string `json:"pubkey,omitempty"`
+
+	// RecordedAt RFC 3339 timestamp
+	RecordedAt Timestamp `json:"recorded_at"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId *RunID `json:"run_id,omitempty"`
+
+	// Signature BIP-340 Schnorr signature, hex. Not a credential.
+	Signature *string `json:"signature,omitempty"`
+}
+
+// AuditRecordList defines model for AuditRecordList.
+type AuditRecordList struct {
+	Items      []AuditRecord `json:"items"`
+	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// AuditVerifyResult defines model for AuditVerifyResult.
+type AuditVerifyResult struct {
+	Reason *string `json:"reason,omitempty"`
+	Valid  bool    `json:"valid"`
+}
+
+// BranchPlanRequest defines model for BranchPlanRequest.
+type BranchPlanRequest struct {
+	Comment *string `json:"comment,omitempty"`
+}
+
+// Checkpoint defines model for Checkpoint.
+type Checkpoint struct {
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque checkpoint identifier. Not interchangeable with other ID kinds.
+	Id CheckpointID `json:"id"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId   RunID   `json:"run_id"`
+	Summary *string `json:"summary,omitempty"`
+}
+
+// CheckpointID Opaque checkpoint identifier. Not interchangeable with other ID kinds.
+type CheckpointID = string
+
+// CheckpointList defines model for CheckpointList.
+type CheckpointList struct {
+	Items      []Checkpoint `json:"items"`
+	NextCursor *string      `json:"next_cursor,omitempty"`
+}
+
+// CheckpointRestore defines model for CheckpointRestore.
+type CheckpointRestore struct {
+	// CheckpointId Opaque checkpoint identifier. Not interchangeable with other ID kinds.
+	CheckpointId CheckpointID `json:"checkpoint_id"`
+
+	// RunId Run that results from restore, if restore mints or selects one.
+	// Omitted until restore semantics are locked.
+	RunId *RunID `json:"run_id,omitempty"`
+}
+
+// CreateMemoryRequest defines model for CreateMemoryRequest.
+type CreateMemoryRequest struct {
+	// AgentId Opaque agent identifier. Not interchangeable with other ID kinds.
+	AgentId *AgentID `json:"agent_id,omitempty"`
+	Body    string   `json:"body"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId *RunID `json:"run_id,omitempty"`
+}
+
+// CreateRunRequest defines model for CreateRunRequest.
+type CreateRunRequest struct {
+	// AgentId Opaque agent identifier. Not interchangeable with other ID kinds.
+	AgentId AgentID `json:"agent_id"`
+
+	// Prompt Operator prompt that starts the run. Whether a tracker issue is
+	// also required (and under which field) is not locked.
+	Prompt *string `json:"prompt,omitempty"`
+}
+
+// Error defines model for Error.
+type Error struct {
+	// Error Stable machine-readable code
+	Error   string  `json:"error"`
+	Message *string `json:"message,omitempty"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Status HealthStatus `json:"status"`
@@ -33,11 +294,355 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// MemoryEntry defines model for MemoryEntry.
+type MemoryEntry struct {
+	// AgentId Opaque agent identifier. Not interchangeable with other ID kinds.
+	AgentId *AgentID `json:"agent_id,omitempty"`
+	Body    string   `json:"body"`
+
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque memory entry identifier. Not interchangeable with other ID kinds.
+	Id MemoryID `json:"id"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId *RunID `json:"run_id,omitempty"`
+}
+
+// MemoryEntryList defines model for MemoryEntryList.
+type MemoryEntryList struct {
+	Items      []MemoryEntry `json:"items"`
+	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// MemoryID Opaque memory entry identifier. Not interchangeable with other ID kinds.
+type MemoryID = string
+
+// MemoryProposal defines model for MemoryProposal.
+type MemoryProposal struct {
+	// AgentId Opaque agent identifier. Not interchangeable with other ID kinds.
+	AgentId *AgentID `json:"agent_id,omitempty"`
+	Body    string   `json:"body"`
+
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque memory proposal identifier. Not interchangeable with other ID kinds.
+	Id MemoryProposalID `json:"id"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId  *RunID               `json:"run_id,omitempty"`
+	Status MemoryProposalStatus `json:"status"`
+}
+
+// MemoryProposalID Opaque memory proposal identifier. Not interchangeable with other ID kinds.
+type MemoryProposalID = string
+
+// MemoryProposalList defines model for MemoryProposalList.
+type MemoryProposalList struct {
+	Items      []MemoryProposal `json:"items"`
+	NextCursor *string          `json:"next_cursor,omitempty"`
+}
+
+// MemoryProposalStatus defines model for MemoryProposalStatus.
+type MemoryProposalStatus string
+
+// PatchAgentRequest Config fields beyond display name are not locked. Do not put
+// credentials here. Scopes and leases are policy, not agent config.
+type PatchAgentRequest struct {
+	Name *string `json:"name,omitempty"`
+}
+
+// Plan defines model for Plan.
+type Plan struct {
+	// Body Human-readable plan text. Structured diffs, file lists, and
+	// command lists are not in this draft.
+	Body *string `json:"body,omitempty"`
+
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt Timestamp `json:"created_at"`
+
+	// Id Opaque plan identifier. Not interchangeable with other ID kinds.
+	Id PlanID `json:"id"`
+
+	// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+	RunId RunID `json:"run_id"`
+
+	// Status Mirrors the plan lifecycle names (draft, cross-exam, approve, apply)
+	// plus the request-changes path. Applied is listed because apply exists
+	// in the kernel even though this API has no apply operation.
+	Status PlanStatus `json:"status"`
+	Title  *string    `json:"title,omitempty"`
+
+	// UpdatedAt RFC 3339 timestamp
+	UpdatedAt *Timestamp `json:"updated_at,omitempty"`
+}
+
+// PlanID Opaque plan identifier. Not interchangeable with other ID kinds.
+type PlanID = string
+
+// PlanStatus Mirrors the plan lifecycle names (draft, cross-exam, approve, apply)
+// plus the request-changes path. Applied is listed because apply exists
+// in the kernel even though this API has no apply operation.
+type PlanStatus string
+
+// RequestPlanChangesRequest defines model for RequestPlanChangesRequest.
+type RequestPlanChangesRequest struct {
+	Comment string `json:"comment"`
+}
+
+// Run defines model for Run.
+type Run struct {
+	// AgentId Opaque agent identifier. Not interchangeable with other ID kinds.
+	AgentId AgentID `json:"agent_id"`
+
+	// CreatedAt RFC 3339 timestamp
+	CreatedAt Timestamp `json:"created_at"`
+
+	// CurrentPlanId Opaque plan identifier. Not interchangeable with other ID kinds.
+	CurrentPlanId *PlanID `json:"current_plan_id,omitempty"`
+
+	// Id Opaque run identifier. Not interchangeable with other ID kinds.
+	Id RunID `json:"id"`
+
+	// Status Draft enum so list and detail views can render a status. Closed
+	// values are not locked against the session state machine.
+	Status RunStatus `json:"status"`
+
+	// UpdatedAt RFC 3339 timestamp
+	UpdatedAt *Timestamp `json:"updated_at,omitempty"`
+}
+
+// RunEvent defines model for RunEvent.
+type RunEvent struct {
+	// RecordedAt RFC 3339 timestamp
+	RecordedAt Timestamp `json:"recorded_at"`
+
+	// Seq Monotonic per-run sequence used for replay order
+	Seq     int     `json:"seq"`
+	Summary *string `json:"summary,omitempty"`
+
+	// Type Event kind. A closed enum is not locked; the live view should not
+	// assume these strings beyond opaque display until the session
+	// machine lands.
+	Type string `json:"type"`
+}
+
+// RunID Opaque run identifier. Not interchangeable with other ID kinds.
+type RunID = string
+
+// RunList defines model for RunList.
+type RunList struct {
+	Items      []Run   `json:"items"`
+	NextCursor *string `json:"next_cursor,omitempty"`
+}
+
+// RunStatus Draft enum so list and detail views can render a status. Closed
+// values are not locked against the session state machine.
+type RunStatus string
+
+// SteerRunRequest defines model for SteerRunRequest.
+type SteerRunRequest struct {
+	Message string `json:"message"`
+}
+
+// Timestamp RFC 3339 timestamp
+type Timestamp = time.Time
+
+// AgentId Opaque agent identifier. Not interchangeable with other ID kinds.
+type AgentId = AgentID
+
+// AuditId Opaque audit record identifier. Not interchangeable with other ID kinds.
+type AuditId = AuditID
+
+// CheckpointId Opaque checkpoint identifier. Not interchangeable with other ID kinds.
+type CheckpointId = CheckpointID
+
+// Cursor defines model for Cursor.
+type Cursor = string
+
+// Limit defines model for Limit.
+type Limit = int
+
+// MemoryProposalId Opaque memory proposal identifier. Not interchangeable with other ID kinds.
+type MemoryProposalId = MemoryProposalID
+
+// PlanId Opaque plan identifier. Not interchangeable with other ID kinds.
+type PlanId = PlanID
+
+// RunId Opaque run identifier. Not interchangeable with other ID kinds.
+type RunId = RunID
+
+// BadRequest defines model for BadRequest.
+type BadRequest = Error
+
+// Conflict defines model for Conflict.
+type Conflict = Error
+
+// Denied defines model for Denied.
+type Denied = Error
+
+// NotFound defines model for NotFound.
+type NotFound = Error
+
+// ListAgentsParams defines parameters for ListAgents.
+type ListAgentsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListApprovalsParams defines parameters for ListApprovals.
+type ListApprovalsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListAuditParams defines parameters for ListAudit.
+type ListAuditParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListCheckpointsParams defines parameters for ListCheckpoints.
+type ListCheckpointsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListMemoryParams defines parameters for ListMemory.
+type ListMemoryParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListMemoryProposalsParams defines parameters for ListMemoryProposals.
+type ListMemoryProposalsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListRunsParams defines parameters for ListRuns.
+type ListRunsParams struct {
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Opaque page token from a previous next_cursor.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetRunEventsParams defines parameters for GetRunEvents.
+type GetRunEventsParams struct {
+	// Last How many recorded events to replay before the live tail.
+	Last *int `form:"last,omitempty" json:"last,omitempty"`
+}
+
+// PatchAgentJSONRequestBody defines body for PatchAgent for application/json ContentType.
+type PatchAgentJSONRequestBody = PatchAgentRequest
+
+// CreateMemoryJSONRequestBody defines body for CreateMemory for application/json ContentType.
+type CreateMemoryJSONRequestBody = CreateMemoryRequest
+
+// ApprovePlanJSONRequestBody defines body for ApprovePlan for application/json ContentType.
+type ApprovePlanJSONRequestBody = ApprovePlanRequest
+
+// BranchPlanJSONRequestBody defines body for BranchPlan for application/json ContentType.
+type BranchPlanJSONRequestBody = BranchPlanRequest
+
+// RequestPlanChangesJSONRequestBody defines body for RequestPlanChanges for application/json ContentType.
+type RequestPlanChangesJSONRequestBody = RequestPlanChangesRequest
+
+// CreateRunJSONRequestBody defines body for CreateRun for application/json ContentType.
+type CreateRunJSONRequestBody = CreateRunRequest
+
+// SteerRunJSONRequestBody defines body for SteerRun for application/json ContentType.
+type SteerRunJSONRequestBody = SteerRunRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAgents List agents
+	// (GET /agents)
+	ListAgents(w http.ResponseWriter, r *http.Request, params ListAgentsParams)
+	// GetAgent Get an agent
+	// (GET /agents/{id})
+	GetAgent(w http.ResponseWriter, r *http.Request, id AgentId)
+	// PatchAgent Patch agent config
+	// (PATCH /agents/{id})
+	PatchAgent(w http.ResponseWriter, r *http.Request, id AgentId)
+	// ListApprovals List pending approvals
+	// (GET /approvals)
+	ListApprovals(w http.ResponseWriter, r *http.Request, params ListApprovalsParams)
+	// ListAudit List audit records
+	// (GET /audit)
+	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
+	// VerifyAudit Verify an audit record
+	// (POST /audit/{id}/verify)
+	VerifyAudit(w http.ResponseWriter, r *http.Request, id AuditId)
+	// ListCheckpoints List checkpoints
+	// (GET /checkpoints)
+	ListCheckpoints(w http.ResponseWriter, r *http.Request, params ListCheckpointsParams)
+	// RestoreCheckpoint Restore a checkpoint
+	// (POST /checkpoints/{id}/restore)
+	RestoreCheckpoint(w http.ResponseWriter, r *http.Request, id CheckpointId)
 	// Health Liveness
 	// (GET /health)
 	Health(w http.ResponseWriter, r *http.Request)
+	// ListMemory List memory entries
+	// (GET /memory)
+	ListMemory(w http.ResponseWriter, r *http.Request, params ListMemoryParams)
+	// CreateMemory Write a memory entry
+	// (POST /memory)
+	CreateMemory(w http.ResponseWriter, r *http.Request)
+	// ListMemoryProposals List memory proposals
+	// (GET /memory/proposals)
+	ListMemoryProposals(w http.ResponseWriter, r *http.Request, params ListMemoryProposalsParams)
+	// AcceptMemoryProposal Accept a memory proposal
+	// (POST /memory/proposals/{id}/accept)
+	AcceptMemoryProposal(w http.ResponseWriter, r *http.Request, id MemoryProposalId)
+	// RejectMemoryProposal Reject a memory proposal
+	// (POST /memory/proposals/{id}/reject)
+	RejectMemoryProposal(w http.ResponseWriter, r *http.Request, id MemoryProposalId)
+	// GetPlan Get a plan
+	// (GET /plans/{id})
+	GetPlan(w http.ResponseWriter, r *http.Request, id PlanId)
+	// ApprovePlan Approve a plan
+	// (POST /plans/{id}/approve)
+	ApprovePlan(w http.ResponseWriter, r *http.Request, id PlanId)
+	// BranchPlan Branch a plan
+	// (POST /plans/{id}/branch)
+	BranchPlan(w http.ResponseWriter, r *http.Request, id PlanId)
+	// RequestPlanChanges Request changes on a plan
+	// (POST /plans/{id}/request-changes)
+	RequestPlanChanges(w http.ResponseWriter, r *http.Request, id PlanId)
+	// ListRuns List runs
+	// (GET /runs)
+	ListRuns(w http.ResponseWriter, r *http.Request, params ListRunsParams)
+	// CreateRun Start a run
+	// (POST /runs)
+	CreateRun(w http.ResponseWriter, r *http.Request)
+	// GetRun Get a run
+	// (GET /runs/{id})
+	GetRun(w http.ResponseWriter, r *http.Request, id RunId)
+	// BackgroundRun Background a run
+	// (POST /runs/{id}/background)
+	BackgroundRun(w http.ResponseWriter, r *http.Request, id RunId)
+	// GetRunEvents Run event stream
+	// (GET /runs/{id}/events)
+	GetRunEvents(w http.ResponseWriter, r *http.Request, id RunId, params GetRunEventsParams)
+	// SteerRun Steer a run
+	// (POST /runs/{id}/steer)
+	SteerRun(w http.ResponseWriter, r *http.Request, id RunId)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -49,11 +654,741 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// ListAgents operation middleware
+func (siw *ServerInterfaceWrapper) ListAgents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAgentsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgent operation middleware
+func (siw *ServerInterfaceWrapper) GetAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AgentId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchAgent operation middleware
+func (siw *ServerInterfaceWrapper) PatchAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AgentId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListApprovals operation middleware
+func (siw *ServerInterfaceWrapper) ListApprovals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListApprovalsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListApprovals(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAudit operation middleware
+func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAudit(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyAudit operation middleware
+func (siw *ServerInterfaceWrapper) VerifyAudit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AuditId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyAudit(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCheckpoints operation middleware
+func (siw *ServerInterfaceWrapper) ListCheckpoints(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCheckpointsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCheckpoints(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreCheckpoint operation middleware
+func (siw *ServerInterfaceWrapper) RestoreCheckpoint(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id CheckpointId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreCheckpoint(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Health operation middleware
 func (siw *ServerInterfaceWrapper) Health(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Health(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMemory operation middleware
+func (siw *ServerInterfaceWrapper) ListMemory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMemoryParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMemory(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateMemory operation middleware
+func (siw *ServerInterfaceWrapper) CreateMemory(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateMemory(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMemoryProposals operation middleware
+func (siw *ServerInterfaceWrapper) ListMemoryProposals(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMemoryProposalsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMemoryProposals(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptMemoryProposal operation middleware
+func (siw *ServerInterfaceWrapper) AcceptMemoryProposal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MemoryProposalId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptMemoryProposal(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RejectMemoryProposal operation middleware
+func (siw *ServerInterfaceWrapper) RejectMemoryProposal(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id MemoryProposalId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RejectMemoryProposal(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPlan operation middleware
+func (siw *ServerInterfaceWrapper) GetPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApprovePlan operation middleware
+func (siw *ServerInterfaceWrapper) ApprovePlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApprovePlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BranchPlan operation middleware
+func (siw *ServerInterfaceWrapper) BranchPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BranchPlan(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestPlanChanges operation middleware
+func (siw *ServerInterfaceWrapper) RequestPlanChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id PlanId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestPlanChanges(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListRunsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRuns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateRun operation middleware
+func (siw *ServerInterfaceWrapper) CreateRun(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateRun(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRun operation middleware
+func (siw *ServerInterfaceWrapper) GetRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BackgroundRun operation middleware
+func (siw *ServerInterfaceWrapper) BackgroundRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BackgroundRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRunEvents operation middleware
+func (siw *ServerInterfaceWrapper) GetRunEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRunEventsParams
+
+	// ------------- Optional query parameter "last" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "last", r.URL.Query(), &params.Last, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "last"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "last", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRunEvents(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SteerRun operation middleware
+func (siw *ServerInterfaceWrapper) SteerRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SteerRun(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -184,6 +1519,29 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	}
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/health", wrapper.Health)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/runs", wrapper.ListRuns)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs", wrapper.CreateRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/runs/{id}", wrapper.GetRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/runs/{id}/events", wrapper.GetRunEvents)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/steer", wrapper.SteerRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/background", wrapper.BackgroundRun)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/plans/{id}", wrapper.GetPlan)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/approve", wrapper.ApprovePlan)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/request-changes", wrapper.RequestPlanChanges)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/plans/{id}/branch", wrapper.BranchPlan)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents", wrapper.ListAgents)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{id}", wrapper.GetAgent)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/agents/{id}", wrapper.PatchAgent)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/approvals", wrapper.ListApprovals)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/memory", wrapper.ListMemory)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/memory", wrapper.CreateMemory)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/memory/proposals", wrapper.ListMemoryProposals)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/memory/proposals/{id}/accept", wrapper.AcceptMemoryProposal)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/memory/proposals/{id}/reject", wrapper.RejectMemoryProposal)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/audit", wrapper.ListAudit)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/audit/{id}/verify", wrapper.VerifyAudit)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/checkpoints", wrapper.ListCheckpoints)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/checkpoints/{id}/restore", wrapper.RestoreCheckpoint)
 
 	return m
 }

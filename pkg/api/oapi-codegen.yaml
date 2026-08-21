@@ -1,7 +1,12 @@
-# Config for `task generate`. Output is stdlib-only (net/http) so the
-# generated package does not add module dependencies.
+# Config for `task generate`. Models and routing are net/http. Path and
+# query binding in the generated server import github.com/oapi-codegen/runtime
+# (pinned in go.mod). Do not add other module dependencies from this file.
 package: gen
 output: pkg/api/gen/go/server.go
 generate:
   models: true
   std-http-server: true
+output-options:
+  # Keep schemas that the HTTP operations do not reference directly
+  # (WebSocket RunEvent frames, ID aliases used only as $ref targets).
+  skip-prune: true

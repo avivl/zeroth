@@ -6,14 +6,42 @@ info:
     Local control-plane API for Zeroth. Stage 1 is single-player and binds
     locally. This spec is the canonical contract; Go stubs and the TypeScript
     client are generated from it, not hand-written.
+
+    Product version is the git commit SHA (plan §6), not this info.version
+    field. info.version stays a document label so the OpenAPI document remains
+    valid.
+
+    HTTP "run" is the operator-facing name for a kernel session
+    (internal/session). Distinct kernel ID types stay distinct in Go; over
+    HTTP they are opaque strings and must not be mixed across resources.
+
+    This document is a draft for Linear 42-17 (human-owned). Field-level
+    shapes that the mockup does not pin down are omitted rather than invented.
+    See pkg/api/README.md for the view mapping and the gaps that need a human.
   license:
     name: MIT
     identifier: MIT
   contact:
     url: https://github.com/avivl/zeroth
+servers:
+  - url: http://127.0.0.1
+    description: |
+      Local zerothd (stage 1). The bind host is loopback. The port is not
+      locked in this draft.
+tags:
+  - name: health
+  - name: runs
+  - name: plans
+  - name: agents
+  - name: approvals
+  - name: memory
+  - name: audit
+  - name: checkpoints
+security: []
 paths:
   /health:
     get:
+      tags: [health]
       summary: Liveness
       operationId: health
       responses:
@@ -23,12 +51,1043 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Health"
+
+  /runs:
+    get:
+      tags: [runs]
+      summary: List runs
+      operationId: listRuns
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of runs, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+    post:
+      tags: [runs]
+      summary: Start a run
+      operationId: createRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRunRequest"
+      responses:
+        "201":
+          description: Run created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /runs/{id}:
+    get:
+      tags: [runs]
+      summary: Get a run
+      operationId: getRun
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /runs/{id}/events:
+    get:
+      tags: [runs]
+      summary: Run event stream
+      operationId: getRunEvents
+      description: |
+        Upgrade this GET to a WebSocket. The server replays the last `last`
+        recorded events, then tails live events until the socket closes.
+
+        Each text frame is a JSON RunEvent. Generated HTTP clients will emit
+        a GET helper; the web UI still needs a WebSocket caller for this path.
+        That mismatch is called out in pkg/api/README.md rather than papered
+        over with a second REST snapshot endpoint.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - name: last
+          in: query
+          description: How many recorded events to replay before the live tail.
+          schema:
+            type: integer
+            minimum: 0
+            default: 100
+      responses:
+        "101":
+          description: Switching Protocols. Each WebSocket text frame is a JSON RunEvent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunEvent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /runs/{id}/steer:
+    post:
+      tags: [runs]
+      summary: Steer a run
+      operationId: steerRun
+      description: |
+        Operator input into a live run (steer). This is not apply, and it
+        does not bypass the plan lifecycle for consequential mutation.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SteerRunRequest"
+      responses:
+        "200":
+          description: Run after accepting the steer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /runs/{id}/background:
+    post:
+      tags: [runs]
+      summary: Background a run
+      operationId: backgroundRun
+      description: |
+        Continue the run without a live foreground operator. There is no
+        matching foreground endpoint on the listed stage-1 surface.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run is backgrounded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /plans/{id}:
+    get:
+      tags: [plans]
+      summary: Get a plan
+      operationId: getPlan
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      responses:
+        "200":
+          description: Plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /plans/{id}/approve:
+    post:
+      tags: [plans]
+      summary: Approve a plan
+      operationId: approvePlan
+      description: |
+        Human gate on a plan. Approve is not apply. There is no
+        POST /plans/{id}/apply on the listed stage-1 surface; that gap is
+        called out in pkg/api/README.md.
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovePlanRequest"
+      responses:
+        "200":
+          description: Plan after approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /plans/{id}/request-changes:
+    post:
+      tags: [plans]
+      summary: Request changes on a plan
+      operationId: requestPlanChanges
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestPlanChangesRequest"
+      responses:
+        "200":
+          description: Plan after the change request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /plans/{id}/branch:
+    post:
+      tags: [plans]
+      summary: Branch a plan
+      operationId: branchPlan
+      description: |
+        Fork a new plan from this one. The original plan is not applied.
+        Exact branch semantics (what is copied, whether the run switches)
+        are not locked.
+      parameters:
+        - $ref: "#/components/parameters/PlanId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchPlanRequest"
+      responses:
+        "201":
+          description: Branched plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Plan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /agents:
+    get:
+      tags: [agents]
+      summary: List agents
+      operationId: listAgents
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of agents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
+
+  /agents/{id}:
+    get:
+      tags: [agents]
+      summary: Get an agent
+      operationId: getAgent
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      responses:
+        "200":
+          description: Agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [agents]
+      summary: Patch agent config
+      operationId: patchAgent
+      description: |
+        Config changes are themselves signed, audited actions. The daemon
+        records the audit event; the HTTP request is not a client-side
+        signature. Credentials never appear in this body (ADR-Z-0008).
+      parameters:
+        - $ref: "#/components/parameters/AgentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchAgentRequest"
+      responses:
+        "200":
+          description: Agent after the patch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /approvals:
+    get:
+      tags: [approvals]
+      summary: List pending approvals
+      operationId: listApprovals
+      description: |
+        Human inbox of work that is waiting. This is not a decision
+        endpoint; decide through the subject resource (plan, memory
+        proposal, and so on).
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of pending approvals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalList"
+
+  /memory:
+    get:
+      tags: [memory]
+      summary: List memory entries
+      operationId: listMemory
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of memory entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEntryList"
+    post:
+      tags: [memory]
+      summary: Write a memory entry
+      operationId: createMemory
+      description: |
+        Operator-authored memory. Agent-proposed writes go through
+        /memory/proposals, not this path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMemoryRequest"
+      responses:
+        "201":
+          description: Memory entry created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryEntry"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Denied"
+
+  /memory/proposals:
+    get:
+      tags: [memory]
+      summary: List memory proposals
+      operationId: listMemoryProposals
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of memory proposals
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposalList"
+
+  /memory/proposals/{id}/accept:
+    post:
+      tags: [memory]
+      summary: Accept a memory proposal
+      operationId: acceptMemoryProposal
+      parameters:
+        - $ref: "#/components/parameters/MemoryProposalId"
+      responses:
+        "200":
+          description: Proposal accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposal"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /memory/proposals/{id}/reject:
+    post:
+      tags: [memory]
+      summary: Reject a memory proposal
+      operationId: rejectMemoryProposal
+      parameters:
+        - $ref: "#/components/parameters/MemoryProposalId"
+      responses:
+        "200":
+          description: Proposal rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemoryProposal"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /audit:
+    get:
+      tags: [audit]
+      summary: List audit records
+      operationId: listAudit
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of audit records, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditRecordList"
+
+  /audit/{id}/verify:
+    post:
+      tags: [audit]
+      summary: Verify an audit record
+      operationId: verifyAudit
+      description: |
+        Re-verify the Schnorr signature (ADR-Z-0007) on one append-only
+        record. This does not rewrite the log.
+      parameters:
+        - $ref: "#/components/parameters/AuditId"
+      responses:
+        "200":
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditVerifyResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /checkpoints:
+    get:
+      tags: [checkpoints]
+      summary: List checkpoints
+      operationId: listCheckpoints
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Page of checkpoints
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckpointList"
+
+  /checkpoints/{id}/restore:
+    post:
+      tags: [checkpoints]
+      summary: Restore a checkpoint
+      operationId: restoreCheckpoint
+      description: |
+        Restore is a consequential action. It must still go through the plan
+        lifecycle inside the daemon; this path is the operator trigger, not a
+        kernel bypass. Whether restore mints a new run or rewinds in place
+        is not locked.
+      parameters:
+        - $ref: "#/components/parameters/CheckpointId"
+      responses:
+        "200":
+          description: Restore accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckpointRestore"
+        "403":
+          $ref: "#/components/responses/Denied"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
 components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque page token from a previous next_cursor.
+      schema:
+        type: string
+        minLength: 1
+    RunId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/RunID"
+    PlanId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/PlanID"
+    AgentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/AgentID"
+    MemoryProposalId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/MemoryProposalID"
+    AuditId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/AuditID"
+    CheckpointId:
+      name: id
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/CheckpointID"
+
+  responses:
+    BadRequest:
+      description: Request could not be parsed or failed validation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Denied:
+      description: Policy denied the action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Unknown identifier
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Action is not valid in the current lifecycle state
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
   schemas:
     Health:
       type: object
+      additionalProperties: false
       required: [status]
       properties:
         status:
           type: string
           enum: [ok]
+
+    Error:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Stable machine-readable code
+        message:
+          type: string
+
+    RunID:
+      type: string
+      minLength: 1
+      description: Opaque run identifier. Not interchangeable with other ID kinds.
+    PlanID:
+      type: string
+      minLength: 1
+      description: Opaque plan identifier. Not interchangeable with other ID kinds.
+    AgentID:
+      type: string
+      minLength: 1
+      description: Opaque agent identifier. Not interchangeable with other ID kinds.
+    MemoryID:
+      type: string
+      minLength: 1
+      description: Opaque memory entry identifier. Not interchangeable with other ID kinds.
+    MemoryProposalID:
+      type: string
+      minLength: 1
+      description: Opaque memory proposal identifier. Not interchangeable with other ID kinds.
+    AuditID:
+      type: string
+      minLength: 1
+      description: Opaque audit record identifier. Not interchangeable with other ID kinds.
+    CheckpointID:
+      type: string
+      minLength: 1
+      description: Opaque checkpoint identifier. Not interchangeable with other ID kinds.
+    ApprovalID:
+      type: string
+      minLength: 1
+      description: Opaque approval identifier. Not interchangeable with other ID kinds.
+
+    Timestamp:
+      type: string
+      format: date-time
+      description: RFC 3339 timestamp
+
+    RunStatus:
+      type: string
+      description: |
+        Draft enum so list and detail views can render a status. Closed
+        values are not locked against the session state machine.
+      enum:
+        - queued
+        - running
+        - waiting
+        - backgrounded
+        - completed
+        - failed
+
+    PlanStatus:
+      type: string
+      description: |
+        Mirrors the plan lifecycle names (draft, cross-exam, approve, apply)
+        plus the request-changes path. Applied is listed because apply exists
+        in the kernel even though this API has no apply operation.
+      enum:
+        - draft
+        - cross_exam
+        - pending_approval
+        - approved
+        - changes_requested
+        - applied
+
+    MemoryProposalStatus:
+      type: string
+      enum:
+        - pending
+        - accepted
+        - rejected
+
+    Run:
+      type: object
+      additionalProperties: false
+      required: [id, agent_id, status, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/RunID"
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        current_plan_id:
+          $ref: "#/components/schemas/PlanID"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    RunList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Run"
+        next_cursor:
+          type: string
+
+    CreateRunRequest:
+      type: object
+      additionalProperties: false
+      required: [agent_id]
+      properties:
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        prompt:
+          type: string
+          minLength: 1
+          description: |
+            Operator prompt that starts the run. Whether a tracker issue is
+            also required (and under which field) is not locked.
+
+    SteerRunRequest:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+
+    RunEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, type, recorded_at]
+      properties:
+        seq:
+          type: integer
+          minimum: 0
+          description: Monotonic per-run sequence used for replay order
+        type:
+          type: string
+          minLength: 1
+          description: |
+            Event kind. A closed enum is not locked; the live view should not
+            assume these strings beyond opaque display until the session
+            machine lands.
+        recorded_at:
+          $ref: "#/components/schemas/Timestamp"
+        summary:
+          type: string
+
+    Plan:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, status, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/PlanID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        status:
+          $ref: "#/components/schemas/PlanStatus"
+        title:
+          type: string
+        body:
+          type: string
+          description: |
+            Human-readable plan text. Structured diffs, file lists, and
+            command lists are not in this draft.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    ApprovePlanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+
+    RequestPlanChangesRequest:
+      type: object
+      additionalProperties: false
+      required: [comment]
+      properties:
+        comment:
+          type: string
+          minLength: 1
+
+    BranchPlanRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+
+    Agent:
+      type: object
+      additionalProperties: false
+      required: [id, name, harness]
+      properties:
+        id:
+          $ref: "#/components/schemas/AgentID"
+        name:
+          type: string
+          minLength: 1
+        harness:
+          type: string
+          enum: [claudecode]
+          description: Stage 1 has one harness implementation.
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    AgentList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+        next_cursor:
+          type: string
+
+    PatchAgentRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+      description: |
+        Config fields beyond display name are not locked. Do not put
+        credentials here. Scopes and leases are policy, not agent config.
+
+    Approval:
+      type: object
+      additionalProperties: false
+      required: [id, kind, subject_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/ApprovalID"
+        kind:
+          type: string
+          minLength: 1
+          description: |
+            Subject kind as an opaque string (for example plan or
+            memory_proposal). A closed enum is not locked.
+        subject_id:
+          type: string
+          minLength: 1
+          description: Identifier of the subject resource. Kind-specific.
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        summary:
+          type: string
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    ApprovalList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Approval"
+        next_cursor:
+          type: string
+
+    MemoryEntry:
+      type: object
+      additionalProperties: false
+      required: [id, body, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/MemoryID"
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        body:
+          type: string
+          minLength: 1
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    MemoryEntryList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryEntry"
+        next_cursor:
+          type: string
+
+    CreateMemoryRequest:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+
+    MemoryProposal:
+      type: object
+      additionalProperties: false
+      required: [id, body, status, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/MemoryProposalID"
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        body:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/MemoryProposalStatus"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    MemoryProposalList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemoryProposal"
+        next_cursor:
+          type: string
+
+    AuditRecord:
+      type: object
+      additionalProperties: false
+      required: [id, action, recorded_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/AuditID"
+        action:
+          type: string
+          minLength: 1
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        recorded_at:
+          $ref: "#/components/schemas/Timestamp"
+        pubkey:
+          type: string
+          description: x-only secp256k1 public key, hex (ADR-Z-0007). Not a secret.
+        signature:
+          type: string
+          description: BIP-340 Schnorr signature, hex. Not a credential.
+
+    AuditRecordList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditRecord"
+        next_cursor:
+          type: string
+
+    AuditVerifyResult:
+      type: object
+      additionalProperties: false
+      required: [valid]
+      properties:
+        valid:
+          type: boolean
+        reason:
+          type: string
+
+    Checkpoint:
+      type: object
+      additionalProperties: false
+      required: [id, run_id, created_at]
+      properties:
+        id:
+          $ref: "#/components/schemas/CheckpointID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        summary:
+          type: string
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    CheckpointList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Checkpoint"
+        next_cursor:
+          type: string
+
+    CheckpointRestore:
+      type: object
+      additionalProperties: false
+      required: [checkpoint_id]
+      properties:
+        checkpoint_id:
+          $ref: "#/components/schemas/CheckpointID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+          description: |
+            Run that results from restore, if restore mints or selects one.
+            Omitted until restore semantics are locked.

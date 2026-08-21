@@ -64,6 +64,18 @@ tasks:
       - go run {{.OAPI_CODEGEN}} --config pkg/api/oapi-codegen.yaml pkg/api/openapi.yaml
       - "{{.PNPM}} dlx {{.TS_CLIENT}} generate -p pkg/api/openapi.yaml -o pkg/api/gen/ts -n client.ts"
 
+  generate:check:
+    desc: Fail if committed gen/ is stale relative to openapi.yaml
+    cmds:
+      - task: generate
+      - |
+        if [ -n "$(git status --porcelain -- pkg/api/gen)" ]; then
+          echo "generated code is stale relative to pkg/api/openapi.yaml; run task generate"
+          git status --porcelain -- pkg/api/gen
+          git diff -- pkg/api/gen
+          exit 1
+        fi
+
   web:
     desc: Vite dev server for web/
     deps: [web:deps]
@@ -81,9 +93,10 @@ tasks:
       - go vet ./...
 
   ci:
-    desc: Local stand-in for CI (lint, test, conformance, secretscan, web, build)
+    desc: Local stand-in for CI (lint, generate check, test, conformance, secretscan, web, build)
     cmds:
       - task: lint
+      - task: generate:check
       - task: test
       - task: conformance
       - task: secretscan

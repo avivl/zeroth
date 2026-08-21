@@ -52,6 +52,26 @@ jobs:
               - "pkg/api/**"
               - ".github/workflows/ci.yml"
 
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.0"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+      - name: Fail if generated API clients are stale
+        run: task generate:check
+
   go:
     needs: changes
     if: needs.changes.outputs.go == 'true'
@@ -140,21 +160,22 @@ jobs:
   ci:
     name: ci
     if: ${{ !cancelled() }}
-    needs: [changes, go, web, secretscan]
+    needs: [changes, generate, go, web, secretscan]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: All required jobs passed
         env:
           CHANGES: ${{ needs.changes.result }}
+          GENERATE: ${{ needs.generate.result }}
           GO: ${{ needs.go.result }}
           WEB: ${{ needs.web.result }}
           SECRETSCAN: ${{ needs.secretscan.result }}
         run: |
           set -euo pipefail
-          echo "changes=${CHANGES} go=${GO} web=${WEB} secretscan=${SECRETSCAN}"
+          echo "changes=${CHANGES} generate=${GENERATE} go=${GO} web=${WEB} secretscan=${SECRETSCAN}"
           fail=0
-          for result in "${CHANGES}" "${SECRETSCAN}"; do
+          for result in "${CHANGES}" "${GENERATE}" "${SECRETSCAN}"; do
             if [ "${result}" != "success" ]; then
               fail=1
             fi
