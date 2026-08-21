@@ -15,7 +15,7 @@ func ExcludedFromExport(rel string) bool {
 		return false
 	}
 	base := strings.ToLower(path.Base(rel))
-	if excludedBasenames[base] {
+	if _, ok := excludedBasenames[base]; ok {
 		return true
 	}
 	lower := strings.ToLower(rel)
