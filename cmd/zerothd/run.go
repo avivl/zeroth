@@ -4,16 +4,21 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/avivl/zeroth/internal/logging"
 	"github.com/avivl/zeroth/internal/resilience"
+	"github.com/avivl/zeroth/internal/server"
+	"github.com/avivl/zeroth/internal/store/sqlite"
 	"go.uber.org/zap"
 )
 
 type deps struct {
 	probe  func(context.Context, string) error
 	writer io.Writer
+	serve  func(ctx context.Context, addr string, h http.Handler) error
 }
 
 func runDaemon(ctx context.Context, cfg Config, d deps) error {
@@ -50,6 +55,54 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		log.Info("docker socket reachable", zap.String("socket", cfg.DockerSocket))
 	}
 
-	log.Info("skeleton stub (would bind)", zap.String("addr", cfg.Addr))
+	st, err := sqlite.New(cfg.DBPath)
+	if err != nil {
+		return fmt.Errorf("zerothd store: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	srv, err := server.New(server.Config{Store: st, Log: log})
+	if err != nil {
+		return fmt.Errorf("zerothd server: %w", err)
+	}
+	defer srv.Close()
+
+	log.Info("zerothd listening", zap.String("addr", cfg.Addr))
+	serve := d.serve
+	if serve == nil {
+		serve = listenAndServe
+	}
+	if err := serve(ctx, cfg.Addr, srv.Handler()); err != nil {
+		return fmt.Errorf("zerothd listen: %w", err)
+	}
 	return nil
+}
+
+func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
+	httpSrv := &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
+	errc := make(chan error, 1)
+	go func() {
+		errc <- httpSrv.ListenAndServe()
+	}()
+	select {
+	case <-ctx.Done():
+		shctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(shctx)
+		err := <-errc
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	case err := <-errc:
+		if err == http.ErrServerClosed {
+			return nil
+		}
+		return err
+	}
 }

@@ -1,6 +1,7 @@
 package session_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -65,6 +66,40 @@ func TestSupervisorLifecycle(t *testing.T) {
 	}
 	if st.Status != session.StatusDone {
 		t.Fatalf("done %+v", st)
+	}
+}
+
+func TestSupervisorStartWith(t *testing.T) {
+	t.Parallel()
+	log := session.NewMemoryLog()
+	sup, err := session.NewSupervisor(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sup.Close)
+	id := mustID(t, "s_startwith")
+	if err := sup.StartWith(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	if !sup.Live(id) {
+		t.Fatal("expected live goroutine")
+	}
+	ids := sup.LiveIDs()
+	if len(ids) != 1 || ids[0] != id {
+		t.Fatalf("LiveIDs = %v", ids)
+	}
+	if err := sup.StartWith(t.Context(), id); err == nil {
+		t.Fatal("expected already-live error")
+	}
+	if err := sup.Succeed(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for sup.Live(id) && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := sup.Background(t.Context(), id, nil); !errors.Is(err, session.ErrIllegalTransition) {
+		t.Fatalf("background after succeed: %v", err)
 	}
 }
 

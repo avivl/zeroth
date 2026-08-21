@@ -96,15 +96,45 @@ func (s *Supervisor) Start(ctx context.Context) (ID, error) {
 	if err != nil {
 		return ID{}, fmt.Errorf("session supervisor start: %w", err)
 	}
+	if err := s.StartWith(ctx, id); err != nil {
+		return ID{}, err
+	}
+	return id, nil
+}
+
+// StartWith starts a session that already has a durable row (the store
+// session id). Used by the HTTP create-run path, which must insert the
+// session before the first event because events reference sessions.
+func (s *Supervisor) StartWith(ctx context.Context, id ID) error {
+	if id.IsZero() {
+		return fmt.Errorf("session supervisor start: empty id")
+	}
+	s.mu.Lock()
+	_, exists := s.runs[id]
+	s.mu.Unlock()
+	if exists {
+		return fmt.Errorf("session %s: already live", id.String())
+	}
 	m, err := New(ctx, id, s.log)
 	if err != nil {
-		return ID{}, fmt.Errorf("session supervisor start: %w", err)
+		return fmt.Errorf("session supervisor start: %w", err)
 	}
 	if err := m.Start(ctx); err != nil {
-		return ID{}, fmt.Errorf("session supervisor start: %w", err)
+		return fmt.Errorf("session supervisor start: %w", err)
 	}
 	s.spawn(m)
-	return id, nil
+	return nil
+}
+
+// LiveIDs returns the ids with a supervisor goroutine still running.
+func (s *Supervisor) LiveIDs() []ID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]ID, 0, len(s.runs))
+	for id := range s.runs {
+		out = append(out, id)
+	}
+	return out
 }
 
 func (s *Supervisor) spawn(m *Machine) {
@@ -146,7 +176,10 @@ func (s *Supervisor) do(ctx context.Context, id ID, fn func() error) error {
 	r, ok := s.runs[id]
 	s.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("session %s: %w", id.String(), ErrNotFound)
+		// Goroutine is gone (terminal, or Close). Run fn on the log-backed
+		// machine so callers see illegal-transition or not-found, not a
+		// missing supervisor.
+		return fn()
 	}
 	errc := make(chan error, 1)
 	cmd := command{fn: fn, errc: errc}
@@ -154,7 +187,7 @@ func (s *Supervisor) do(ctx context.Context, id ID, fn func() error) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-r.done:
-		return fmt.Errorf("session %s: %w", id.String(), ErrNotFound)
+		return fn()
 	case r.cmds <- cmd:
 	}
 	select {
@@ -165,7 +198,7 @@ func (s *Supervisor) do(ctx context.Context, id ID, fn func() error) error {
 		case err := <-errc:
 			return err
 		default:
-			return fmt.Errorf("session %s: %w", id.String(), ErrNotFound)
+			return fn()
 		}
 	case <-ctx.Done():
 		return ctx.Err()

@@ -2,22 +2,31 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/avivl/zeroth/internal/logging"
 	"github.com/avivl/zeroth/internal/version"
 	"github.com/spf13/cobra"
-	"go.uber.org/zap"
 )
 
+const defaultDaemonAddr = "127.0.0.1:8420"
+
+type cli struct {
+	addr        string
+	logLevel    string
+	logEncoding string
+}
+
 func newRoot() *cobra.Command {
-	var logLevel, logEncoding string
+	c := &cli{}
 	cmd := &cobra.Command{
 		Use:          "zeroth",
 		Short:        "CLI and headless entry point for Zeroth",
 		SilenceUsage: true,
 		Version:      version.SHA(),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			log, err := logging.New(logging.Options{Level: logLevel, Encoding: logEncoding})
+			log, err := logging.New(logging.Options{Level: c.logLevel, Encoding: c.logEncoding})
 			if err != nil {
 				return fmt.Errorf("zeroth logger: %w", err)
 			}
@@ -30,9 +39,17 @@ func newRoot() *cobra.Command {
 	}
 	cmd.SetVersionTemplate("{{.Version}}\n")
 	cmd.CompletionOptions.DisableDefaultCmd = true
-	cmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "zap log level: debug, info, warn, error")
-	cmd.PersistentFlags().StringVar(&logEncoding, "log-encoding", "console", "zap encoder: console or json")
-	cmd.AddCommand(newVersionCmd(), newRunCmd(), newAttachCmd(), newBgCmd())
+	cmd.PersistentFlags().StringVar(&c.logLevel, "log-level", "info", "zap log level: debug, info, warn, error")
+	cmd.PersistentFlags().StringVar(&c.logEncoding, "log-encoding", "console", "zap encoder: console or json")
+	cmd.PersistentFlags().StringVar(&c.addr, "addr", envOr("ZEROTH_ADDR", defaultDaemonAddr), "zerothd address (ZEROTH_ADDR)")
+	cmd.AddCommand(
+		newVersionCmd(),
+		c.newRunCmd(),
+		c.newAttachCmd(),
+		c.newBgCmd(),
+		c.newRunsCmd(),
+		c.newVerifyCmd(),
+	)
 	return cmd
 }
 
@@ -47,25 +64,13 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-func newRunCmd() *cobra.Command {
-	return stubCmd("run", "Run a headless session against local zerothd")
-}
-
-func newAttachCmd() *cobra.Command {
-	return stubCmd("attach", "Attach to a running session")
-}
-
-func newBgCmd() *cobra.Command {
-	return stubCmd("bg", "Background a running session")
-}
-
-func stubCmd(use, short string) *cobra.Command {
-	return &cobra.Command{
-		Use:   use,
-		Short: short + " (stub)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			logging.FromContext(cmd.Context()).Info("skeleton stub", zap.String("cmd", use))
-			return nil
-		},
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
 	}
+	return fallback
+}
+
+func (c *cli) client() *apiClient {
+	return newAPIClient(c.addr)
 }

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -14,7 +16,7 @@ func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
 	var probed string
 	cfg := Config{
 		Addr:         "127.0.0.1:7999",
-		DBPath:       "zeroth.db",
+		DBPath:       filepath.Join(t.TempDir(), "zeroth.db"),
 		DockerSocket: "/tmp/docker.sock",
 		LogLevel:     "info",
 		LogEncoding:  "json",
@@ -25,6 +27,15 @@ func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
 			probed = socket
 			return nil
 		},
+		serve: func(_ context.Context, addr string, h http.Handler) error {
+			if h == nil {
+				t.Fatal("nil handler")
+			}
+			if addr != cfg.Addr {
+				t.Fatalf("serve addr %q, want %s", addr, cfg.Addr)
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("runDaemon: %v", err)
@@ -33,8 +44,11 @@ func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
 		t.Fatalf("probed %q, want %s", probed, cfg.DockerSocket)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "skeleton stub") {
-		t.Fatalf("missing stub log: %s", out)
+	if !strings.Contains(out, "zerothd listening") {
+		t.Fatalf("missing listening log: %s", out)
+	}
+	if strings.Contains(out, "skeleton stub") {
+		t.Fatalf("stub log still present: %s", out)
 	}
 	if !strings.Contains(out, "docker socket reachable") {
 		t.Fatalf("missing probe log: %s", out)

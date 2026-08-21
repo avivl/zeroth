@@ -1,0 +1,248 @@
+package server
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"sync"
+	"time"
+
+	"github.com/avivl/zeroth/internal/session"
+	"github.com/avivl/zeroth/internal/store"
+	gen "github.com/avivl/zeroth/pkg/api/gen/go"
+	"go.uber.org/zap"
+)
+
+const (
+	// DefaultAgentID is the local agent seeded when the daemon starts with
+	// an empty agent table. Create-run requires an agent_id and the contract
+	// has no POST /agents.
+	DefaultAgentID = "a_default"
+
+	defaultReplayLast = 50
+	maxReplayLast     = 1000
+	defaultTokens     = 120
+	defaultInterval   = 100 * time.Millisecond
+)
+
+// Config is the HTTP surface. Store is required. TokenInterval and
+// TokenCount bound the in-process stand-in worker that emits log events
+// until the harness loop is wired into the daemon.
+type Config struct {
+	Store         store.Store
+	Log           *zap.Logger
+	TokenInterval time.Duration
+	TokenCount    int
+}
+
+// Server serves the OpenAPI contract against a session supervisor.
+type Server struct {
+	store    store.Store
+	log      *zap.Logger
+	elog     *storeLog
+	sup      *session.Supervisor
+	interval time.Duration
+	tokens   int
+
+	root   context.Context
+	cancel context.CancelFunc
+
+	mu    sync.Mutex
+	lives map[string]*liveRun
+}
+
+type liveRun struct {
+	id    session.ID
+	steer chan string
+	stop  context.CancelFunc
+}
+
+// New opens a supervisor on the store-backed log, seeds the default
+// agent, and resumes workers for non-terminal sessions.
+func New(cfg Config) (*Server, error) {
+	if cfg.Store == nil {
+		return nil, fmt.Errorf("server: nil store")
+	}
+	log := cfg.Log
+	if log == nil {
+		log = zap.NewNop()
+	}
+	interval := cfg.TokenInterval
+	if interval <= 0 {
+		interval = defaultInterval
+	}
+	tokens := cfg.TokenCount
+	if tokens <= 0 {
+		tokens = defaultTokens
+	}
+	elog := newStoreLog(cfg.Store)
+	sup, err := session.Restore(context.Background(), elog)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{
+		store:    cfg.Store,
+		log:      log,
+		elog:     elog,
+		sup:      sup,
+		interval: interval,
+		tokens:   tokens,
+		root:     ctx,
+		cancel:   cancel,
+		lives:    make(map[string]*liveRun),
+	}
+	if err := s.ensureDefaultAgent(ctx); err != nil {
+		s.Close()
+		return nil, err
+	}
+	for _, id := range sup.LiveIDs() {
+		s.startWorker(id)
+	}
+	return s, nil
+}
+
+// Close stops workers and session goroutines. It does not close the store.
+func (s *Server) Close() {
+	if s == nil {
+		return
+	}
+	s.cancel()
+	s.mu.Lock()
+	for _, l := range s.lives {
+		l.stop()
+	}
+	s.mu.Unlock()
+	if s.sup != nil {
+		s.sup.Close()
+	}
+}
+
+// Handler returns the OpenAPI mux.
+func (s *Server) Handler() http.Handler {
+	return gen.Handler(s)
+}
+
+func (s *Server) ensureDefaultAgent(ctx context.Context) error {
+	id, err := store.ParseAgentID(DefaultAgentID)
+	if err != nil {
+		return fmt.Errorf("server default agent: %w", err)
+	}
+	_, err = s.store.GetAgent(ctx, id)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("server default agent: %w", err)
+	}
+	now := time.Now().UTC()
+	if err := s.store.CreateAgent(ctx, store.Agent{
+		ID:        id,
+		Name:      "default",
+		Harness:   "claudecode",
+		Status:    string(gen.Ready),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		return fmt.Errorf("server default agent: %w", err)
+	}
+	return nil
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, gen.Error{Code: code, Message: message})
+}
+
+func decodeJSON(r *http.Request, v any) error {
+	if r.Body == nil {
+		return fmt.Errorf("empty body")
+	}
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) loadRun(ctx context.Context, raw string) (gen.Run, bool, error) {
+	sid, err := store.ParseSessionID(raw)
+	if err != nil {
+		return gen.Run{}, false, err
+	}
+	sess, err := s.store.GetSession(ctx, sid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return gen.Run{}, false, nil
+		}
+		return gen.Run{}, false, err
+	}
+	id, err := session.ParseID(raw)
+	if err != nil {
+		return gen.Run{}, false, err
+	}
+	st, err := s.sup.State(ctx, id)
+	if err != nil {
+		if errors.Is(err, session.ErrNotFound) {
+			return gen.Run{}, false, nil
+		}
+		return gen.Run{}, false, err
+	}
+	return runFrom(sess, st), true, nil
+}
+
+func (s *Server) syncSession(ctx context.Context, id session.ID) error {
+	sid, err := store.ParseSessionID(id.String())
+	if err != nil {
+		return fmt.Errorf("server sync session: %w", err)
+	}
+	sess, err := s.store.GetSession(ctx, sid)
+	if err != nil {
+		return fmt.Errorf("server sync session: %w", err)
+	}
+	st, err := s.sup.State(ctx, id)
+	if err != nil {
+		return fmt.Errorf("server sync session: %w", err)
+	}
+	sess.Status = string(apiStatus(st))
+	sess.UpdatedAt = time.Now().UTC()
+	if st.Status.Terminal() && sess.FinishedAt.IsZero() {
+		sess.FinishedAt = sess.UpdatedAt
+	}
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("server sync session: %w", err)
+	}
+	return nil
+}
+
+func statusForSessionError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, session.ErrNotFound), errors.Is(err, store.ErrNotFound):
+		return http.StatusNotFound, "not_found", err.Error()
+	case errors.Is(err, session.ErrIllegalTransition):
+		return http.StatusConflict, "conflict", err.Error()
+	default:
+		return http.StatusInternalServerError, "internal", err.Error()
+	}
+}
+
+func parseReplayLast(params gen.GetRunEventsParams) (int, error) {
+	if params.Last == nil {
+		return defaultReplayLast, nil
+	}
+	n := *params.Last
+	if n < 1 || n > maxReplayLast {
+		return 0, fmt.Errorf("last must be 1..%d", maxReplayLast)
+	}
+	return n, nil
+}
+
+var _ gen.ServerInterface = (*Server)(nil)

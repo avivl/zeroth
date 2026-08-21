@@ -62,6 +62,8 @@ The UI under `web/` is a pnpm workspace package. `task web` and `task lint` inst
 
 PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests, conformance, `go vet`, staticcheck, a secret scan over the diff, the `web/` build and tests, and a check that `pkg/api/gen` matches `task generate`. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. The commit SHA is the version. There is no semver in this repository.
 
+`zeroth run <task>` starts a headless session. `zeroth attach <run-id>` replays recent events and live-tails (type to steer; Ctrl-C detaches). `zeroth bg <run-id>` demotes a run. `zeroth runs` lists. Live events are `GET /runs/{id}/events` over WebSocket.
+
 ## License
 
 [MIT](LICENSE) © 2026 Aviv Laufer

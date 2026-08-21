@@ -5,6 +5,7 @@ go 1.27
 toolchain go1.27.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/failsafe-go/failsafe-go v0.9.1
 	github.com/oapi-codegen/runtime v1.7.0 // generated pkg/api/gen/go parameter binding
 	github.com/spf13/cobra v1.10.2

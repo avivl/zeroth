@@ -59,8 +59,8 @@ Stage 1 is local and single-player, so the store is SQLite and the daemon binds 
 
 ## Surfaces
 
-- `cmd/zerothd` — long-running process (Cobra root, Viper config, Zap logs).
-- `cmd/zeroth` — CLI and headless entry point (Cobra: `version`, stubs for `run` / `attach` / `bg`).
+- `cmd/zerothd` — long-running process (Cobra root, Viper config, Zap logs). Binds the OpenAPI HTTP surface (`internal/server`) on `127.0.0.1:8420` by default.
+- `cmd/zeroth` — CLI and headless entry point (Cobra: `version`, `run`, `attach`, `bg`, `runs`, and a `verify` stub). Same OpenAPI contract as the web UI. `attach` is replay-then-live-tail over the run-events WebSocket; Ctrl-C detaches without stopping the run.
 - `pkg/api` — OpenAPI spec (`openapi.yaml`); Go stubs and the TypeScript client are generated from it. Stage 1 surface: runs (steer, background, foreground, stop, events WebSocket, on-demand checkpoints), plans (list, approve, request-changes, branch, apply), agents (including read-only leases), approvals, memory (including proposals), audit verify, and checkpoint restore (forks a new run). Apply is `POST /plans/{id}/apply` after approve. Cross-exam is automatic and appears on the plan resource, not as an operator endpoint. A flow that cannot be expressed here does not ship on the web UI or the CLI.
 - `web/` — Vite + React. Intended to use [Beautiful UI](https://www.beautifului.dev/) primitives (MIT). The generated TypeScript client is HTTP; live run events use a thin WebSocket wrapper around the generated `RunEvent` type.
 
