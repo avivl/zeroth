@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/avivl/zeroth/internal/sandbox"
+	"github.com/avivl/zeroth/internal/secretscan"
 )
 
 // ExportTar implements [sandbox.Driver].
@@ -30,8 +31,9 @@ func (d *Driver) ExportTar(ctx context.Context, id sandbox.ID, w io.Writer) erro
 		return fmt.Errorf("sandbox docker export: %w", sandbox.ErrStopped)
 	}
 	// Host-side tar of the workspace. Exec is docker exec, so this
-	// does not take a turn lock.
-	if err := packTar(ctx, dir, w); err != nil {
+	// does not take a turn lock. Excluded credential paths are
+	// omitted; the packed tar is scanned before any bytes reach w.
+	if err := exportWorkspace(ctx, dir, w); err != nil {
 		return fmt.Errorf("sandbox docker export: %w", err)
 	}
 	return nil
@@ -78,6 +80,41 @@ func (d *Driver) ImportTar(ctx context.Context, id sandbox.ID, r io.Reader) erro
 	return nil
 }
 
+func exportWorkspace(ctx context.Context, dir string, w io.Writer) error {
+	tmp, err := os.CreateTemp("", "zeroth-export-*.tar")
+	if err != nil {
+		return fmt.Errorf("temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}()
+	if err := packTar(ctx, dir, tmp); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync: %w", err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek: %w", err)
+	}
+	findings, err := secretscan.ScanTar(tmp)
+	if err != nil {
+		return err
+	}
+	if len(findings) > 0 {
+		return fmt.Errorf("%w (%s:%s)", sandbox.ErrSecret, findings[0].Path, findings[0].Rule)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("seek: %w", err)
+	}
+	if _, err := io.Copy(w, tmp); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	return nil
+}
+
 func packTar(ctx context.Context, dir string, w io.Writer) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
@@ -93,6 +130,12 @@ func packTar(ctx context.Context, dir string, w io.Writer) error {
 			return err
 		}
 		if rel == "." {
+			return nil
+		}
+		if sandbox.ExcludedFromExport(rel) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		info, err := d.Info()
@@ -136,6 +179,9 @@ func unpackTar(dir string, r io.Reader) error {
 		}
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
+		}
+		if sandbox.ExcludedFromExport(hdr.Name) {
+			continue
 		}
 		target, err := safeJoin(dir, hdr.Name)
 		if err != nil {

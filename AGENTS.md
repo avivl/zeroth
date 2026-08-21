@@ -33,7 +33,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | `internal/lease` | Runtime mint, renew, expire of leases | Defining what a lease *is* (that is policy) |
 | `internal/signer` | Signing actions and audit records | Key-management product design |
 | `internal/audit` | Append-only signed trail | Rewritable logs, chat residue as source of truth |
-| `internal/secretscan` | Gate on apply for leaked secrets | A skippable linter |
+| `internal/secretscan` | Gate on apply and sandbox export for leaked secrets | A skippable linter |
 | `internal/logging` | Zap logger construction (no package-level global) | A logger `internal/policy` can import |
 | `internal/resilience` | Failsafe-go retry, timeout, and circuit breaker | Per-driver retry loops |
 | `internal/version` | Build SHA for `zeroth version` / `zerothd --version` | A semver product constant |

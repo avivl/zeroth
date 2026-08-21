@@ -22,6 +22,11 @@ func (d *Driver) Exec(ctx context.Context, id sandbox.ID, cmd sandbox.Cmd) (sand
 			return sandbox.ExecResult{}, fmt.Errorf("sandbox docker exec: %w", sandbox.ErrInvalid)
 		}
 	}
+	for _, f := range cmd.Files {
+		if err := sandbox.ValidCredPath(f.Path); err != nil {
+			return sandbox.ExecResult{}, fmt.Errorf("sandbox docker exec: %w", err)
+		}
+	}
 	inst, err := d.lookup(id)
 	if err != nil {
 		return sandbox.ExecResult{}, fmt.Errorf("sandbox docker exec: %w", err)
@@ -42,6 +47,12 @@ func (d *Driver) Exec(ctx context.Context, id sandbox.ID, cmd sandbox.Cmd) (sand
 	if killed || container == "" {
 		return sandbox.ExecResult{}, fmt.Errorf("sandbox docker exec: %w", sandbox.ErrKilled)
 	}
+
+	cleanup, err := stageCredFiles(ctx, container, cmd.Files)
+	if err != nil {
+		return sandbox.ExecResult{}, fmt.Errorf("sandbox docker exec: %w", err)
+	}
+	defer cleanup()
 
 	args := []string{"exec", "-w", "/workspace"}
 	if proxyURL != "" {

@@ -21,9 +21,27 @@ type Cmd struct {
 	Argv []string
 	// Env is KEY=value pairs visible only to this command. The host
 	// process environment is not forwarded. Malformed entries (no
-	// '=') are ErrInvalid.
+	// '=') are ErrInvalid. This is the env half of credential
+	// injection (Z1-113): values are never written into /workspace.
 	Env []string
+	// Files are written onto a tmpfs for this command only (Z1-113).
+	// Path must be absolute and under CredsDir or /tmp, never under
+	// /workspace. Data is removed when Exec returns and is never
+	// part of ExportTar.
+	Files []CredFile
 }
+
+// CredFile is one credential file injected at Exec time.
+type CredFile struct {
+	Path string
+	Data []byte
+}
+
+// WorkspaceDir is the in-sandbox mount for the session workspace.
+const WorkspaceDir = "/workspace"
+
+// CredsDir is the in-sandbox tmpfs where Exec file credentials land.
+const CredsDir = "/run/zeroth"
 
 // ExecResult is the outcome of one command. A non-zero process exit is
 // ExitCode with a nil error. Driver failures (unknown id, killed
