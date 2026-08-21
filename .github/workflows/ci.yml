@@ -48,6 +48,7 @@ jobs:
               - "Taskfile.yml"
               - "pkg/api/**"
               - ".github/workflows/ci.yml"
+              - ".octocov.yml"
               - "!zeroth-spike/**"
             web:
               - "web/**"
@@ -67,13 +68,24 @@ jobs:
     # modernc.org/sqlite is race-instrumented Go, not cgo. First compile plus
     # staticcheck exceeds the 5m budget that was enough for the skeleton.
     timeout-minutes: 15
+    permissions:
+      # Badge commit on merge to main. Workflow-level contents is read-only.
+      contents: write
+      # Update the octocov PR comment in place (do not re-post).
+      pull-requests: write
+      # Read the previous report and replace the default-branch artifact.
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.0"
       - name: Test (race)
-        run: go test -race -timeout 10m ./...
+        run: go test -race -timeout 10m -coverprofile=coverage.out ./...
+      - name: Coverage (octocov)
+        uses: k1LoW/octocov-action@v1
+        with:
+          version: v0.75.12
       - name: Conformance
         run: |
           set -euo pipefail

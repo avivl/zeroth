@@ -1,6 +1,8 @@
 ![Zeroth](zeroth-app-icon.svg )
 # Zeroth
 
+![Coverage](./docs/coverage.svg)
+
 Agents work at machine speed. Humans keep control of consequential actions.
 
 Zeroth is a control plane for AI agents. Autonomy is earned tier by tier, plans are proposed before they are applied, and every action is signed and auditable. The name is from Asimov: the Three Laws were incomplete, so a Zeroth Law was added above them — not another rule in the list, but the constraint that outranks the rest. Everything else in this repository is a First Law. **Human control is the Zeroth.**
@@ -60,7 +62,7 @@ task lint  # go vet, staticcheck, and the web lint
 
 The UI under `web/` is a pnpm workspace package. `task web` and `task lint` install JS deps via Corepack. Requires Go 1.27 (see `go.mod`). `zerothd` binds `127.0.0.1:8420` by default (`ZEROTH_ADDR` or `--addr`). Config is Cobra flags over Viper (env, optional `zeroth.yaml` / `--config`, then defaults). Logs are Zap (`--log-level`, `--log-encoding`). `zeroth version` prints the build SHA.
 
-PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests, conformance, `go vet`, staticcheck, a secret scan over the diff, the `web/` build and tests, and a check that `pkg/api/gen` matches `task generate`. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. The commit SHA is the version. There is no semver in this repository.
+PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests with a coverage profile, octocov (PR comment plus a fail if coverage drops versus main), conformance, `go vet`, staticcheck, a secret scan over the diff, the `web/` build and tests, and a check that `pkg/api/gen` matches `task generate`. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. Merge to main commits `docs/coverage.svg`. The commit SHA is the version. There is no semver in this repository.
 
 ## License
 
