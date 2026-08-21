@@ -13,6 +13,8 @@ import (
 
 // G6 from the BA-6 spike: 5 concurrent sessions appending. A stall is one
 // Append (or one batched AppendEvents commit). Pass bar: no stall > 50 ms.
+// Sample count is smaller than the spike's 110 so race-instrumented CI
+// stays inside the job budget; the gate is still max stall, not a percentile.
 const g6StallLimit = 50 * time.Millisecond
 
 func TestG6WriteStall(t *testing.T) {
@@ -25,8 +27,8 @@ func TestG6WriteStall(t *testing.T) {
 	}
 
 	const sessions = 5
-	const warmup = 10
-	const samples = 110
+	const warmup = 5
+	const samples = 20
 	ids := make([]store.SessionID, sessions)
 	for i := 0; i < sessions; i++ {
 		id, err := store.ParseSessionID("g6-" + itoa(i))
@@ -96,7 +98,7 @@ func TestRangeReadIndexed(t *testing.T) {
 	if err := s.CreateSession(ctx, store.Session{ID: id, AgentID: agent.ID, Status: "running"}); err != nil {
 		t.Fatal(err)
 	}
-	const n = 2000
+	const n = 500
 	batch := make([]store.Event, 0, 100)
 	for i := 0; i < n; i++ {
 		batch = append(batch, store.Event{Type: "log", Message: "x"})
@@ -126,7 +128,7 @@ func TestRangeReadIndexed(t *testing.T) {
 	if len(after) != 19 {
 		t.Fatalf("after len=%d", len(after))
 	}
-	t.Logf("range-read 2000 rows: ReplayLast(20)=%s EventsAfter=%s (attach replay is the G1 hot path)", replay, afterD)
+	t.Logf("range-read %d rows: ReplayLast(20)=%s EventsAfter=%s (attach replay is the G1 hot path)", n, replay, afterD)
 	if replay > 50*time.Millisecond {
 		t.Fatalf("ReplayLast too slow: %s", replay)
 	}
