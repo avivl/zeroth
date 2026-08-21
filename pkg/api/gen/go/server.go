@@ -703,8 +703,8 @@ type ListRunsParams struct {
 
 // GetRunEventsParams defines parameters for GetRunEvents.
 type GetRunEventsParams struct {
-	// N Number of recent events to replay. The daemon defaults this when omitted.
-	N *int `form:"n,omitempty" json:"n,omitempty"`
+	// Last How many recent events to replay before live tail. The daemon defaults this when omitted.
+	Last *int `form:"last,omitempty" json:"last,omitempty"`
 }
 
 // PatchAgentJSONRequestBody defines body for PatchAgent for application/json ContentType.
@@ -1624,15 +1624,15 @@ func (siw *ServerInterfaceWrapper) GetRunEvents(w http.ResponseWriter, r *http.R
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetRunEventsParams
 
-	// ------------- Optional query parameter "n" -------------
+	// ------------- Optional query parameter "last" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "n", r.URL.Query(), &params.N, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "last", r.URL.Query(), &params.Last, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "n"})
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "last"})
 		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "n", Err: err})
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "last", Err: err})
 		}
 		return
 	}

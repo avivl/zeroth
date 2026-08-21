@@ -841,7 +841,7 @@ export class Api<
       }),
 
     /**
-     * @description The event log is the source of truth for a run, not chat residue. Query parameter n selects how many recent events to replay. A WebSocket upgrade on this path replays those events, then tails live. Each WebSocket message is a JSON RunEvent. Without Upgrade, this GET returns the same replay window as JSON so the CLI and tests can read the log without a socket.
+     * @description The event log is the source of truth for a run, not chat residue. Query parameter last selects how many recent events to replay. A WebSocket upgrade on this path replays those events, then tails live. Each WebSocket message is a JSON RunEvent. Without Upgrade, this GET returns the same replay window as JSON so the CLI and tests can read the log without a socket. The generated TypeScript client is that GET helper, not a WebSocket caller.
      *
      * @tags runs
      * @name GetRunEvents
@@ -852,11 +852,11 @@ export class Api<
       id: RunID,
       query?: {
         /**
-         * Number of recent events to replay. The daemon defaults this when omitted.
+         * How many recent events to replay before live tail. The daemon defaults this when omitted.
          * @min 1
          * @max 1000
          */
-        n?: number;
+        last?: number;
       },
       params: RequestParams = {},
     ) =>
