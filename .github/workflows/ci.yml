@@ -64,14 +64,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # modernc.org/sqlite is race-instrumented Go, not cgo. First compile plus
+    # staticcheck exceeds the 5m budget that was enough for the skeleton.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27.0"
       - name: Test (race)
-        run: go test -race ./...
+        run: go test -race -timeout 10m ./...
       - name: Conformance
         run: |
           set -euo pipefail
@@ -82,7 +84,7 @@ jobs:
           fi
           # Word-split the directory list from find. Directories have no spaces.
           # shellcheck disable=SC2086
-          go test -race ${packages} -run Conformance
+          go test -race -timeout 10m ${packages} -run Conformance
       - name: Vet
         run: go vet ./...
       - name: staticcheck
