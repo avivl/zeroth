@@ -1,0 +1,208 @@
+package store
+
+import "time"
+
+// Session is one human-supervised run. The API calls this a run.
+type Session struct {
+	ID           SessionID
+	AgentID      AgentID
+	PlanID       PlanID
+	Status       string
+	Prompt       string
+	TrackerRef   string
+	Workspace    WorkspaceSource
+	AutonomyTier string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	FinishedAt   time.Time
+}
+
+// WorkspaceSource is the repo a session checks out.
+type WorkspaceSource struct {
+	Repo string
+	Ref  string
+}
+
+// SessionQuery filters ListSessions. Newest first.
+type SessionQuery struct {
+	PageQuery
+	Status  string
+	AgentID AgentID
+}
+
+// Event is one append-only log row. Seq is the order key and the source of
+// truth for a session. The WebSocket stream is a live tail of this log.
+type Event struct {
+	Seq       int64
+	ID        EventID
+	SessionID SessionID
+	Type      string
+	PlanID    PlanID
+	Message   string
+	Payload   string
+	CreatedAt time.Time
+}
+
+// Plan is a draft that must be cross-examined and approved before apply.
+type Plan struct {
+	ID                 PlanID
+	SessionID          SessionID
+	ParentPlanID       PlanID
+	Status             string
+	Summary            string
+	Effects            []PlanEffect
+	CrossExam          *CrossExam
+	SecretScanFindings []SecretScanFinding
+	ReviewComment      string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// PlanEffect is one proposed mutation. The payload never includes a secret.
+type PlanEffect struct {
+	Type             string
+	Path             string
+	Diff             string
+	PreconditionHash string
+	CostEstimate     string
+}
+
+// CrossExam is the automatic challenge of a draft.
+type CrossExam struct {
+	Verdict       string
+	ReviewerModel string
+	Reasoning     string
+	At            time.Time
+}
+
+// SecretScanFinding names a detector hit without the secret itself.
+type SecretScanFinding struct {
+	Path string
+	Rule string
+	Line int
+}
+
+// PlanQuery filters ListPlans. Newest first.
+type PlanQuery struct {
+	PageQuery
+	SessionID SessionID
+	Status    string
+}
+
+// Approval is an operator-inbox item. Decisions happen on the subject
+// resource, not here.
+type Approval struct {
+	ID        ApprovalID
+	Kind      string
+	Status    string
+	PlanID    PlanID
+	SessionID SessionID
+	Summary   string
+	CreatedAt time.Time
+}
+
+// ApprovalQuery filters ListApprovals. Oldest pending first when Status is
+// pending; otherwise newest first so the inbox and history share one method.
+type ApprovalQuery struct {
+	PageQuery
+	Status string
+}
+
+// MemoryEntry is store-backed session, agent, or operator memory.
+type MemoryEntry struct {
+	ID        MemoryID
+	Kind      string
+	RefID     string
+	Content   string
+	CreatedAt time.Time
+}
+
+// MemoryQuery filters ListMemory. Newest first.
+type MemoryQuery struct {
+	PageQuery
+	Kind  string
+	RefID string
+}
+
+// MemoryProposal is a harness-proposed memory row awaiting human review.
+type MemoryProposal struct {
+	ID         MemoryProposalID
+	Kind       string
+	RefID      string
+	SessionID  SessionID
+	Content    string
+	Status     string
+	MemoryID   MemoryID
+	CreatedAt  time.Time
+	ReviewedAt time.Time
+}
+
+// MemoryProposalQuery filters ListMemoryProposals. Newest first.
+type MemoryProposalQuery struct {
+	PageQuery
+	Status string
+}
+
+// AuditRecord is one signed, append-only trail row.
+type AuditRecord struct {
+	ID           AuditID
+	Action       string
+	ResourceType string
+	ResourceID   string
+	Actor        string
+	Signature    string
+	CreatedAt    time.Time
+}
+
+// AuditQuery filters ListAudit. Newest first.
+type AuditQuery struct {
+	PageQuery
+	ResourceType string
+	ResourceID   string
+}
+
+// Lease is a time-bounded grant. Policy defines what a lease may be; the
+// store only persists the facts the runtime passes in.
+type Lease struct {
+	ID        LeaseID
+	GrantID   GrantID
+	ScopeID   ScopeID
+	AgentID   AgentID
+	ExpiresAt time.Time
+	MintedAt  time.Time
+}
+
+// LeaseQuery filters ListLeases. Newest minted first.
+type LeaseQuery struct {
+	PageQuery
+	AgentID AgentID
+}
+
+// Checkpoint is an index row for a workspace snapshot. The blob lives
+// outside the store (sandbox tar). Location is a backend-specific locator.
+type Checkpoint struct {
+	ID        CheckpointID
+	SessionID SessionID
+	Label     string
+	Location  string
+	CreatedAt time.Time
+}
+
+// CheckpointQuery filters ListCheckpoints. Newest first.
+type CheckpointQuery struct {
+	PageQuery
+	SessionID SessionID
+}
+
+// Agent is a local agent record. Config changes are audited by callers.
+type Agent struct {
+	ID           AgentID
+	Name         string
+	Harness      string
+	Status       string
+	Model        string
+	Tools        []string
+	AutonomyTier string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
