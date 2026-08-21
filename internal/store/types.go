@@ -44,12 +44,20 @@ type Event struct {
 }
 
 // Plan is a draft that must be cross-examined and approved before apply.
+// Hash, ExpiresAt, CostCeiling, ScopeID, and Credentials are the plan-level
+// fields from Z1-052. Hash is the canonical digest of the rows and those
+// constraints; a mismatch with the recomputed digest is a revision.
 type Plan struct {
 	ID                 PlanID
 	SessionID          SessionID
 	ParentPlanID       PlanID
 	Status             string
 	Summary            string
+	Hash               string
+	ExpiresAt          time.Time
+	CostCeiling        int64
+	ScopeID            ScopeID
+	Credentials        []CredentialConstraint
 	Effects            []PlanEffect
 	CrossExam          *CrossExam
 	SecretScanFindings []SecretScanFinding
@@ -58,13 +66,23 @@ type Plan struct {
 	UpdatedAt          time.Time
 }
 
+// CredentialConstraint names a credential class a plan was drafted under.
+// Provider and Kind are labels. The secret itself is never stored.
+type CredentialConstraint struct {
+	Provider string
+	Kind     string
+}
+
 // PlanEffect is one proposed mutation. The payload never includes a secret.
 type PlanEffect struct {
-	Type             string
-	Path             string
-	Diff             string
-	PreconditionHash string
-	CostEstimate     string
+	Type              string
+	Path              string
+	Diff              string
+	PreconditionHash  string
+	PostconditionHash string
+	IdempotencyKey    string
+	LeaseID           LeaseID
+	CostEstimate      string
 }
 
 // CrossExam is the automatic challenge of a draft.

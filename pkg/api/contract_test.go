@@ -142,6 +142,26 @@ func TestCreateRunHasNoSandboxField(t *testing.T) {
 	}
 }
 
+func TestPlanModelFieldsAreDocumented(t *testing.T) {
+	t.Parallel()
+	spec := readSpec(t)
+	plan := schemaBlock(spec, "Plan:")
+	for _, field := range []string{"hash:", "expires_at:", "cost_ceiling:", "scope_id:", "credentials:"} {
+		if !strings.Contains(plan, field) {
+			t.Errorf("Plan schema missing %s", field)
+		}
+	}
+	effect := schemaBlock(spec, "PlanEffect:")
+	for _, field := range []string{"precondition_hash:", "postcondition_hash:", "idempotency_key:", "lease_id:"} {
+		if !strings.Contains(effect, field) {
+			t.Errorf("PlanEffect schema missing %s", field)
+		}
+	}
+	if schemaBlock(spec, "CredentialConstraint:") == "" {
+		t.Fatal("CredentialConstraint schema missing")
+	}
+}
+
 func TestGeneratedArtifactsExist(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{"gen/go/server.go", "gen/ts/client.ts"} {

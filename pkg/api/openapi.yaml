@@ -1098,6 +1098,30 @@ components:
           type: string
           minLength: 1
           description: Human-readable rationale for the plan. Not a substitute for effects.
+        hash:
+          type: string
+          minLength: 1
+          description: |
+            Canonical digest of the rows and the constraints the plan was
+            drafted under. A revised plan is a new hash and needs a new
+            approval by construction.
+        expires_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC. Apply after this instant is a deny. Expiry is exclusive.
+        cost_ceiling:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Token ceiling for the plan as a whole. Not a billing field. Zero means unset.
+        scope_id:
+          $ref: "#/components/schemas/ScopeID"
+          description: Scope the plan was drafted under.
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/CredentialConstraint"
+          description: Credential classes the plan was drafted under. Never secret values.
         effects:
           type: array
           items:
@@ -1154,10 +1178,34 @@ components:
           type: string
           minLength: 1
           description: Hash of the pre-apply state this effect assumes. Apply rechecks it.
+        postcondition_hash:
+          type: string
+          minLength: 1
+          description: Hash of the post-apply state this effect promises. Apply rechecks it.
+        idempotency_key:
+          type: string
+          minLength: 1
+          description: Stable key so apply retries do not double-apply this row.
+        lease_id:
+          $ref: "#/components/schemas/LeaseID"
+          description: Lease this row will consume on apply.
         cost_estimate:
           type: string
           minLength: 1
           description: Harness-supplied cost hint (tokens, time, or other). Not a billing field.
+    CredentialConstraint:
+      type: object
+      additionalProperties: false
+      required: [provider, kind]
+      properties:
+        provider:
+          type: string
+          minLength: 1
+          description: Credential provider (for example anthropic). Never a secret.
+        kind:
+          type: string
+          minLength: 1
+          description: Credential class (for example api_key). Never the secret itself.
     CrossExam:
       type: object
       additionalProperties: false
