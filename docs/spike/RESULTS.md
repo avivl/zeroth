@@ -138,34 +138,34 @@ Pass bar: 9/10 runs produce parseable effects (`op`, `target`, `diff` or
 | | |
 | --- | --- |
 | Attempts | 10 |
-| Source | `claude -p`, then Messages API stand-in |
-| Parseable / 3-file set | 0 / 0 |
-| Parser agent used | 0 (no transcript to parse) |
+| Source | `claude -p` (`--tools ""`, `--permission-mode plan`) |
+| Parseable / 3-file set | 10 / 10 |
+| Parser agent used | 0 |
 | Wrote files | 0 |
-| Result | **not measured** |
+| Result | **PASS** |
 
-Every attempt failed before a transcript: Anthropic `credit balance is
-too low` from both `claude -p` and `POST /v1/messages`. That is a
-billing block, not unstructured output. The fail path (parser agent in
-front of the raw transcript) was not exercised live. ACP (G7) stays
-the protocol question; this run does not raise it.
+Credits were topped up after the first pass (PR #17) returned 0/10 with
+`credit balance is too low`. This re-run is the live G4 bar: 10/10
+parseable 3-file effect sets from `claude -p`, no file writes, no
+parser-agent second pass. ACP (G7) is unchanged; a structured
+tool-call channel is not required for this prompt.
 
 Offline parser corpus (`harness/testdata/g4`, 10 transcripts: clean
 JSON, markdown fences, OpenAPI `type`/`path` aliases, `claude -p
 --output-format json` wrapper, array root, `./` targets): **10/10**
-parseable 3-file sets. That is parser readiness, not the live G4 bar.
+parseable 3-file sets.
 
 ### Example effect set
 
-Shape the adapter must emit. Taken from the offline corpus
-(`01-clean.json`), not from a live model run.
+Live run 1 (`claude -p`). The other nine matched this shape
+(`op`/`target`/`diff` for README.md, greet.go, main.go).
 
 ```json
 [
   {
     "op": "modify",
     "target": "README.md",
-    "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n # demo\n+Version: 2\n"
+    "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1,3 @@\n # demo\n+\n+Version: 2\n"
   },
   {
     "op": "modify",
@@ -175,7 +175,7 @@ Shape the adapter must emit. Taken from the offline corpus
   {
     "op": "modify",
     "target": "main.go",
-    "diff": "--- a/main.go\n+++ b/main.go\n@@ -8,5 +8,5 @@\n \n func main() {\n-\tfmt.Println(greet.Hello())\n+\tfmt.Println(greet.Greet(\"zeroth\"))\n }\n"
+    "diff": "--- a/main.go\n+++ b/main.go\n@@ -6,5 +6,5 @@\n )\n \n func main() {\n-\tfmt.Println(greet.Hello())\n+\tfmt.Println(greet.Greet(\"zeroth\"))\n }\n"
   }
 ]
 ```
