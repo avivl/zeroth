@@ -332,19 +332,25 @@ func testKillInflight(t *testing.T, open func(t *testing.T) sandbox.Driver) {
 	ctx := t.Context()
 	sb := mustSpawn(t, d, helloTar())
 
-	errc := make(chan error, 1)
+	type execOut struct {
+		res sandbox.ExecResult
+		err error
+	}
+	done := make(chan execOut, 1)
 	go func() {
-		_, err := d.Exec(ctx, sb.ID, sandbox.Cmd{Argv: []string{"sleep", "30"}})
-		errc <- err
+		res, err := d.Exec(ctx, sb.ID, sandbox.Cmd{Argv: []string{"sleep", "30"}})
+		done <- execOut{res: res, err: err}
 	}()
 	time.Sleep(300 * time.Millisecond)
 	if err := d.Kill(ctx, sb.ID); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
 	select {
-	case err := <-errc:
-		if err == nil {
-			t.Fatal("in-flight exec succeeded after kill")
+	case out := <-done:
+		// Signal death is a non-zero exit with a nil driver error.
+		// Either form means the sleep did not finish.
+		if out.err == nil && out.res.ExitCode == 0 {
+			t.Fatal("in-flight exec completed after kill")
 		}
 	case <-time.After(15 * time.Second):
 		t.Fatal("in-flight exec did not return after kill")

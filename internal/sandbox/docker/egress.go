@@ -48,6 +48,7 @@ func (d *Driver) AllowEgress(ctx context.Context, id sandbox.ID, rules []sandbox
 		}
 		if inst.bridged && inst.container != "" {
 			_ = exec.CommandContext(ctx, "docker", "network", "disconnect", "bridge", inst.container).Run()
+			_ = exec.CommandContext(ctx, "docker", "network", "connect", "none", inst.container).Run()
 			inst.bridged = false
 		}
 		return nil
@@ -63,6 +64,7 @@ func (d *Driver) AllowEgress(ctx context.Context, id sandbox.ID, rules []sandbox
 		inst.proxy.SetRules(rules)
 	}
 	if !inst.bridged && inst.container != "" {
+		_ = exec.CommandContext(ctx, "docker", "network", "disconnect", "none", inst.container).Run()
 		if _, err := d.docker(ctx, "network", "connect", "bridge", inst.container); err != nil {
 			return fmt.Errorf("sandbox docker egress: connect: %w", err)
 		}

@@ -59,10 +59,11 @@ type Driver interface {
 	// Kill SIGKILLs in-flight work. Processes are not checkpointed.
 	// The workspace overlay remains until Stop so a last ExportTar can
 	// still run. Work written after the last export is gone on restore.
-	// Subsequent Exec returns ErrKilled. Kill is idempotent. A restored
-	// pid file is not liveness: that number can name a different process
-	// in a new pid namespace. An in-sandbox daemon's files restore; the
-	// process does not.
+	// An in-flight Exec returns either a driver error or a non-zero
+	// ExitCode (signal). Subsequent Exec returns ErrKilled. Kill is
+	// idempotent. A restored pid file is not liveness: that number can
+	// name a different process in a new pid namespace. An in-sandbox
+	// daemon's files restore; the process does not.
 	Kill(ctx context.Context, id ID) error
 
 	// Stop releases host resources (runtime, overlay, temp dirs).
