@@ -12,6 +12,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       SPIKE_ADDR: ":8421"
       SPIKE_FIXTURES: /fixtures
+      SPIKE_DB: /tmp/spike.db
     volumes:
       - ./fixtures:/fixtures:ro
     healthcheck:

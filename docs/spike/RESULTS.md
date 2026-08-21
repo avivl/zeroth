@@ -31,3 +31,26 @@ synthetic files. Only S.tar is in git. Recreate M and L with
 | G5 | | Session state machine and append-only event log. Distinct `session.ID`. | Illegal transitions deny. Log is the source of truth. | | |
 | G6 | | Harness touchpoint with Anthropic API key only ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). | Key from env. No consumer OAuth. Key never logged. | | |
 | G7 | [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) | Evaluate ACP as the harness driver protocol. Write [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). | ADR accepted with ACP or a shim. Plan-then-apply still holds. | | |
+
+## Attach latency and SQLite throughput (Linear 42-6)
+
+These G1/G6 numbers are the session-model gates (Z1-031..034, NFR-1), not
+the sandbox/harness rows in the table above. The event log in SQLite is the
+source of truth. The WebSocket stream is a live tail of it. Attach is
+replay last N, then live tail.
+
+Re-run with `go run ./cmd/spike bench` from `zeroth-spike/`. Method: 10
+warm-up runs, then 110 samples for G1 warm and G6. Percentiles are of those
+110. G1 warm is attach to an already-streaming session. G1 cold is a new
+SQLite file, new session, then attach (2 warm-up + 10 samples; each sample
+is a new database, so the recorded number is not a 110-run tax). G6 is 5
+concurrent sessions appending; a stall is one `Append` (or one batched
+`AppendBatch` commit).
+
+| Gate | Pass bar | n | p50 | p95 | p99 | max | Result |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| G1 Attach (warm) | < 2 s to first live token | 110 | 5.403 ms | 6.137 ms | 6.214 ms | 6.237 ms | pass |
+| G1 Attach (cold) | recorded | 10 | 5.775 ms | 6.130 ms | 6.190 ms | 6.205 ms | recorded |
+| G6 write stall (5 sessions, unbatched) | no stall > 50 ms | 550 | 0.089 ms | 0.290 ms | 0.503 ms | 5.714 ms | pass |
+
+Host: Linux 6.12, Go 1.27.0, local SQLite WAL via `modernc.org/sqlite`. Unbatched G6 max is 5.7 ms, so batched writes were not measured. Cross-process attach: `spike run` then `spike attach <id>` against `spike serve` (see `cmd/spike/cli_test.go`). Subprocess supervision is `spike run -agent claude` (`claude -p`) when the binary is present; tests use `echo` as the stand-in.

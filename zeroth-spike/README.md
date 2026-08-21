@@ -20,6 +20,23 @@ curl -fsS http://127.0.0.1:8421/fixtures  # S/M/L tar sizes
 The process listens on loopback port 8421. It never logs or returns the API
 key. Consumer OAuth is out of scope.
 
+## Session log (Linear 42-6)
+
+SQLite is the source of truth. WebSocket is a live tail of that log.
+Attach is replay last N, a `caught_up` frame, then live tokens.
+
+```bash
+go run ./cmd/spike serve -db /tmp/spike.db
+go run ./cmd/spike run                         # prints session id; fake agent
+go run ./cmd/spike attach <id>                 # replay then live tail
+go run ./cmd/spike bg <id>                     # demote; agent keeps running
+go run ./cmd/spike run -agent claude           # one real `claude -p` if installed
+go run ./cmd/spike bench                       # G1 attach + G6 write stall
+```
+
+`spike run` is headless: it starts a session on the server and exits.
+`spike attach` talks to that server from another process.
+
 ## Tests
 
 ```bash
@@ -34,7 +51,10 @@ and 5 GB). Recreate them with `./fixtures/build.sh`.
 | Path | Role |
 | --- | --- |
 | `sandbox` | `Driver` port: `Name`, `Start` / `Exec` / `Stop`. Memory unpacks tars. Docker is named and stubbed. |
-| `session` | Distinct `ID` type, state machine, append-only event log |
+| `session` | Distinct `ID` type and state machine |
+| `eventlog` | Append-only SQLite WAL log; one row per session event |
+| `supervisor` | Goroutine plus fake ticker agent, or a subprocess (`claude -p` / cmd) |
+| `bench` | G1 attach latency and G6 SQLite write-stall measurement |
 | `harness` | One touchpoint: `ANTHROPIC_API_KEY` present or not |
 | `fixtures` | S/M/L workspace tars |
-| `cmd/spike` | The compose process |
+| `cmd/spike` | `serve` (default), `run`, `attach`, `bg`, `bench` |
