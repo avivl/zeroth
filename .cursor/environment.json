@@ -1,0 +1,12 @@
+{
+  "name": "Zeroth (Go 1.27 + web + Docker)",
+  "user": "ubuntu",
+  "install": "./.cursor/install.sh",
+  "start": "./.cursor/start.sh",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "cd web && COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack pnpm run dev"
+    }
+  ]
+}
