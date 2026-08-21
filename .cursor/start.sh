@@ -13,9 +13,12 @@ if sudo docker info >/dev/null 2>&1; then
 fi
 
 log "Starting dockerd"
-# Redirect under sudo so the log file is opened as root; a plain
-# "sudo dockerd >/var/log/..." would open the file as the unprivileged user.
-sudo sh -c 'nohup dockerd >/var/log/dockerd.log 2>&1 &'
+sudo mkdir -p /var/log
+# setsid moves dockerd into its own session and process group so it survives
+# after this start script returns and the start step's process group is torn
+# down. A plain "nohup ... &" only ignores SIGHUP and can still be reaped, which
+# leaves the daemon down on boot. Redirect under sudo so the log opens as root.
+sudo bash -c 'setsid dockerd </dev/null >>/var/log/dockerd.log 2>&1 &'
 
 for _ in $(seq 1 30); do
   if sudo docker info >/dev/null 2>&1; then
