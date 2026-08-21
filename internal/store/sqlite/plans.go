@@ -9,7 +9,7 @@ import (
 	"github.com/avivl/zeroth/internal/store"
 )
 
-const planCols = `id, session_id, parent_plan_id, status, summary, effects_json, cross_exam_json, secret_scan_findings_json, review_comment, created_at_unix_nano, updated_at_unix_nano`
+const planCols = `id, session_id, parent_plan_id, status, summary, hash, expires_at_unix_nano, cost_ceiling, scope_id, credentials_json, effects_json, cross_exam_json, secret_scan_findings_json, review_comment, created_at_unix_nano, updated_at_unix_nano`
 
 func (s *Store) CreatePlan(ctx context.Context, p store.Plan) error {
 	if err := s.guard(); err != nil {
@@ -18,12 +18,13 @@ func (s *Store) CreatePlan(ctx context.Context, p store.Plan) error {
 	if p.ID.IsZero() || p.SessionID.IsZero() || p.Status == "" || p.Summary == "" {
 		return wrap("create plan", store.ErrInvalid)
 	}
-	effects, exam, findings, err := planJSON(p)
+	effects, exam, findings, creds, err := planJSON(p)
 	if err != nil {
 		return wrap("create plan", err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO plans (`+planCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = s.db.ExecContext(ctx, `INSERT INTO plans (`+planCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID.String(), p.SessionID.String(), p.ParentPlanID.String(), p.Status, p.Summary,
+		p.Hash, unixNano(p.ExpiresAt), p.CostCeiling, p.ScopeID.String(), creds,
 		effects, exam, findings, p.ReviewComment, nano(p.CreatedAt), nano(p.UpdatedAt),
 	)
 	if err != nil {
@@ -49,15 +50,17 @@ func (s *Store) UpdatePlan(ctx context.Context, p store.Plan) error {
 	if p.ID.IsZero() || p.SessionID.IsZero() || p.Status == "" || p.Summary == "" {
 		return wrap("update plan", store.ErrInvalid)
 	}
-	effects, exam, findings, err := planJSON(p)
+	effects, exam, findings, creds, err := planJSON(p)
 	if err != nil {
 		return wrap("update plan", err)
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE plans SET session_id = ?, parent_plan_id = ?, status = ?, summary = ?, effects_json = ?,
+		UPDATE plans SET session_id = ?, parent_plan_id = ?, status = ?, summary = ?, hash = ?,
+			expires_at_unix_nano = ?, cost_ceiling = ?, scope_id = ?, credentials_json = ?, effects_json = ?,
 			cross_exam_json = ?, secret_scan_findings_json = ?, review_comment = ?, updated_at_unix_nano = ?
 		WHERE id = ?`,
-		p.SessionID.String(), p.ParentPlanID.String(), p.Status, p.Summary, effects, exam, findings,
+		p.SessionID.String(), p.ParentPlanID.String(), p.Status, p.Summary, p.Hash,
+		unixNano(p.ExpiresAt), p.CostCeiling, p.ScopeID.String(), creds, effects, exam, findings,
 		p.ReviewComment, nano(p.UpdatedAt), p.ID.String(),
 	)
 	if err != nil {
@@ -107,43 +110,57 @@ func (s *Store) ListPlans(ctx context.Context, q store.PlanQuery) (store.Page[st
 	return pageOf(items, limit, func(p store.Plan) time.Time { return p.CreatedAt }, func(p store.Plan) string { return p.ID.String() }), nil
 }
 
-func planJSON(p store.Plan) (effects, exam, findings string, err error) {
+func planJSON(p store.Plan) (effects, exam, findings, creds string, err error) {
 	effects, err = marshalEffects(p.Effects)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	exam, err = marshalCrossExam(p.CrossExam)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 	findings, err = marshalFindings(p.SecretScanFindings)
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
-	return effects, exam, findings, nil
+	creds, err = marshalCredentials(p.Credentials)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return effects, exam, findings, creds, nil
+}
+
+type planScan struct {
+	id, sess, parent, hash, scope, creds, effects, exam, findings string
+	expires, cost                                                 int64
+	created, updated                                              int64
 }
 
 func scanPlan(row *sql.Row, op string) (store.Plan, error) {
 	var p store.Plan
-	var id, sess, parent, effects, exam, findings string
-	var created, updated int64
-	err := row.Scan(&id, &sess, &parent, &p.Status, &p.Summary, &effects, &exam, &findings, &p.ReviewComment, &created, &updated)
+	var s planScan
+	err := row.Scan(
+		&s.id, &s.sess, &s.parent, &p.Status, &p.Summary, &s.hash, &s.expires, &s.cost,
+		&s.scope, &s.creds, &s.effects, &s.exam, &s.findings, &p.ReviewComment, &s.created, &s.updated,
+	)
 	if err != nil {
 		return store.Plan{}, wrap(op, err)
 	}
-	return finishPlan(p, id, sess, parent, effects, exam, findings, created, updated, op)
+	return finishPlan(p, s, op)
 }
 
 func scanPlans(rows *sql.Rows) ([]store.Plan, error) {
 	var out []store.Plan
 	for rows.Next() {
 		var p store.Plan
-		var id, sess, parent, effects, exam, findings string
-		var created, updated int64
-		if err := rows.Scan(&id, &sess, &parent, &p.Status, &p.Summary, &effects, &exam, &findings, &p.ReviewComment, &created, &updated); err != nil {
+		var s planScan
+		if err := rows.Scan(
+			&s.id, &s.sess, &s.parent, &p.Status, &p.Summary, &s.hash, &s.expires, &s.cost,
+			&s.scope, &s.creds, &s.effects, &s.exam, &s.findings, &p.ReviewComment, &s.created, &s.updated,
+		); err != nil {
 			return nil, wrap("list plans", err)
 		}
-		p, err := finishPlan(p, id, sess, parent, effects, exam, findings, created, updated, "list plans")
+		p, err := finishPlan(p, s, "list plans")
 		if err != nil {
 			return nil, err
 		}
@@ -158,38 +175,52 @@ func scanPlans(rows *sql.Rows) ([]store.Plan, error) {
 	return out, nil
 }
 
-func finishPlan(p store.Plan, id, sess, parent, effects, exam, findings string, created, updated int64, op string) (store.Plan, error) {
-	pid, err := store.ParsePlanID(id)
+func finishPlan(p store.Plan, s planScan, op string) (store.Plan, error) {
+	pid, err := store.ParsePlanID(s.id)
 	if err != nil {
 		return store.Plan{}, wrap(op, err)
 	}
-	sid, err := store.ParseSessionID(sess)
+	sid, err := store.ParseSessionID(s.sess)
 	if err != nil {
 		return store.Plan{}, wrap(op, err)
 	}
 	p.ID = pid
 	p.SessionID = sid
-	if parent != "" {
-		pp, err := store.ParsePlanID(parent)
+	p.Hash = s.hash
+	p.ExpiresAt = fromNano(s.expires)
+	p.CostCeiling = s.cost
+	if s.scope != "" {
+		scope, err := store.ParseScopeID(s.scope)
+		if err != nil {
+			return store.Plan{}, wrap(op, err)
+		}
+		p.ScopeID = scope
+	}
+	if s.parent != "" {
+		pp, err := store.ParsePlanID(s.parent)
 		if err != nil {
 			return store.Plan{}, wrap(op, err)
 		}
 		p.ParentPlanID = pp
 	}
-	p.Effects, err = unmarshalEffects(effects)
+	p.Credentials, err = unmarshalCredentials(s.creds)
 	if err != nil {
 		return store.Plan{}, wrap(op, err)
 	}
-	p.CrossExam, err = unmarshalCrossExam(exam)
+	p.Effects, err = unmarshalEffects(s.effects)
 	if err != nil {
 		return store.Plan{}, wrap(op, err)
 	}
-	p.SecretScanFindings, err = unmarshalFindings(findings)
+	p.CrossExam, err = unmarshalCrossExam(s.exam)
 	if err != nil {
 		return store.Plan{}, wrap(op, err)
 	}
-	p.CreatedAt = fromNano(created)
-	p.UpdatedAt = fromNano(updated)
+	p.SecretScanFindings, err = unmarshalFindings(s.findings)
+	if err != nil {
+		return store.Plan{}, wrap(op, err)
+	}
+	p.CreatedAt = fromNano(s.created)
+	p.UpdatedAt = fromNano(s.updated)
 	return p, nil
 }
 

@@ -46,6 +46,15 @@ func nano(t time.Time) int64 {
 	return t.UTC().UnixNano()
 }
 
+// unixNano stores a timestamp that may be absent. Zero time is 0, unlike
+// [nano], which fills in now for created/updated columns.
+func unixNano(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UTC().UnixNano()
+}
+
 func fromNano(n int64) time.Time {
 	if n == 0 {
 		return time.Time{}
@@ -165,11 +174,14 @@ func unmarshalCrossExam(s string) (*store.CrossExam, error) {
 }
 
 type effectJSON struct {
-	Type             string `json:"type"`
-	Path             string `json:"path,omitempty"`
-	Diff             string `json:"diff,omitempty"`
-	PreconditionHash string `json:"precondition_hash,omitempty"`
-	CostEstimate     string `json:"cost_estimate,omitempty"`
+	Type              string `json:"type"`
+	Path              string `json:"path,omitempty"`
+	Diff              string `json:"diff,omitempty"`
+	PreconditionHash  string `json:"precondition_hash,omitempty"`
+	PostconditionHash string `json:"postcondition_hash,omitempty"`
+	IdempotencyKey    string `json:"idempotency_key,omitempty"`
+	LeaseID           string `json:"lease_id,omitempty"`
+	CostEstimate      string `json:"cost_estimate,omitempty"`
 }
 
 func marshalEffects(effects []store.PlanEffect) (string, error) {
@@ -179,11 +191,14 @@ func marshalEffects(effects []store.PlanEffect) (string, error) {
 	js := make([]effectJSON, 0, len(effects))
 	for _, e := range effects {
 		js = append(js, effectJSON{
-			Type:             e.Type,
-			Path:             e.Path,
-			Diff:             e.Diff,
-			PreconditionHash: e.PreconditionHash,
-			CostEstimate:     e.CostEstimate,
+			Type:              e.Type,
+			Path:              e.Path,
+			Diff:              e.Diff,
+			PreconditionHash:  e.PreconditionHash,
+			PostconditionHash: e.PostconditionHash,
+			IdempotencyKey:    e.IdempotencyKey,
+			LeaseID:           e.LeaseID.String(),
+			CostEstimate:      e.CostEstimate,
 		})
 	}
 	return marshalJSON(js)
@@ -196,13 +211,51 @@ func unmarshalEffects(s string) ([]store.PlanEffect, error) {
 	}
 	out := make([]store.PlanEffect, 0, len(raw))
 	for _, e := range raw {
+		var lease store.LeaseID
+		if e.LeaseID != "" {
+			lease, err = store.ParseLeaseID(e.LeaseID)
+			if err != nil {
+				return nil, err
+			}
+		}
 		out = append(out, store.PlanEffect{
-			Type:             e.Type,
-			Path:             e.Path,
-			Diff:             e.Diff,
-			PreconditionHash: e.PreconditionHash,
-			CostEstimate:     e.CostEstimate,
+			Type:              e.Type,
+			Path:              e.Path,
+			Diff:              e.Diff,
+			PreconditionHash:  e.PreconditionHash,
+			PostconditionHash: e.PostconditionHash,
+			IdempotencyKey:    e.IdempotencyKey,
+			LeaseID:           lease,
+			CostEstimate:      e.CostEstimate,
 		})
+	}
+	return out, nil
+}
+
+type credentialJSON struct {
+	Provider string `json:"provider"`
+	Kind     string `json:"kind"`
+}
+
+func marshalCredentials(creds []store.CredentialConstraint) (string, error) {
+	if creds == nil {
+		creds = []store.CredentialConstraint{}
+	}
+	js := make([]credentialJSON, 0, len(creds))
+	for _, c := range creds {
+		js = append(js, credentialJSON{Provider: c.Provider, Kind: c.Kind})
+	}
+	return marshalJSON(js)
+}
+
+func unmarshalCredentials(s string) ([]store.CredentialConstraint, error) {
+	raw, err := unmarshalSlice[credentialJSON](s)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.CredentialConstraint, 0, len(raw))
+	for _, c := range raw {
+		out = append(out, store.CredentialConstraint{Provider: c.Provider, Kind: c.Kind})
 	}
 	return out, nil
 }

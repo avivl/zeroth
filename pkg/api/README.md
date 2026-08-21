@@ -33,7 +33,7 @@ be the resource groups on this surface.
 | View | Expressible through | Notes |
 | --- | --- | --- |
 | Runs | `POST/GET /runs`, `GET /runs/{id}`, `GET /runs/{id}/events`, `POST /runs/{id}/steer`, `POST /runs/{id}/background`, `POST /runs/{id}/foreground`, `POST /runs/{id}/stop`, `POST /runs/{id}/checkpoints` | Live tail is the WebSocket on `GET /runs/{id}/events`. HTTP without Upgrade returns the same replay window for the CLI. Stop checkpoints, then marks the run stopped so restore can fork a continuation. |
-| Plans | `GET /plans`, `GET /plans/{id}`, `POST /plans/{id}/approve`, `POST /plans/{id}/request-changes`, `POST /plans/{id}/branch`, `POST /plans/{id}/apply` | Effects are structured diffs. Cross-exam is a field on the plan, not an operator endpoint. Apply is the world-changing call. |
+| Plans | `GET /plans`, `GET /plans/{id}`, `POST /plans/{id}/approve`, `POST /plans/{id}/request-changes`, `POST /plans/{id}/branch`, `POST /plans/{id}/apply` | Effects are structured diffs with lease, precondition, idempotency key, and postcondition. The plan carries a canonical hash, expiry, cost ceiling, and draft constraints. Cross-exam is a field on the plan, not an operator endpoint. Apply is the world-changing call. |
 | Agents | `GET /agents`, `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /agents/{id}/leases` | PATCH is a signed audited action (`name`, `model`, `tools`, `autonomy_tier`). Leases are read-only; they are minted during apply. |
 | Approvals | `GET /approvals` | Inbox only. `kind` is an open string. Decisions go to the subject resource. |
 | Memory | `GET/POST /memory`, `GET /memory/proposals`, `POST /memory/proposals/{id}/accept`, `POST /memory/proposals/{id}/reject` | Operator writes vs agent proposals are separate paths. |

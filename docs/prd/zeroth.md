@@ -55,6 +55,7 @@ This table is an index. The ADRs live in [`docs/adr/`](../adr/), one file per de
 | [ADR-Z-0006](../adr/Z-0006-linear-tracker.md) | Linear is the first tracker provider, GitHub Issues second | Accepted |
 | [ADR-Z-0007](../adr/Z-0007-secp256k1-schnorr.md) | Signing scheme secp256k1 Schnorr, Nostr compatible | Accepted |
 | [ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md) | Anthropic auth is API key only; per-provider auth matrix, quarterly review | Accepted |
+| [ADR-Z-0009](../adr/Z-0009-canonical-plan-hash.md) | Canonical plan hash, closed effect set, no unexpressible-effect fallback | Accepted |
 
 Project-level choices that are not in this register (name, public from day one, stage 1 is local, plan-then-apply) stay in [plan §6](../design/plan.md).
 

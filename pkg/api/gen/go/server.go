@@ -428,6 +428,15 @@ type CreateRunRequest struct {
 	WorkspaceSource *WorkspaceSource `json:"workspace_source,omitempty"`
 }
 
+// CredentialConstraint defines model for CredentialConstraint.
+type CredentialConstraint struct {
+	// Kind Credential class (for example api_key). Never the secret itself.
+	Kind string `json:"kind"`
+
+	// Provider Credential provider (for example anthropic). Never a secret.
+	Provider string `json:"provider"`
+}
+
 // CrossExam defines model for CrossExam.
 type CrossExam struct {
 	// At RFC 3339 timestamp in UTC when cross-exam completed.
@@ -556,12 +565,26 @@ type MemoryProposalStatus string
 
 // Plan defines model for Plan.
 type Plan struct {
+	// CostCeiling Token ceiling for the plan as a whole. Not a billing field. Zero means unset.
+	CostCeiling *int64 `json:"cost_ceiling,omitempty"`
+
 	// CreatedAt RFC 3339 timestamp in UTC.
-	CreatedAt time.Time  `json:"created_at"`
-	CrossExam *CrossExam `json:"cross_exam,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Credentials Credential classes the plan was drafted under. Never secret values.
+	Credentials *[]CredentialConstraint `json:"credentials,omitempty"`
+	CrossExam   *CrossExam              `json:"cross_exam,omitempty"`
 
 	// Effects Structured diffs the operator reviews before apply.
 	Effects []PlanEffect `json:"effects"`
+
+	// ExpiresAt RFC 3339 timestamp in UTC. Apply after this instant is a deny. Expiry is exclusive.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Hash Canonical digest of the rows and the constraints the plan was
+	// drafted under. A revised plan is a new hash and needs a new
+	// approval by construction.
+	Hash *string `json:"hash,omitempty"`
 
 	// Id Opaque plan id. Not interchangeable with other id kinds.
 	Id PlanID `json:"id"`
@@ -574,6 +597,9 @@ type Plan struct {
 
 	// RunId Opaque run id. Not interchangeable with other id kinds.
 	RunId RunID `json:"run_id"`
+
+	// ScopeId Scope the plan was drafted under.
+	ScopeId *ScopeID `json:"scope_id,omitempty"`
 
 	// SecretScanFindings Secretscan results. Omitted until the gate has run. Empty
 	// means it ran and found nothing. Non-empty findings block
@@ -598,8 +624,17 @@ type PlanEffect struct {
 	// Diff Unified diff or proposed content. Never a secret value.
 	Diff *string `json:"diff,omitempty"`
 
+	// IdempotencyKey Stable key so apply retries do not double-apply this row.
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+
+	// LeaseId Lease this row will consume on apply.
+	LeaseId *LeaseID `json:"lease_id,omitempty"`
+
 	// Path Workspace path this effect touches. For memory_proposal, a memory key.
 	Path *string `json:"path,omitempty"`
+
+	// PostconditionHash Hash of the post-apply state this effect promises. Apply rechecks it.
+	PostconditionHash *string `json:"postcondition_hash,omitempty"`
 
 	// PreconditionHash Hash of the pre-apply state this effect assumes. Apply rechecks it.
 	PreconditionHash *string        `json:"precondition_hash,omitempty"`

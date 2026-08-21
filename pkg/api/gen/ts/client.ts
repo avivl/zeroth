@@ -281,6 +281,28 @@ export interface Plan {
    * @minLength 1
    */
   summary: string;
+  /**
+   * Canonical digest of the rows and the constraints the plan was
+   * drafted under. A revised plan is a new hash and needs a new
+   * approval by construction.
+   * @minLength 1
+   */
+  hash?: string;
+  /**
+   * RFC 3339 timestamp in UTC. Apply after this instant is a deny. Expiry is exclusive.
+   * @format date-time
+   */
+  expires_at?: string;
+  /**
+   * Token ceiling for the plan as a whole. Not a billing field. Zero means unset.
+   * @format int64
+   * @min 0
+   */
+  cost_ceiling?: number;
+  /** Scope the plan was drafted under. */
+  scope_id?: ScopeID;
+  /** Credential classes the plan was drafted under. Never secret values. */
+  credentials?: CredentialConstraint[];
   /** Structured diffs the operator reviews before apply. */
   effects: PlanEffect[];
   cross_exam?: CrossExam;
@@ -325,10 +347,35 @@ export interface PlanEffect {
    */
   precondition_hash?: string;
   /**
+   * Hash of the post-apply state this effect promises. Apply rechecks it.
+   * @minLength 1
+   */
+  postcondition_hash?: string;
+  /**
+   * Stable key so apply retries do not double-apply this row.
+   * @minLength 1
+   */
+  idempotency_key?: string;
+  /** Lease this row will consume on apply. */
+  lease_id?: LeaseID;
+  /**
    * Harness-supplied cost hint (tokens, time, or other). Not a billing field.
    * @minLength 1
    */
   cost_estimate?: string;
+}
+
+export interface CredentialConstraint {
+  /**
+   * Credential provider (for example anthropic). Never a secret.
+   * @minLength 1
+   */
+  provider: string;
+  /**
+   * Credential class (for example api_key). Never the secret itself.
+   * @minLength 1
+   */
+  kind: string;
 }
 
 export interface CrossExam {

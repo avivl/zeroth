@@ -307,15 +307,23 @@ func testPlans(t *testing.T, open func(t *testing.T) store.Store) {
 	ctx := t.Context()
 	sess := seedSession(t, s, "plan-agent", "plan-sess")
 	p := store.Plan{
-		ID:        mustPlanID(t, "plan-1"),
-		SessionID: sess.ID,
-		Status:    "draft",
-		Summary:   "touch README",
+		ID:          mustPlanID(t, "plan-1"),
+		SessionID:   sess.ID,
+		Status:      "draft",
+		Summary:     "touch README",
+		Hash:        "abc123",
+		ExpiresAt:   ts(10),
+		CostCeiling: 1000,
+		ScopeID:     mustScopeID(t, "scope-a"),
+		Credentials: []store.CredentialConstraint{{Provider: "anthropic", Kind: "api_key"}},
 		Effects: []store.PlanEffect{{
-			Type:             "modify",
-			Path:             "README.md",
-			Diff:             "+hi",
-			PreconditionHash: "abc",
+			Type:              "modify",
+			Path:              "README.md",
+			Diff:              "+hi",
+			PreconditionHash:  "abc",
+			PostconditionHash: "def",
+			IdempotencyKey:    "idem-1",
+			LeaseID:           mustLeaseID(t, "lease-1"),
 		}},
 		CrossExam: &store.CrossExam{
 			Verdict:       "ok",
@@ -336,6 +344,15 @@ func testPlans(t *testing.T, open func(t *testing.T) store.Store) {
 	}
 	if len(got.Effects) != 1 || got.Effects[0].Path != "README.md" || got.CrossExam == nil || got.CrossExam.Verdict != "ok" {
 		t.Fatalf("GetPlan = %+v", got)
+	}
+	if got.Hash != "abc123" || got.CostCeiling != 1000 || got.ScopeID.String() != "scope-a" {
+		t.Fatalf("plan constraints: %+v", got)
+	}
+	if got.Effects[0].LeaseID.String() != "lease-1" || got.Effects[0].IdempotencyKey != "idem-1" || got.Effects[0].PostconditionHash != "def" {
+		t.Fatalf("plan row: %+v", got.Effects[0])
+	}
+	if len(got.Credentials) != 1 || got.Credentials[0].Provider != "anthropic" {
+		t.Fatalf("credentials: %+v", got.Credentials)
 	}
 	p.Status = "approved"
 	p.ReviewComment = "ship it"
