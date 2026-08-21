@@ -1,6 +1,10 @@
 package session
 
-import "fmt"
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+)
 
 // ID is a session identifier. It is a distinct named type, not a
 // string and not interchangeable with sandbox handle IDs.
@@ -14,6 +18,16 @@ func ParseID(raw string) (ID, error) {
 		return ID{}, fmt.Errorf("session id: empty")
 	}
 	return ID{raw: raw}, nil
+}
+
+// NewID returns a random session ID. The value is opaque; callers
+// must not parse structure out of it.
+func NewID() (ID, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ID{}, fmt.Errorf("session id: %w", err)
+	}
+	return ParseID("s_" + hex.EncodeToString(b[:]))
 }
 
 // String returns the raw identifier. It is for logs and tests, not

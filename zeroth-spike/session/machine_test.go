@@ -7,6 +7,21 @@ import (
 	"github.com/avivl/zeroth/zeroth-spike/session"
 )
 
+func TestNewID(t *testing.T) {
+	t.Parallel()
+	a, err := session.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := session.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.IsZero() || a.String() == b.String() {
+		t.Fatalf("NewID not unique: %q %q", a.String(), b.String())
+	}
+}
+
 func TestParseID(t *testing.T) {
 	t.Parallel()
 
