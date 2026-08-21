@@ -100,6 +100,16 @@ func (d *Docker) Start(ctx context.Context, req StartRequest) (Instance, error) 
 		merged:    merged,
 		overlay:   method,
 		image:     d.image,
+		proxy:     nil,
+	}
+
+	if !req.Egress.Empty() {
+		px, err := ListenProxy(req.Egress)
+		if err != nil {
+			_ = inst.cleanup()
+			return nil, fmt.Errorf("sandbox docker start: %w", err)
+		}
+		inst.proxy = px
 	}
 
 	if err := inst.createContainer(ctx); err != nil {
@@ -132,6 +142,7 @@ type dockerInstance struct {
 	overlay   string
 	image     string
 	container string
+	proxy     *Proxy
 
 	mu      sync.Mutex
 	killed  bool
@@ -148,11 +159,24 @@ func (i *dockerInstance) createContainer(ctx context.Context) error {
 	args := []string{
 		"create",
 		"--name", name,
-		"--network", "none",
 		"--read-only",
 		"--tmpfs", "/tmp:rw,exec",
 		"--mount", "type=bind,src=" + i.merged + ",dst=/workspace",
 		"--workdir", "/workspace",
+	}
+	if i.proxy == nil {
+		args = append(args, "--network", "none")
+	} else {
+		proxyURL := fmt.Sprintf("http://host.docker.internal:%d", i.proxy.Port())
+		args = append(args,
+			"--add-host", "host.docker.internal:host-gateway",
+			"-e", "HTTP_PROXY="+proxyURL,
+			"-e", "HTTPS_PROXY="+proxyURL,
+			"-e", "http_proxy="+proxyURL,
+			"-e", "https_proxy="+proxyURL,
+			"-e", "NO_PROXY=localhost,127.0.0.1",
+			"-e", "no_proxy=localhost,127.0.0.1",
+		)
 	}
 	if spec := currentUserSpec(); spec != "" {
 		args = append(args, "--user", spec)
@@ -291,10 +315,16 @@ func (i *dockerInstance) cleanupLocked() error {
 	var first error
 	if i.container != "" {
 		out, err := exec.Command("docker", "rm", "-f", i.container).CombinedOutput()
-		if err != nil {
+		if err != nil && first == nil {
 			first = fmt.Errorf("sandbox docker rm: %s", bytesHead(out, err))
 		}
 		i.container = ""
+	}
+	if i.proxy != nil {
+		if err := i.proxy.Close(); err != nil && first == nil {
+			first = fmt.Errorf("sandbox docker proxy: %w", err)
+		}
+		i.proxy = nil
 	}
 	if err := unmountOverlay(i.overlay, i.merged); err != nil && first == nil {
 		first = fmt.Errorf("sandbox docker unmount: %w", err)

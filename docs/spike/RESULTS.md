@@ -32,6 +32,71 @@ synthetic files. Only S.tar is in git. Recreate M and L with
 | G6 | | Harness touchpoint with Anthropic API key only ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). | Key from env. No consumer OAuth. Key never logged. | | |
 | G7 | [42-9](https://linear.app/42-golems/issue/42-9/gate-g7-evaluate-acp-as-the-harness-driver-protocol-write-adr-z-0003) | Evaluate ACP as the harness driver protocol. Write [ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md). | ADR accepted with ACP or a shim. Plan-then-apply still holds. | | |
 
+## Checkpoint round-trip (Linear 42-7, Z1-036 / Z1-080)
+
+A checkpoint is a workspace tar plus the session transcript, not a frozen
+process. Measured against `sandbox.Driver` docker with overlay workspace,
+`ExportTar`, `ImportTar`, `Exec`, and `Kill`. Command:
+`SPIKE_SANDBOX_SUDO=1 go run ./cmd/gate -fixtures ./fixtures -runs 10 -build-sec 300`.
+Byte-identity is the content hash of the overlay tree (paths, modes, file
+bytes). Tar mtimes are ignored. Overlay method: kernel `overlayfs` on an
+ext4 loop (nested overlay-on-overlay on this pod's root fs is invalid).
+
+### Hydration matrix
+
+10 runs each. Import is first `Start` from the fixture tar. Restore is
+`Start` from the exported tar. Hash is SHA-256 of the tree, truncated.
+
+| Size | Runs | Overlay | Import p50 | Import p95 | Export p50 | Export p95 | Restore p50 | Restore p95 | Hash |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| S | 10 | overlayfs | 160 ms | 186 ms | 7 ms | 9 ms | 160 ms | 165 ms | `6b683fb14026` |
+| M | 10 | overlayfs | 1.73 s | 2.21 s | 564 ms | 720 ms | 1.58 s | 1.83 s | `9948fe2393d0` |
+| L | 10 | overlayfs | 8.46 s | 11.12 s | 4.80 s | 9.69 s | 6.29 s | 8.06 s | `771d409655c0` |
+
+- M restore p50 1.58 s: **PASS** (bar < 10 s)
+- L restore p50 6.29 s: **PASS** (target < 60 s)
+- Full tar round-trip is fast enough. Do not switch to rsync-style
+  deltas before M2 unless a slower disk shows up.
+
+### Async export
+
+`ExportTar` ran alongside `Exec(sleep 2s)`. exec=2.06 s, export=63 ms,
+blocked=false, overlay=overlayfs. Export is a host-side `tar` of the
+overlay. Exec is `docker exec`. Export does not take a turn lock.
+
+### G3 Kill and resume
+
+Simulated 5-minute build: one file per second under `/workspace/build`.
+Checkpoint at step 100, kill at step 150.
+
+| | Count |
+| --- | ---: |
+| Files at export | 100 |
+| Files after restore | 100 |
+| Lost work (ticks after last export) | 50 |
+| Resume clean | yes |
+
+Only work since the last export is lost. After restore, a new write
+succeeds. Resume is `Start` from the exported tar (a new container),
+not `docker start` of the killed one.
+
+### Daemon-on-restore
+
+Stand-in for a dev server: `sh` loop appending `/workspace/devserver.log`.
+
+| | |
+| --- | --- |
+| Alive before kill (log growing) | yes |
+| Workspace files restored | yes |
+| Alive after restore (log growing) | no |
+
+The documented limitation holds. Checkpoint restores the log, not the
+process. A pid file would also restore, but that number can name a
+different process in the new pid namespace. Resume must start the
+server again.
+
+Divergence log: [`DIVERGENCE.md`](DIVERGENCE.md).
+
 ## Attach latency and SQLite throughput (Linear 42-6)
 
 These G1/G6 numbers are the session-model gates (Z1-031..034, NFR-1), not
@@ -54,3 +119,85 @@ concurrent sessions appending; a stall is one `Append` (or one batched
 | G6 write stall (5 sessions, unbatched) | no stall > 50 ms | 550 | 0.089 ms | 0.290 ms | 0.503 ms | 5.714 ms | pass |
 
 Host: Linux 6.12, Go 1.27.0, local SQLite WAL via `modernc.org/sqlite`. Unbatched G6 max is 5.7 ms, so batched writes were not measured. Cross-process attach: `spike run` then `spike attach <id>` against `spike serve` (see `cmd/spike/cli_test.go`). Subprocess supervision is `spike run -agent claude` (`claude -p`) when the binary is present; tests use `echo` as the stand-in.
+
+## Structured effects (Linear 42-8, G4, Z1-052)
+
+These G4/G5 numbers are the plan-model gates, not the fixture-L /
+session-machine rows in the table above.
+
+Plan-then-apply needs proposed effects, not in-place writes. The adapter
+text is `harness.ProposeEffectsPrompt`. Flags that belong with it:
+`claude -p --output-format text --bare --tools "" --permission-mode plan
+--no-session-persistence --system-prompt <ProposeEffectsPrompt>`.
+Re-run: `go run ./cmd/effects -runs 10` from `zeroth-spike/`.
+
+Task: change README.md, greet.go, and main.go. Do not write the files.
+Pass bar: 9/10 runs produce parseable effects (`op`, `target`, `diff` or
+`payload`) covering those three paths.
+
+| | |
+| --- | --- |
+| Attempts | 10 |
+| Source | `claude -p`, then Messages API stand-in |
+| Parseable / 3-file set | 0 / 0 |
+| Parser agent used | 0 (no transcript to parse) |
+| Wrote files | 0 |
+| Result | **not measured** |
+
+Every attempt failed before a transcript: Anthropic `credit balance is
+too low` from both `claude -p` and `POST /v1/messages`. That is a
+billing block, not unstructured output. The fail path (parser agent in
+front of the raw transcript) was not exercised live. ACP (G7) stays
+the protocol question; this run does not raise it.
+
+Offline parser corpus (`harness/testdata/g4`, 10 transcripts: clean
+JSON, markdown fences, OpenAPI `type`/`path` aliases, `claude -p
+--output-format json` wrapper, array root, `./` targets): **10/10**
+parseable 3-file sets. That is parser readiness, not the live G4 bar.
+
+### Example effect set
+
+Shape the adapter must emit. Taken from the offline corpus
+(`01-clean.json`), not from a live model run.
+
+```json
+[
+  {
+    "op": "modify",
+    "target": "README.md",
+    "diff": "--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n # demo\n+Version: 2\n"
+  },
+  {
+    "op": "modify",
+    "target": "greet.go",
+    "diff": "--- a/greet.go\n+++ b/greet.go\n@@ -1,3 +1,5 @@\n package greet\n \n func Hello() string { return \"hi\" }\n+\n+func Greet(name string) string { return \"hello, \" + name }\n"
+  },
+  {
+    "op": "modify",
+    "target": "main.go",
+    "diff": "--- a/main.go\n+++ b/main.go\n@@ -8,5 +8,5 @@\n \n func main() {\n-\tfmt.Println(greet.Hello())\n+\tfmt.Println(greet.Greet(\"zeroth\"))\n }\n"
+  }
+]
+```
+
+## Egress deny-by-default (Linear 42-8, G5, Z1-080 / Z2-111)
+
+Deny by default. Empty leases keep docker `--network none`.
+Per-destination allow is an HTTP/HTTPS CONNECT proxy whose allowlist is
+derived from active leases. A destination that is not listed returns
+403. Enforcement for leased egress is the proxy: clients that ignore
+`HTTP_PROXY` are out of scope for stage 1. That is stated in
+[`architecture.md`](../design/architecture.md).
+
+Measured against a local httptest origin so the number is the proxy
+hop, not WAN noise. Command: `go run ./cmd/egress` (10 warm-up + 110
+samples). Host: Linux 6.12, Go 1.27.0.
+
+| Check | Pass bar | Result |
+| --- | --- | --- |
+| Allow listed destination | HTTP 200 through proxy | yes |
+| Deny unlisted destination | HTTP 403, upstream not reached | yes |
+| Proxy latency delta p50 | < 20 ms (n=110) | **40 us** (direct 39 us, proxy 80 us) |
+
+G5: **PASS**
+

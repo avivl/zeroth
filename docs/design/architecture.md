@@ -62,6 +62,8 @@ Stage 1 is local and single-player, so the store is SQLite and the daemon binds 
 
 The harness is untrusted relative to the kernel. The sandbox is the isolation boundary for agent work. Policy decides what a session may do; the harness does not. Audit records are signed so a successful agent cannot quietly rewrite history.
 
+Sandbox egress is deny by default. With no lease, the docker driver uses `--network none`. Per-destination allow is an HTTP/HTTPS CONNECT proxy whose allowlist is derived from active leases. A destination that is not listed is denied. The proxy is the enforcement point for leased egress: clients that ignore `HTTP_PROXY` are out of scope for stage 1. Closing that gap is a later network-namespace filter, not a second allowlist. The BA-6 spike measured this in [RESULTS.md](../spike/RESULTS.md) (Linear 42-8).
+
 ## Out of scope here
 
 Deployment topology, multi-tenant isolation, and multiplayer session sharing. Those belong to stage 2 and are not designed in this document.
