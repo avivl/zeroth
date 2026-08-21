@@ -154,10 +154,8 @@ func (i *dockerInstance) createContainer(ctx context.Context) error {
 		"--mount", "type=bind,src=" + i.merged + ",dst=/workspace",
 		"--workdir", "/workspace",
 	}
-	if i.overlay == overlayFUSE {
-		if spec := currentUserSpec(); spec != "" {
-			args = append(args, "--user", spec)
-		}
+	if spec := currentUserSpec(); spec != "" {
+		args = append(args, "--user", spec)
 	}
 	args = append(args, i.image, "sleep", "infinity")
 	create := exec.CommandContext(ctx, "docker", args...)
@@ -302,8 +300,15 @@ func (i *dockerInstance) cleanupLocked() error {
 		first = fmt.Errorf("sandbox docker unmount: %w", err)
 	}
 	if i.base != "" {
-		if err := os.RemoveAll(i.base); err != nil && first == nil {
-			first = fmt.Errorf("sandbox docker cleanup: %w", err)
+		if err := os.RemoveAll(i.base); err != nil {
+			if os.Getenv("SPIKE_SANDBOX_SUDO") == "1" {
+				out, err2 := exec.Command("sudo", "-n", "rm", "-rf", i.base).CombinedOutput()
+				if err2 != nil && first == nil {
+					first = fmt.Errorf("sandbox docker cleanup: %w / sudo: %s", err, bytesHead(out, err2))
+				}
+			} else if first == nil {
+				first = fmt.Errorf("sandbox docker cleanup: %w", err)
+			}
 		}
 	}
 	return first

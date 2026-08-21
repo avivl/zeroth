@@ -20,4 +20,7 @@ to change Z1-036 checkpoint semantics.
 
 If G2 restore of fixture M is slower than 10 s p50, try rsync-style
 deltas of the overlay upperdir before changing the checkpoint model.
-If G3 resume is not clean, re-examine Z1-036 before M2.
+Measured restore p50: M 1.58 s, L 6.29 s, so the full-tar model holds
+on this disk. If G3 resume is not clean, re-examine Z1-036 before M2.
+Measured G3: 100 files at export, 100 restored, 50 lost (ticks after
+the last export), resume clean.

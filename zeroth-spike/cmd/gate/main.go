@@ -17,7 +17,7 @@ import (
 func main() {
 	fixtures := flag.String("fixtures", "./fixtures", "fixture tar directory")
 	runs := flag.Int("runs", 10, "round-trips per fixture size")
-	sizes := flag.String("sizes", "S,M,L", "comma-separated sizes to measure")
+	sizes := flag.String("sizes", "S,M,L", "comma-separated sizes to measure (empty skips G2 hydrate)")
 	buildSec := flag.Int("build-sec", 300, "G3 simulated build length in seconds")
 	flag.Parse()
 
@@ -30,7 +30,11 @@ func main() {
 	d := sandbox.NewDocker()
 	wanted := map[string]bool{}
 	for _, s := range strings.Split(*sizes, ",") {
-		wanted[strings.TrimSpace(s)] = true
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		wanted[s] = true
 	}
 
 	fmt.Println("## Checkpoint round-trip (Linear 42-7, Z1-036 / Z1-080)")
