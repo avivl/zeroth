@@ -72,6 +72,10 @@ func TestDriverConformance(t *testing.T) {
 			t.Run("kill_lost_work", func(t *testing.T) { testKillLostWork(t, tc.open) })
 			t.Run("kill_daemon_not_restored", func(t *testing.T) { testKillDaemonNotRestored(t, tc.open) })
 			t.Run("export_alongside_exec", func(t *testing.T) { testExportAlongsideExec(t, tc.open) })
+			t.Run("cred_files_tmpfs", func(t *testing.T) { testCredFilesTmpfs(t, tc.open) })
+			t.Run("credential_excluded_from_export", func(t *testing.T) { testCredentialExcludedFromExport(t, tc.open) })
+			t.Run("export_secret_fail_closed", func(t *testing.T) { testExportSecretFailClosed(t, tc.open) })
+			t.Run("branch_independent", func(t *testing.T) { testBranchIndependent(t, tc.open) })
 			t.Run("unknown_id", func(t *testing.T) { testUnknownID(t, tc.open) })
 			t.Run("stop_idempotent", func(t *testing.T) { testStopIdempotent(t, tc.open) })
 		})
@@ -463,6 +467,170 @@ func testExportAlongsideExec(t *testing.T, open func(t *testing.T) sandbox.Drive
 	elapsed := time.Since(start)
 	if elapsed > 3500*time.Millisecond {
 		t.Fatalf("export blocked turn: elapsed=%s", elapsed)
+	}
+}
+
+func testCredFilesTmpfs(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	t.Helper()
+	d := open(t)
+	ctx := t.Context()
+	sb := mustSpawn(t, d, helloTar())
+	tokenPath := sandbox.CredsDir + "/token"
+	payload := []byte("lease-token-not-a-detector")
+	res := mustExec(t, d, sb.ID, sandbox.Cmd{
+		Argv:  []string{"cat", tokenPath},
+		Files: []sandbox.CredFile{{Path: tokenPath, Data: payload}},
+	})
+	if res.Stdout != string(payload) {
+		t.Fatalf("injected cred = %q", res.Stdout)
+	}
+	res = mustExec(t, d, sb.ID, sandbox.Cmd{
+		Argv: []string{"sh", "-c", "test -f '" + tokenPath + "' && echo yes || echo no"},
+	})
+	if strings.TrimSpace(res.Stdout) != "no" {
+		t.Fatalf("cred file leaked to next exec: %q", res.Stdout)
+	}
+	res = mustExec(t, d, sb.ID, sandbox.Cmd{
+		Argv: []string{"sh", "-c", "test -f /workspace/token && echo yes || echo no"},
+	})
+	if strings.TrimSpace(res.Stdout) != "no" {
+		t.Fatalf("cred file landed in workspace: %q", res.Stdout)
+	}
+	var buf bytes.Buffer
+	if err := d.ExportTar(ctx, sb.ID, &buf); err != nil {
+		t.Fatalf("ExportTar: %v", err)
+	}
+	if bytes.Contains(buf.Bytes(), payload) {
+		t.Fatal("injected credential appeared in export")
+	}
+	_, err := d.Exec(ctx, sb.ID, sandbox.Cmd{
+		Argv:  []string{"true"},
+		Files: []sandbox.CredFile{{Path: sandbox.WorkspaceDir + "/secret", Data: payload}},
+	})
+	if !errors.Is(err, sandbox.ErrInvalid) {
+		t.Fatalf("workspace cred path: %v, want ErrInvalid", err)
+	}
+}
+
+func testCredentialExcludedFromExport(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	t.Helper()
+	d := open(t)
+	ctx := t.Context()
+	sb := mustSpawn(t, d, helloTar())
+	script := strings.Join([]string{
+		"echo kept > /workspace/kept.txt",
+		"mkdir -p /workspace/.config/gh",
+		"echo 'https://user:oauth-store@github.com' > /workspace/.git-credentials",
+		"echo hist > /workspace/.bash_history",
+		"echo 'github.com:' > /workspace/.config/gh/hosts.yml",
+		"echo 'machine github.com login user password cache' > /workspace/.netrc",
+	}, " && ")
+	mustExec(t, d, sb.ID, sandbox.Cmd{Argv: []string{"sh", "-c", script}})
+	var buf bytes.Buffer
+	if err := d.ExportTar(ctx, sb.ID, &buf); err != nil {
+		t.Fatalf("ExportTar: %v", err)
+	}
+	names := tarFileNames(t, buf.Bytes())
+	if !names["kept.txt"] || !names["hello.txt"] {
+		t.Fatalf("export missing workspace files: %v", names)
+	}
+	for _, forbidden := range []string{
+		".git-credentials",
+		".bash_history",
+		".config/gh/hosts.yml",
+		".netrc",
+	} {
+		if names[forbidden] {
+			t.Fatalf("export contains excluded %q", forbidden)
+		}
+	}
+	if bytes.Contains(buf.Bytes(), []byte("oauth-store")) {
+		t.Fatal("excluded credential content appeared in export")
+	}
+}
+
+func testExportSecretFailClosed(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	t.Helper()
+	d := open(t)
+	ctx := t.Context()
+	sb := mustSpawn(t, d, helloTar())
+	mustExec(t, d, sb.ID, sandbox.Cmd{
+		Argv: []string{"sh", "-c", `printf '%s%s\n' "$A" "$B" > /workspace/notes.txt`},
+		Env:  []string{"A=AKI", "B=AZEROTHTESTFAKE01"},
+	})
+	var buf bytes.Buffer
+	err := d.ExportTar(ctx, sb.ID, &buf)
+	if !errors.Is(err, sandbox.ErrSecret) {
+		t.Fatalf("ExportTar: %v, want ErrSecret", err)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("fail-closed export wrote %d bytes", buf.Len())
+	}
+	mustExec(t, d, sb.ID, sandbox.Cmd{Argv: []string{"sh", "-c", "echo clean > /workspace/notes.txt"}})
+	buf.Reset()
+	if err := d.ExportTar(ctx, sb.ID, &buf); err != nil {
+		t.Fatalf("clean ExportTar: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("clean export was empty")
+	}
+}
+
+func testBranchIndependent(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	t.Helper()
+	d := open(t)
+	ctx := t.Context()
+	parent := mustSpawn(t, d, helloTar())
+	mustExec(t, d, parent.ID, sandbox.Cmd{Argv: []string{"sh", "-c", "echo trunk > /workspace/trunk.txt"}})
+	var ckpt bytes.Buffer
+	if err := d.ExportTar(ctx, parent.ID, &ckpt); err != nil {
+		t.Fatalf("ExportTar: %v", err)
+	}
+
+	left := mustSpawn(t, d, bytes.NewReader(ckpt.Bytes()))
+	right := mustSpawn(t, d, bytes.NewReader(ckpt.Bytes()))
+	if left.ID == right.ID {
+		t.Fatal("branch sandboxes share an id")
+	}
+	mustExec(t, d, left.ID, sandbox.Cmd{Argv: []string{"sh", "-c", "echo left > /workspace/side.txt"}})
+	mustExec(t, d, right.ID, sandbox.Cmd{Argv: []string{"sh", "-c", "echo right > /workspace/side.txt"}})
+
+	leftTrunk := mustExec(t, d, left.ID, sandbox.Cmd{Argv: []string{"cat", "trunk.txt"}})
+	rightTrunk := mustExec(t, d, right.ID, sandbox.Cmd{Argv: []string{"cat", "trunk.txt"}})
+	if strings.TrimSpace(leftTrunk.Stdout) != "trunk" || strings.TrimSpace(rightTrunk.Stdout) != "trunk" {
+		t.Fatalf("branch lost trunk: left=%q right=%q", leftTrunk.Stdout, rightTrunk.Stdout)
+	}
+	leftSide := mustExec(t, d, left.ID, sandbox.Cmd{Argv: []string{"cat", "side.txt"}})
+	rightSide := mustExec(t, d, right.ID, sandbox.Cmd{Argv: []string{"cat", "side.txt"}})
+	if strings.TrimSpace(leftSide.Stdout) != "left" {
+		t.Fatalf("left side = %q", leftSide.Stdout)
+	}
+	if strings.TrimSpace(rightSide.Stdout) != "right" {
+		t.Fatalf("right side = %q", rightSide.Stdout)
+	}
+	parentSide := mustExec(t, d, parent.ID, sandbox.Cmd{Argv: []string{"sh", "-c", "test -f /workspace/side.txt && echo yes || echo no"}})
+	if strings.TrimSpace(parentSide.Stdout) != "no" {
+		t.Fatalf("parent saw a branch write: %q", parentSide.Stdout)
+	}
+}
+
+func tarFileNames(t *testing.T, raw []byte) map[string]bool {
+	t.Helper()
+	out := make(map[string]bool)
+	tr := tar.NewReader(bytes.NewReader(raw))
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("tar: %v", err)
+		}
+		name := strings.TrimPrefix(hdr.Name, "./")
+		if name == "" || name == "." {
+			continue
+		}
+		out[name] = true
 	}
 }
 

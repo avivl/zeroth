@@ -75,6 +75,7 @@ func (i *instance) createContainer(ctx context.Context, image string) error {
 		"--tmpfs", "/tmp:rw,exec",
 		"--mount", "type=bind,src=" + i.workspace + ",dst=/workspace",
 		"--workdir", "/workspace",
+		"--tmpfs", credsTmpfsSpec(),
 		"--network", "none",
 		"--add-host", "host.docker.internal:host-gateway",
 	}

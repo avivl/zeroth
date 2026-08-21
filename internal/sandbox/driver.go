@@ -28,8 +28,9 @@ type Driver interface {
 	//
 	// Non-zero process exit is ExecResult.ExitCode with a nil error.
 	// Failures of the driver itself (unknown id, killed or stopped
-	// sandbox, runtime down) are errors. Env in cmd is visible to that
-	// process; the host environment is not. Empty Argv is ErrInvalid.
+	// sandbox, runtime down) are errors. Env and Files in cmd are
+	// visible to that process; the host environment is not. Files
+	// land on a tmpfs, never /workspace. Empty Argv is ErrInvalid.
 	Exec(ctx context.Context, id ID, cmd Cmd) (ExecResult, error)
 
 	// ExportTar writes an uncompressed tar of the /workspace tree.
@@ -39,6 +40,11 @@ type Driver interface {
 	// not take a turn lock; it may run alongside Exec. A live tar can
 	// be slightly inconsistent if the command writes during the walk.
 	// ExportTar remains valid after Kill until Stop.
+	//
+	// Paths matching ExcludedFromExport are omitted. The remaining
+	// tree is secret-scanned; a finding is ErrSecret and w receives
+	// no bytes (fail closed, Z1-113). The same tar hydrates any
+	// number of independent sandboxes (branch).
 	ExportTar(ctx context.Context, id ID, w io.Writer) error
 
 	// ImportTar replaces the /workspace tree with the tar contents.
