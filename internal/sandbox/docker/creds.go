@@ -1,12 +1,12 @@
 package docker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path"
-	"strconv"
 
 	"github.com/avivl/zeroth/internal/sandbox"
 )
@@ -42,63 +42,18 @@ func stageCredFiles(ctx context.Context, container string, files []sandbox.CredF
 			cleanup()
 			return nil, fmt.Errorf("mkdir creds: %s", bytesHead(out, err))
 		}
-		host, err := os.CreateTemp("", "zeroth-cred-")
+		// Write from inside the container so a --read-only rootfs still
+		// accepts bytes on the credential tmpfs. docker cp targets the
+		// rootfs and fails with "marked read-only".
+		cmd := exec.CommandContext(ctx, "docker", "exec", "-i", container,
+			"sh", "-c", `cat >"$1" && chmod 0600 "$1"`, "zeroth-cred", f.Path)
+		cmd.Stdin = bytes.NewReader(f.Data)
+		out, err = cmd.CombinedOutput()
 		if err != nil {
 			cleanup()
-			return nil, fmt.Errorf("cred temp: %w", err)
-		}
-		hostName := host.Name()
-		if _, err := host.Write(f.Data); err != nil {
-			_ = host.Close()
-			_ = os.Remove(hostName)
-			cleanup()
-			return nil, fmt.Errorf("cred temp write: %w", err)
-		}
-		if err := host.Chmod(0o600); err != nil {
-			_ = host.Close()
-			_ = os.Remove(hostName)
-			cleanup()
-			return nil, fmt.Errorf("cred temp chmod: %w", err)
-		}
-		if err := host.Close(); err != nil {
-			_ = os.Remove(hostName)
-			cleanup()
-			return nil, fmt.Errorf("cred temp close: %w", err)
-		}
-		cpOut, err := exec.CommandContext(ctx, "docker", "cp", hostName, container+":"+f.Path).CombinedOutput()
-		_ = os.Remove(hostName)
-		if err != nil {
-			cleanup()
-			return nil, fmt.Errorf("docker cp cred: %s", bytesHead(cpOut, err))
-		}
-		if err := chownCred(ctx, container, f.Path); err != nil {
-			cleanup()
-			return nil, err
+			return nil, fmt.Errorf("write cred: %s", bytesHead(out, err))
 		}
 		staged = append(staged, f.Path)
 	}
 	return cleanup, nil
-}
-
-func chownCred(ctx context.Context, container, dest string) error {
-	uid := os.Getuid()
-	gid := os.Getgid()
-	if uid == 0 {
-		out, err := exec.CommandContext(ctx, "docker", "exec", container, "chmod", "0600", "--", dest).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("chmod cred: %s", bytesHead(out, err))
-		}
-		return nil
-	}
-	out, err := exec.CommandContext(ctx, "docker", "exec", "-u", "0", container,
-		"chown", strconv.Itoa(uid)+":"+strconv.Itoa(gid), "--", dest).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("chown cred: %s", bytesHead(out, err))
-	}
-	out, err = exec.CommandContext(ctx, "docker", "exec", "-u", "0", container,
-		"chmod", "0600", "--", dest).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("chmod cred: %s", bytesHead(out, err))
-	}
-	return nil
 }
