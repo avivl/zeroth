@@ -8,6 +8,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func unsetenv(t *testing.T, key string) {
+	t.Helper()
+	orig, wasSet := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if !wasSet {
+			_ = os.Unsetenv(key)
+			return
+		}
+		_ = os.Setenv(key, orig)
+	})
+}
+
 func TestConfigDefaults(t *testing.T) {
 	got := loadFrom(t, nil, nil)
 	if got.Addr != defaultAddr {
@@ -134,7 +149,7 @@ func loadFrom(t *testing.T, args []string, env map[string]string) Config {
 		if val, ok := env[k]; ok {
 			t.Setenv(k, val)
 		} else {
-			t.Unsetenv(k)
+			unsetenv(t, k)
 		}
 	}
 	cmd, v := newRoot(deps{})
