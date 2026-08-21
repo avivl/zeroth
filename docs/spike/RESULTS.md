@@ -134,6 +134,23 @@ concurrent sessions appending; a stall is one `Append` (or one batched
 
 Host: Linux 6.12, Go 1.27.0, local SQLite WAL via `modernc.org/sqlite`. Unbatched G6 max is 5.7 ms, so batched writes were not measured. Cross-process attach: `spike run` then `spike attach <id>` against `spike serve` (see `cmd/spike/cli_test.go`). Subprocess supervision is `spike run -agent claude` (`claude -p`) when the binary is present; tests use `echo` as the stand-in.
 
+### Product CLI attach versus this G1 p50 (Linear 42-38)
+
+The 2s design-doc bar is a hang detector. A real `zeroth attach` (GET run,
+POST foreground, WebSocket replay-then-live-tail) was measured with the same
+10 warm-up + 110 sample plan against a running session:
+
+| Path | n | p50 | p95 | vs spike p50 |
+| --- | ---: | ---: | ---: | --- |
+| Spike G1 attach (warm, in-process WS) | 110 | 5.403 ms | 6.137 ms | 1x |
+| CLI `zeroth attach` (warm) | 110 | 6.240 ms | 19.372 ms | **1.15x** |
+
+p50 is 1.15x the in-process spike. Expected: the CLI adds a loopback HTTP
+hop the spike did not have. p95 is 3.16x; the tail is logger setup, replay
+print, and a growing session log over 120 attaches, still tens of
+milliseconds. Full method, host, and command:
+[`docs/cli/ATTACH_LATENCY.md`](../cli/ATTACH_LATENCY.md).
+
 ## Structured effects (Linear 42-8, G4, Z1-052)
 
 These G4/G5 numbers are the plan-model gates, not the fixture-L /
