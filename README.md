@@ -1,4 +1,4 @@
-
+![Zeroth](zeroth-app-icon.svg )
 # Zeroth
 
 Agents work at machine speed. Humans keep control of consequential actions.
