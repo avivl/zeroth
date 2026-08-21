@@ -85,6 +85,7 @@ func cliArgs(prompt, resumeSession string) []string {
 		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
+		"--include-partial-messages",
 		"--bare",
 		"--tools", "",
 		"--permission-mode", "plan",
@@ -133,6 +134,15 @@ func (i *instance) spawn(prompt, resumeSession string) error {
 		defer close(done)
 		i.read(stdout, &stderr)
 	}()
+
+	// --input-format stream-json ignores the argv prompt. The same stdin
+	// channel is how Steer injects later turns, so the first user message
+	// belongs here too. The argv prompt stays for the fake CLI and for
+	// operators reading ps output.
+	if err := writeUserMessage(stdin, prompt); err != nil {
+		i.kill()
+		return fmt.Errorf("prompt: %w", err)
+	}
 	return nil
 }
 

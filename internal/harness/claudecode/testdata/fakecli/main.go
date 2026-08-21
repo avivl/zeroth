@@ -40,12 +40,14 @@ func main() {
 		emitResult()
 	case strings.Contains(prompt, "HOLD"):
 		emitDelta("hello-token")
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if err != nil && err != io.EOF {
-			os.Exit(1)
-		}
-		if strings.TrimSpace(line) != "" {
+		if steered := readSteer(prompt); steered {
 			emitDelta("steered-ok")
+		}
+		emitTool()
+		emitResult()
+	case strings.Contains(prompt, "STDINPROMPT"):
+		if text := readUserText(); text != "" {
+			emitDelta("from-stdin")
 		}
 		emitTool()
 		emitResult()
@@ -103,6 +105,59 @@ type resultLine struct {
 	Result    string `json:"result"`
 	IsError   bool   `json:"is_error"`
 	SessionID string `json:"session_id"`
+}
+
+func readSteer(initialPrompt string) bool {
+	r := bufio.NewReader(os.Stdin)
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil && err != io.EOF {
+			os.Exit(1)
+		}
+		text := userText(line)
+		if text != "" && text != initialPrompt {
+			return true
+		}
+		if err == io.EOF {
+			return false
+		}
+	}
+}
+
+func readUserText() string {
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && err != io.EOF {
+		os.Exit(1)
+	}
+	return userText(line)
+}
+
+func userText(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	var msg struct {
+		Message struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(line), &msg); err != nil {
+		return line
+	}
+	var b strings.Builder
+	for _, p := range msg.Message.Content {
+		if p.Type == "text" || p.Type == "" {
+			b.WriteString(p.Text)
+		}
+	}
+	if b.Len() > 0 {
+		return b.String()
+	}
+	return line
 }
 
 func emitDelta(text string) {
