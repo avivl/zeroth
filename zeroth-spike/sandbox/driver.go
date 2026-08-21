@@ -37,6 +37,10 @@ type Workspace struct {
 type StartRequest struct {
 	SessionID session.ID
 	Workspace Workspace
+	// Egress is the per-destination allowlist derived from active
+	// leases. Empty means deny all. The docker driver uses
+	// --network none in that case.
+	Egress Allowlist
 }
 
 // ExecResult is the outcome of one command inside an instance.
