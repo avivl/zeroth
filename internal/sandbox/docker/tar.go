@@ -146,7 +146,7 @@ func unpackTar(dir string, r io.Reader) error {
 			if err := os.MkdirAll(target, 0o755); err != nil {
 				return fmt.Errorf("mkdir: %w", err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg, 0:
 			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return fmt.Errorf("mkdir parent: %w", err)
 			}
