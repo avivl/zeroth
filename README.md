@@ -1,5 +1,4 @@
 
-![Alt text](./zeroth-app-icon.svg)
 <img src="./zeroth-app-icon.svg">
 
 # Zeroth
