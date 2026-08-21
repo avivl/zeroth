@@ -18,8 +18,11 @@ permissions:
 
 env:
   GOTOOLCHAIN: go1.27.0
-  # Pinned to match Taskfile.yml. Bump both together.
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+  # Pinned to match Taskfile.yml. Bump together.
   STATICCHECK: honnef.co/go/tools/cmd/staticcheck@v0.8.0
+  OAPI_CODEGEN: github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@v2.8.0
+  TS_CLIENT: swagger-typescript-api@13.12.6
   GITLEAKS_VERSION: "8.21.2"
   GITLEAKS_LINUX_X64_SHA256: 5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba
 
@@ -102,6 +105,36 @@ jobs:
       - name: Build
         run: pnpm --dir web run build
 
+  # Always runs. Path filters must not skip a stale gen/ tree.
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.0"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Generate Go stubs and TypeScript client
+        run: |
+          set -euo pipefail
+          mkdir -p pkg/api/gen/go pkg/api/gen/ts
+          go run ${{ env.OAPI_CODEGEN }} --config pkg/api/oapi-codegen.yaml pkg/api/openapi.yaml
+          pnpm dlx ${{ env.TS_CLIENT }} generate -p pkg/api/openapi.yaml -o pkg/api/gen/ts -n client.ts
+      - name: Fail if generated code is stale
+        run: |
+          set -euo pipefail
+          if ! git diff --exit-code -- pkg/api/gen \
+            || [ -n "$(git ls-files --others --exclude-standard -- pkg/api/gen)" ]; then
+            echo "pkg/api/gen is stale relative to pkg/api/openapi.yaml; run task generate and commit" >&2
+            git --no-pager diff -- pkg/api/gen
+            git ls-files --others --exclude-standard -- pkg/api/gen
+            exit 1
+          fi
+
   secretscan:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -140,7 +173,7 @@ jobs:
   ci:
     name: ci
     if: ${{ !cancelled() }}
-    needs: [changes, go, web, secretscan]
+    needs: [changes, go, web, secretscan, generate]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -150,11 +183,12 @@ jobs:
           GO: ${{ needs.go.result }}
           WEB: ${{ needs.web.result }}
           SECRETSCAN: ${{ needs.secretscan.result }}
+          GENERATE: ${{ needs.generate.result }}
         run: |
           set -euo pipefail
-          echo "changes=${CHANGES} go=${GO} web=${WEB} secretscan=${SECRETSCAN}"
+          echo "changes=${CHANGES} go=${GO} web=${WEB} secretscan=${SECRETSCAN} generate=${GENERATE}"
           fail=0
-          for result in "${CHANGES}" "${SECRETSCAN}"; do
+          for result in "${CHANGES}" "${SECRETSCAN}" "${GENERATE}"; do
             if [ "${result}" != "success" ]; then
               fail=1
             fi

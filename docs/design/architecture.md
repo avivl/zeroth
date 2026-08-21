@@ -49,7 +49,7 @@ Stage 1 is local and single-player, so the store is SQLite and the daemon binds 
 
 - `cmd/zerothd` — long-running process.
 - `cmd/zeroth` — CLI and headless entry point (same kernel, no GUI required).
-- `pkg/api` — OpenAPI spec; Go stubs and the TypeScript client are generated from it.
+- `pkg/api` — OpenAPI spec (`openapi.yaml`); Go stubs and the TypeScript client are generated from it. Stage 1 surface: runs (steer, background, events WebSocket), plans (approve, request-changes, branch), agents, approvals, memory (including proposals), audit verify, and checkpoint restore. Apply is a daemon transition after approve, not a client operation. A flow that cannot be expressed here does not ship on the web UI or the CLI.
 - `web/` — Vite + React. Intended to use [Beautiful UI](https://www.beautifului.dev/) primitives (MIT).
 
 ## Trust boundary
