@@ -40,6 +40,7 @@ zeroth/
 ├── pkg/api/         OpenAPI spec; generated stubs and TS client under gen/
 ├── web/             Vite + React (pnpm workspace)
 ├── docs/            adr, prd, design, spike
+├── zeroth-spike/    BA-6 confirmation spike (throwaway)
 └── evals/           offline evaluations
 ```
 

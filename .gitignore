@@ -27,6 +27,12 @@ go.work.sum
 # env file
 .env
 
+# Spike fixtures M and L exceed GitHub blob limits. Recreate with
+# zeroth-spike/fixtures/build.sh. S.tar is committed.
+zeroth-spike/fixtures/M.tar
+zeroth-spike/fixtures/L.tar
+zeroth-spike/fixtures/work/
+
 # Editor/IDE
 # .idea/
 # .vscode/
