@@ -153,6 +153,12 @@ func TestHTTPReplayAndWSLiveTail(t *testing.T) {
 	}
 }
 
+// TestAttachLatencyWarm is the coarse NFR-1 CI gate: a single in-process
+// WebSocket attach to a live run must reach a first live token in under 2s.
+// That bar is the design-doc ceiling, not the spike's measured 5.403ms p50.
+// Percentiles for a real `zeroth attach` (warmup + 110 samples) live in
+// cmd/zeroth.TestCLIAttachLatencyWarm and docs/cli/ATTACH_LATENCY.md
+// (Linear 42-38).
 func TestAttachLatencyWarm(t *testing.T) {
 	t.Parallel()
 	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
@@ -202,7 +208,7 @@ func TestAttachLatencyWarm(t *testing.T) {
 			if d > 2*time.Second {
 				t.Fatalf("attach latency %s exceeds G1 2s bar", d)
 			}
-			t.Logf("G1 attach warm: %s (spike was ~6ms)", d)
+			t.Logf("G1 attach warm (in-process WS, single sample): %s; CLI percentiles vs spike 5.403ms p50: TestCLIAttachLatencyWarm", d)
 			return
 		}
 	}
