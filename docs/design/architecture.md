@@ -25,7 +25,7 @@ Zeroth is a local control plane. The daemon holds the kernel. Everything that ta
 ## Kernel
 
 - **policy** — scopes, grants, leases. Outranks every other package.
-- **session** — state machine plus event log for one human-supervised run.
+- **session** — state machine plus event log for one human-supervised run. Lifecycle is `pending → running → awaiting-approval → applying → done | failed`. Attachment (`attached` / `background`) is orthogonal. The event log is the source of truth; status is a replay of it. Attach is replay-then-live-tail of that log, so promotion and demotion only add or remove listeners. Illegal transitions are errors. A supervisor goroutine per live session serializes mutations. A demoted session carries a completion contract (finish, comment on the issue, ping only on blockers). Persistence of the log is the store port; this package talks to a `Log`.
 - **plan** — draft, cross-exam, approve, apply. Consequential mutation happens only on apply.
 - **lease** — runtime mint/renew/expire for policy leases.
 - **signer / audit**: attributable, append-only trail. Signatures are secp256k1 Schnorr, Nostr-compatible ([ADR-Z-0007](../adr/Z-0007-secp256k1-schnorr.md)).
