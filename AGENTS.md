@@ -47,6 +47,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | `web/` | Vite + React UI for the local daemon | Apply paths that skip the kernel |
 | `docs/adr` | `Z-NNNN-slug.md` decisions | Hidden design that never becomes an ADR |
 | `docs/prd` `docs/design` `docs/spike` | Specs and time-boxed investigations | Long-lived subsystems promoted from a spike |
+| `zeroth-spike/` | BA-6 confirmation spike (throwaway). Sandbox and session interface sketches. | Product features. Do not promote this tree into `internal/`. |
 | `evals/` | Offline evaluations | CI unit tests |
 
 `internal/` is not importable from other modules. That is deliberate. Policy outranks the harness. The daemon depends on port interfaces, not on Docker, Claude Code, Linear, or SQLite by name.

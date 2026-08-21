@@ -1,0 +1,3 @@
+fixtures/work
+fixtures/*.tar
+.env

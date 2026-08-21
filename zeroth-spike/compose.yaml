@@ -1,0 +1,22 @@
+# Throwaway BA-6 confirmation-spike stack. No UI, no auth product, no Linear.
+# From this directory: docker compose up --build
+name: zeroth-spike
+
+services:
+  spike:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:8421:8421"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      SPIKE_ADDR: ":8421"
+      SPIKE_FIXTURES: /fixtures
+    volumes:
+      - ./fixtures:/fixtures:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/spike", "-check", "-addr", "127.0.0.1:8421"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 15s

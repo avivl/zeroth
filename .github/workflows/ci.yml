@@ -34,6 +34,7 @@ jobs:
       # Push to main always runs both. PRs use path filters.
       go: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.go }}
       web: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.web }}
+      spike: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.spike }}
     steps:
       - uses: dorny/paths-filter@v3
         if: github.event_name == 'pull_request'
@@ -47,12 +48,16 @@ jobs:
               - "Taskfile.yml"
               - "pkg/api/**"
               - ".github/workflows/ci.yml"
+              - "!zeroth-spike/**"
             web:
               - "web/**"
               - "package.json"
               - "pnpm-lock.yaml"
               - "pnpm-workspace.yaml"
               - "pkg/api/**"
+              - ".github/workflows/ci.yml"
+            spike:
+              - "zeroth-spike/**"
               - ".github/workflows/ci.yml"
 
   go:
@@ -70,7 +75,7 @@ jobs:
       - name: Conformance
         run: |
           set -euo pipefail
-          packages=$(find . \( -name node_modules -o -name .git \) -prune -o -name conformance_test.go -exec dirname {} \; | sort -u | tr '\n' ' ')
+          packages=$(find . \( -name node_modules -o -name .git -o -path ./zeroth-spike \) -prune -o -name conformance_test.go -exec dirname {} \; | sort -u | tr '\n' ' ')
           if [ -z "${packages// }" ]; then
             echo "no conformance_test.go files found"
             exit 1
@@ -82,6 +87,31 @@ jobs:
         run: go vet ./...
       - name: staticcheck
         run: go run ${{ env.STATICCHECK }} ./...
+
+  spike:
+    needs: changes
+    if: needs.changes.outputs.spike == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: zeroth-spike
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.0"
+      - name: Test (race)
+        run: go test -race ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Compose up
+        run: docker compose up --build -d --wait --wait-timeout 120
+      - name: Health
+        run: curl -fsS http://127.0.0.1:8421/health
+      - name: Compose down
+        if: always()
+        run: docker compose down -v
 
   web:
     needs: changes
@@ -173,7 +203,7 @@ jobs:
   ci:
     name: ci
     if: ${{ !cancelled() }}
-    needs: [changes, go, web, secretscan, generate]
+    needs: [changes, go, web, secretscan, generate, spike]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -182,18 +212,19 @@ jobs:
           CHANGES: ${{ needs.changes.result }}
           GO: ${{ needs.go.result }}
           WEB: ${{ needs.web.result }}
+          SPIKE: ${{ needs.spike.result }}
           SECRETSCAN: ${{ needs.secretscan.result }}
           GENERATE: ${{ needs.generate.result }}
         run: |
           set -euo pipefail
-          echo "changes=${CHANGES} go=${GO} web=${WEB} secretscan=${SECRETSCAN} generate=${GENERATE}"
+          echo "changes=${CHANGES} go=${GO} web=${WEB} spike=${SPIKE} secretscan=${SECRETSCAN} generate=${GENERATE}"
           fail=0
           for result in "${CHANGES}" "${SECRETSCAN}" "${GENERATE}"; do
             if [ "${result}" != "success" ]; then
               fail=1
             fi
           done
-          for result in "${GO}" "${WEB}"; do
+          for result in "${GO}" "${WEB}" "${SPIKE}"; do
             if [ "${result}" != "success" ] && [ "${result}" != "skipped" ]; then
               fail=1
             fi
