@@ -89,6 +89,17 @@ func TestRetractClosesPRAndRecordsOnTracker(t *testing.T) {
 	if keys := e.tr.unassignKeys(); len(keys) != 1 || keys[0] != "42-50" {
 		t.Fatalf("unassign %v", keys)
 	}
+	for _, c := range e.tr.commentBodies() {
+		if strings.Contains(c, "### Zeroth cancelled") {
+			t.Fatalf("retract posted a cancel comment: %s", c)
+		}
+	}
+
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	next := waitNewRunByTracker(t, e.hs.URL, "42-50", string(out.Id))
+	if next.Id == out.Id {
+		t.Fatal("re-assign reused the retracted run")
+	}
 
 	again := postJSON(t, e.hs.URL+"/runs/"+string(run.Id)+"/retract", gen.RetractRequest{Reason: reason})
 	defer again.Body.Close()

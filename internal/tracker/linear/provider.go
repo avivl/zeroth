@@ -31,6 +31,9 @@ type Provider struct {
 	known       map[string]tracker.Issue
 	out         chan tracker.AssignmentEvent
 	assigning   bool
+	// assignGen bumps on Unassign so a poll that listed issues before
+	// the agent was cleared cannot emit Assigned and start a new run.
+	assignGen uint64
 }
 
 // New returns a Linear tracker provider.
@@ -208,6 +211,7 @@ func (p *Provider) Unassign(ctx context.Context, key string) error {
 		}
 	}
 	p.mu.Lock()
+	p.assignGen++
 	delete(p.known, issue.Key)
 	if issue.ID != "" {
 		delete(p.known, issue.ID)
