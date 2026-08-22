@@ -312,6 +312,17 @@ func (s *Supervisor) ProposePlan(ctx context.Context, id ID, ref string) error {
 	})
 }
 
+// RecordCrossExam records a reviewer verdict.
+func (s *Supervisor) RecordCrossExam(ctx context.Context, id ID, payload string) error {
+	return s.do(ctx, id, func() error {
+		m, err := s.machine(id)
+		if err != nil {
+			return err
+		}
+		return m.RecordCrossExam(ctx, payload)
+	})
+}
+
 // RequestApproval moves running -> awaiting-approval.
 func (s *Supervisor) RequestApproval(ctx context.Context, id ID, ref string) error {
 	return s.do(ctx, id, func() error {

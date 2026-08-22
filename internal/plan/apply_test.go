@@ -81,7 +81,7 @@ func TestCanApplyDeniesDraftExpiredAndTampered(t *testing.T) {
 	if err := p.CanApply(row, now); !errors.Is(err, ErrNotApproved) {
 		t.Fatalf("draft apply: %v", err)
 	}
-	approved, err := p.Approve(now)
+	approved, err := examined(p).Approve(now)
 	if err != nil {
 		t.Fatal(err)
 	}

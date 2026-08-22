@@ -251,10 +251,11 @@ type Agent struct {
 	Harness string `json:"harness"`
 
 	// Id Opaque agent id. Not interchangeable with other id kinds.
-	Id     AgentID     `json:"id"`
-	Model  *string     `json:"model,omitempty"`
-	Name   string      `json:"name"`
-	Status AgentStatus `json:"status"`
+	Id       AgentID         `json:"id"`
+	Model    *string         `json:"model,omitempty"`
+	Name     string          `json:"name"`
+	Reviewer *ReviewerConfig `json:"reviewer,omitempty"`
+	Status   AgentStatus     `json:"status"`
 
 	// Tools Tool names this agent may be offered. Policy still denies by default; this is not a grant.
 	Tools *[]string `json:"tools,omitempty"`
@@ -275,10 +276,11 @@ type AgentList struct {
 // AgentPatch defines model for AgentPatch.
 type AgentPatch struct {
 	// AutonomyTier Explicit operator tier change. Stage 1 does not auto-promote.
-	AutonomyTier *string   `json:"autonomy_tier,omitempty"`
-	Model        *string   `json:"model,omitempty"`
-	Name         *string   `json:"name,omitempty"`
-	Tools        *[]string `json:"tools,omitempty"`
+	AutonomyTier *string         `json:"autonomy_tier,omitempty"`
+	Model        *string         `json:"model,omitempty"`
+	Name         *string         `json:"name,omitempty"`
+	Reviewer     *ReviewerConfig `json:"reviewer,omitempty"`
+	Tools        *[]string       `json:"tools,omitempty"`
 }
 
 // AgentStatus defines model for AgentStatus.
@@ -469,14 +471,35 @@ type CrossExam struct {
 	// At RFC 3339 timestamp in UTC when cross-exam completed.
 	At time.Time `json:"at"`
 
-	// Reasoning Why the reviewer reached this verdict.
+	// Reasoning Reviewer notes, rendered inline. Empty notes on a nontrivial
+	// plan are a signal (a reviewer that never writes notes is not
+	// reviewing).
 	Reasoning string `json:"reasoning"`
 
-	// ReviewerModel Model that performed the cross-exam.
+	// ReviewerModel Model that performed the cross-exam. Dual reviews join models with a comma.
 	ReviewerModel string `json:"reviewer_model"`
 
-	// Verdict Outcome of the automatic cross-exam. Open string; clients must tolerate unknown verdicts.
+	// Verdict Outcome of the automatic cross-exam. Known values: pass, fail,
+	// pass_with_notes. Clients must tolerate unknown verdicts.
 	Verdict string `json:"verdict"`
+}
+
+// CrossExamStats defines model for CrossExamStats.
+type CrossExamStats struct {
+	// AgentId Opaque agent id. Not interchangeable with other id kinds.
+	AgentId AgentID `json:"agent_id"`
+
+	// EmptyNotesNontrivial Verdicts with empty notes on a nontrivial plan.
+	EmptyNotesNontrivial int `json:"empty_notes_nontrivial"`
+
+	// Examined Plans that have a recorded reviewer verdict.
+	Examined int `json:"examined"`
+	Fail     int `json:"fail"`
+	Pass     int `json:"pass"`
+
+	// PassRate (pass + pass_with_notes) / examined. Zero when examined is zero.
+	PassRate      float64 `json:"pass_rate"`
+	PassWithNotes int     `json:"pass_with_notes"`
 }
 
 // Error defines model for Error.
@@ -686,6 +709,21 @@ type PlanStatus string
 // RequestChangesRequest defines model for RequestChangesRequest.
 type RequestChangesRequest struct {
 	Comment string `json:"comment"`
+}
+
+// ReviewerConfig defines model for ReviewerConfig.
+type ReviewerConfig struct {
+	// BlockOnFail When true, a failed cross-exam returns the plan to the agent with the notes attached instead of escalating to the human.
+	BlockOnFail *bool `json:"block_on_fail,omitempty"`
+
+	// Dual When true, second_model also reviews in an independent context. Both must pass.
+	Dual *bool `json:"dual,omitempty"`
+
+	// Model Reviewer model. Must differ from the producer model. Same-model second pass is rejected.
+	Model *string `json:"model,omitempty"`
+
+	// SecondModel Second reviewer model when dual is true. Must differ from model and from the producer.
+	SecondModel *string `json:"second_model,omitempty"`
 }
 
 // Run defines model for Run.
@@ -944,6 +982,9 @@ type ServerInterface interface {
 	// PatchAgent Patch agent config
 	// (PATCH /agents/{id})
 	PatchAgent(w http.ResponseWriter, r *http.Request, id AgentID)
+	// GetAgentCrossExamStats Cross-exam pass rate for an agent
+	// (GET /agents/{id}/cross-exam-stats)
+	GetAgentCrossExamStats(w http.ResponseWriter, r *http.Request, id AgentID)
 	// ListAgentLeases List current leases for an agent
 	// (GET /agents/{id}/leases)
 	ListAgentLeases(w http.ResponseWriter, r *http.Request, id AgentID)
@@ -1125,6 +1166,32 @@ func (siw *ServerInterfaceWrapper) PatchAgent(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchAgent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentCrossExamStats operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentCrossExamStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id AgentID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentCrossExamStats(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2238,6 +2305,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents", wrapper.ListAgents)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{id}", wrapper.GetAgent)
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/agents/{id}", wrapper.PatchAgent)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{id}/cross-exam-stats", wrapper.GetAgentCrossExamStats)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/agents/{id}/leases", wrapper.ListAgentLeases)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/approvals", wrapper.ListApprovals)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/memory", wrapper.ListMemory)

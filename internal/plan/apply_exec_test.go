@@ -162,7 +162,7 @@ func threeApproved(t *testing.T) Plan {
 		Observed: map[string]string{"a.txt": "h1", "b.txt": "h2", "c.txt": "h3"},
 	})
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
-	approved, err := p.Approve(now)
+	approved, err := examined(p).Approve(now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestApplySecretScanBlocks(t *testing.T) {
 		},
 		Observed: map[string]string{"a.txt": "h1", "b.txt": "h2", "c.txt": "h3"},
 	})
-	approved, err := p.Approve(now)
+	approved, err := examined(p).Approve(now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestPropertyPreconditionDriftWritesNothing(t *testing.T) {
 		live[effects[drift].Path] = fmt.Sprintf("mutated-%d", i)
 
 		p := mustBuild(t, Draft{Effects: effects, Observed: observed})
-		approved, err := p.Approve(now)
+		approved, err := examined(p).Approve(now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -541,7 +541,7 @@ func TestPropertyApprovalBindsToExactHash(t *testing.T) {
 			observed[path] = fmt.Sprintf("h-%d", j)
 		}
 		rev2 := mustBuild(t, Draft{Effects: effects, Observed: observed})
-		approved2, err := rev2.Approve(now)
+		approved2, err := examined(rev2).Approve(now)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -582,7 +582,7 @@ func TestPropertyExpiredLeaseNeverAppliesPastWindow(t *testing.T) {
 			observed[path] = fmt.Sprintf("h-%d", j)
 		}
 		p := mustBuild(t, Draft{Effects: effects, Observed: observed})
-		approved, err := p.Approve(now)
+		approved, err := examined(p).Approve(now)
 		if err != nil {
 			t.Fatal(err)
 		}

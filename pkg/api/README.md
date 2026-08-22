@@ -34,7 +34,7 @@ be the resource groups on this surface.
 | --- | --- | --- |
 | Runs | `POST/GET /runs`, `GET /runs/{id}`, `GET /runs/{id}/events`, `POST /runs/{id}/steer`, `POST /runs/{id}/background`, `POST /runs/{id}/foreground`, `POST /runs/{id}/stop`, `POST /runs/{id}/checkpoints` | Live tail is the WebSocket on `GET /runs/{id}/events`. HTTP without Upgrade returns the same replay window for the CLI. Stop checkpoints, then marks the run stopped so restore can fork a continuation. |
 | Plans | `GET /plans`, `GET /plans/{id}`, `POST /plans/{id}/approve`, `POST /plans/{id}/request-changes`, `POST /plans/{id}/branch`, `POST /plans/{id}/apply` | Effects are structured diffs with lease, precondition, idempotency key, and postcondition. The plan carries a canonical hash, expiry, cost ceiling, and draft constraints. Cross-exam is a field on the plan, not an operator endpoint. Apply is the world-changing call. |
-| Agents | `GET /agents`, `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /agents/{id}/leases` | PATCH is a signed audited action (`name`, `model`, `tools`, `autonomy_tier`). Leases are read-only; they are minted during apply. |
+| Agents | `GET /agents`, `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /agents/{id}/leases`, `GET /agents/{id}/cross-exam-stats` | PATCH is a signed audited action (`name`, `model`, `tools`, `autonomy_tier`, `reviewer`). Reviewer config is a model, optional dual (both must pass), and block-on-fail. Stats is pass rate plus silent-pass count. Leases are read-only; they are minted during apply. |
 | Approvals | `GET /approvals` | Inbox only. `kind` is an open string. Decisions go to the subject resource. |
 | Memory | `GET/POST /memory`, `GET /memory/proposals`, `POST /memory/proposals/{id}/accept`, `POST /memory/proposals/{id}/reject` | Operator writes vs agent proposals are separate paths. |
 | Audit | `GET /audit`, `POST /audit/{id}/verify` | HTTP verify re-checks one Schnorr signature. `zeroth verify <run-id>` walks the hash chain offline. |
@@ -50,7 +50,9 @@ contract drafts:
 1. **Apply** is `POST /plans/{id}/apply`. Response is the updated plan plus
    the audit entry id. Approve does not apply.
 2. **Cross-exam** is system-triggered. Exposed as `Plan.cross_exam`
-   (`verdict`, `reviewer_model`, `reasoning`, `at`). No operator re-run.
+   (`verdict`, `reviewer_model`, `reasoning`, `at`). Known verdicts are
+   `pass`, `fail`, `pass_with_notes`. Empty notes are allowed. No operator
+   re-run. Pass rate is `GET /agents/{id}/cross-exam-stats`.
 3. **Plan list** is `GET /plans?run_id=&status=`. `Plan.effects` is the
    structured diff. `summary` is free-text rationale. `secret_scan_findings`
    is on the plan so the operator sees the gate before apply.
@@ -61,8 +63,8 @@ contract drafts:
 6. **`RunEvent.type`** is an open string. Known values are documented on
    the schema. Codegen will not emit a WebSocket client; `web/src/api/runEvents.ts`
    is the thin wrapper around the generated `RunEvent` type.
-7. **Agent PATCH** is `name`, `model`, `tools`, `autonomy_tier`. Leases are
-   `GET /agents/{id}/leases`. No auto-promotion.
+7. **Agent PATCH** is `name`, `model`, `tools`, `autonomy_tier`, `reviewer`.
+   Leases are `GET /agents/{id}/leases`. No auto-promotion.
 8. **Approvals inbox** stays an inbox. `kind` is an open string.
 9. **On-demand checkpoints** are `POST /runs/{id}/checkpoints`. Restore
    forks a new run.

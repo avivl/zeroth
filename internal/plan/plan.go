@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/avivl/zeroth/internal/policy"
@@ -37,13 +38,37 @@ type Credential struct {
 	Kind     string
 }
 
+// Known cross-exam verdicts. The wire format is an open string; these are
+// the values this package produces. Clients must tolerate unknowns.
+const (
+	VerdictPass          = "pass"
+	VerdictFail          = "fail"
+	VerdictPassWithNotes = "pass_with_notes"
+)
+
 // CrossExam is the automatic challenge of a draft. It is not part of the
 // canonical hash: a reviewer verdict does not rewrite what was approved.
+// Reasoning is the free-text notes shown inline. Empty notes on a
+// nontrivial plan are themselves a signal.
 type CrossExam struct {
 	Verdict       string
 	ReviewerModel string
 	Reasoning     string
 	At            time.Time
+}
+
+// Nontrivial reports whether p is large enough that a silent pass (a
+// verdict with no notes) is worth tracking. One tiny row is not.
+func (p Plan) Nontrivial() bool {
+	if len(p.Rows) > 1 {
+		return true
+	}
+	for _, r := range p.Rows {
+		if len(r.Payload) > 80 {
+			return true
+		}
+	}
+	return false
 }
 
 // Finding names a secretscan hit without the secret itself.
@@ -96,14 +121,17 @@ func (p Plan) PolicyPlan() policy.Plan {
 
 // Approve returns a copy marked approved. It does not change Hash: the
 // operator is gating this exact bundle, not revising it. Expired or
-// hash-mismatched plans are rejected.
+// hash-mismatched plans are rejected. Drafts, in-flight exams, and
+// block-on-fail returns are not the human gate: only a completed
+// cross-exam that escalated (pending_approval) can be approved.
 func (p Plan) Approve(now time.Time) (Plan, error) {
 	if err := p.checkBundle(now); err != nil {
 		return Plan{}, err
 	}
-	switch p.Status {
-	case StatusDraft, StatusCrossExam, StatusPendingApproval, StatusChangesRequested:
-	default:
+	if p.CrossExam == nil {
+		return Plan{}, fmt.Errorf("plan approve: %w", ErrNotExamined)
+	}
+	if p.Status != StatusPendingApproval {
 		return Plan{}, fmtStatus("plan approve", p.Status)
 	}
 	out := p

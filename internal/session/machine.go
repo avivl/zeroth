@@ -121,6 +121,14 @@ func (m *Machine) ProposePlan(ctx context.Context, ref string) error {
 	return nil
 }
 
+// RecordCrossExam appends a reviewer verdict. Status stays running.
+func (m *Machine) RecordCrossExam(ctx context.Context, payload string) error {
+	if err := m.record(ctx, EventCrossExam, payload); err != nil {
+		return fmt.Errorf("session cross-exam: %w", err)
+	}
+	return nil
+}
+
 // RequestApproval moves running -> awaiting-approval.
 func (m *Machine) RequestApproval(ctx context.Context, ref string) error {
 	if err := m.record(ctx, EventApprovalRequested, ref); err != nil {

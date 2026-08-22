@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -123,12 +124,22 @@ func TestMigrateUpAndDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 3 {
-		t.Fatalf("version = %d, want 3", v)
+	if v != 4 {
+		t.Fatalf("version = %d, want 4", v)
 	}
 	agent := store.Agent{ID: mustAID(t, "a1"), Name: "n", Harness: "h", Status: "ready"}
 	if err := s.CreateAgent(ctx, agent); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.MigrateDown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v, err = s.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 3 {
+		t.Fatalf("after 0004 down version = %d", v)
 	}
 	if err := s.MigrateDown(ctx); err != nil {
 		t.Fatal(err)
@@ -150,8 +161,8 @@ func TestMigrateUpAndDown(t *testing.T) {
 	if v != 1 {
 		t.Fatalf("after 0002 down version = %d", v)
 	}
-	if _, err := s.GetAgent(ctx, agent.ID); err != nil {
-		t.Fatalf("agent lost on additive 0002 down: %v", err)
+	if !agentRowExists(t, s, ctx, agent.ID) {
+		t.Fatal("agent lost on additive 0002 down")
 	}
 	if err := s.MigrateDown(ctx); err != nil {
 		t.Fatal(err)
@@ -170,7 +181,7 @@ func TestMigrateUpAndDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err = s.Version(ctx)
-	if err != nil || v != 3 {
+	if err != nil || v != 4 {
 		t.Fatalf("after up version = %d err=%v", v, err)
 	}
 	if err := s.CreateAgent(ctx, agent); err != nil {
@@ -201,11 +212,11 @@ func TestMigrateDownPreservesEarlierRows(t *testing.T) {
 		t.Fatalf("version = %d err=%v, want 2", v, err)
 	}
 
-	agent := store.Agent{ID: mustAID(t, "a1"), Name: "n", Harness: "h", Status: "ready"}
-	if err := s.CreateAgent(ctx, agent); err != nil {
+	agentID := mustAID(t, "a1")
+	if err := insertAgentV1(ctx, s, agentID); err != nil {
 		t.Fatal(err)
 	}
-	sess := store.Session{ID: mustSID(t, "s1"), AgentID: agent.ID, Status: "running", Prompt: "keep-me"}
+	sess := store.Session{ID: mustSID(t, "s1"), AgentID: agentID, Status: "running", Prompt: "keep-me"}
 	if err := s.CreateSession(ctx, sess); err != nil {
 		t.Fatal(err)
 	}
@@ -232,6 +243,20 @@ func TestMigrateDownPreservesEarlierRows(t *testing.T) {
 	if err == nil {
 		t.Fatal("note column still present after down")
 	}
+}
+
+func agentRowExists(t *testing.T, s *Store, ctx context.Context, id store.AgentID) bool {
+	t.Helper()
+	var got string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM agents WHERE id = ?`, id.String()).Scan(&got)
+	return err == nil && got == id.String()
+}
+
+func insertAgentV1(ctx context.Context, s *Store, id store.AgentID) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO agents (id, name, harness, status, created_at_unix_nano, updated_at_unix_nano)
+		VALUES (?, 'n', 'h', 'ready', 1, 1)`, id.String())
+	return err
 }
 
 func openTest(t *testing.T) *Store {

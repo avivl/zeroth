@@ -237,13 +237,38 @@ type CheckpointQuery struct {
 
 // Agent is a local agent record. Config changes are audited by callers.
 type Agent struct {
-	ID           AgentID
-	Name         string
-	Harness      string
-	Status       string
-	Model        string
-	Tools        []string
-	AutonomyTier string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID             AgentID
+	Name           string
+	Harness        string
+	Status         string
+	Model          string
+	Tools          []string
+	AutonomyTier   string
+	ReviewerModel  string
+	ReviewerModel2 string
+	ReviewerDual   bool
+	BlockOnFail    bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// CrossExamStats is the per-agent reviewer scoreboard. PassRate is
+// (Pass + PassWithNotes) / Examined, or 0 when nothing has been examined.
+// EmptyNotesNontrivial is the silent-pass signal: a reviewer that always
+// passes a nontrivial plan with zero notes is not reviewing.
+type CrossExamStats struct {
+	AgentID              AgentID
+	Examined             int
+	Pass                 int
+	Fail                 int
+	PassWithNotes        int
+	EmptyNotesNontrivial int
+}
+
+// PassRate is (pass + pass_with_notes) / examined. Zero when examined is 0.
+func (s CrossExamStats) PassRate() float64 {
+	if s.Examined == 0 {
+		return 0
+	}
+	return float64(s.Pass+s.PassWithNotes) / float64(s.Examined)
 }
