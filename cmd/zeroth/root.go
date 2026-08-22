@@ -48,6 +48,7 @@ func newRoot() *cobra.Command {
 		c.newAttachCmd(),
 		c.newBgCmd(),
 		c.newRunsCmd(),
+		c.newRetractCmd(),
 		c.newVerifyCmd(),
 	)
 	return cmd

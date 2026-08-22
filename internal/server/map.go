@@ -70,6 +70,19 @@ func runFrom(sess store.Session, st session.State) gen.Run {
 		t := sess.UpdatedAt.UTC()
 		out.FinishedAt = &t
 	}
+	if sess.PullRequest != "" {
+		pr := sess.PullRequest
+		out.PullRequest = &pr
+	}
+	if sess.RetractReason != "" {
+		r := sess.RetractReason
+		out.RetractReason = &r
+	}
+	if !sess.RetractedAt.IsZero() {
+		t := sess.RetractedAt.UTC()
+		out.RetractedAt = &t
+		out.Status = gen.RunStatusRetracted
+	}
 	return out
 }
 

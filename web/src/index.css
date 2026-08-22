@@ -214,7 +214,8 @@ pre,
 .badge-destroy,
 .badge-failed,
 .badge-rejected,
-.badge-danger {
+.badge-danger,
+.badge-retracted {
   color: var(--danger);
   background: var(--danger-bg);
 }

@@ -4,17 +4,20 @@ import "time"
 
 // Session is one human-supervised run. The API calls this a run.
 type Session struct {
-	ID           SessionID
-	AgentID      AgentID
-	PlanID       PlanID
-	Status       string
-	Prompt       string
-	TrackerRef   string
-	Workspace    WorkspaceSource
-	AutonomyTier string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	FinishedAt   time.Time
+	ID            SessionID
+	AgentID       AgentID
+	PlanID        PlanID
+	Status        string
+	Prompt        string
+	TrackerRef    string
+	Workspace     WorkspaceSource
+	AutonomyTier  string
+	PullRequest   string
+	RetractReason string
+	RetractedAt   time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	FinishedAt    time.Time
 }
 
 // WorkspaceSource is the repo a session checks out.

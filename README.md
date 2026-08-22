@@ -84,7 +84,7 @@ The UI under `web/` is a pnpm workspace package. `task web` and `task lint` inst
 
 PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests with a coverage profile, octocov (PR comment plus a fail if coverage drops versus main), conformance, `go vet`, staticcheck, a secret scan over the diff, the `web/` build and tests, and a check that `pkg/api/gen` matches `task generate`. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. Merge to main commits `docs/coverage.svg`. The commit SHA is the version. There is no semver in this repository.
 
-`zeroth run <task>` starts a headless session. `zeroth attach <run-id>` replays recent events and live-tails (type to steer; Ctrl-C detaches). `zeroth bg <run-id>` demotes a run. `zeroth runs` lists. `zeroth verify <run-id>` checks the signed audit chain against the SQLite file with no daemon (`--db-path` / `ZEROTH_DB_PATH`). Live events are `GET /runs/{id}/events` over WebSocket.
+`zeroth run <task>` starts a headless session. `zeroth attach <run-id>` replays recent events and live-tails (type to steer; Ctrl-C detaches). `zeroth bg <run-id>` demotes a run. `zeroth runs` lists. `zeroth retract <run-id> --reason "..."` closes any pull request that run opened, comments the reason on the Linear issue, and leaves the issue ready for a fresh assignment. `zeroth verify <run-id>` checks the signed audit chain against the SQLite file with no daemon (`--db-path` / `ZEROTH_DB_PATH`). Live events are `GET /runs/{id}/events` over WebSocket.
 
 ## License
 

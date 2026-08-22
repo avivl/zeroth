@@ -267,14 +267,26 @@ func testSessions(t *testing.T, open func(t *testing.T) store.Store) {
 	if got.Prompt != sess.Prompt || got.Workspace.Repo != sess.Workspace.Repo || got.TrackerRef != "42-19" {
 		t.Fatalf("GetSession = %+v", got)
 	}
+	sess.PullRequest = "https://github.com/avivl/zeroth/pull/99"
 	sess.Status = "backgrounded"
 	sess.UpdatedAt = ts(2)
 	if err := s.UpdateSession(ctx, sess); err != nil {
 		t.Fatalf("UpdateSession: %v", err)
 	}
 	got, err = s.GetSession(ctx, sess.ID)
-	if err != nil || got.Status != "backgrounded" {
+	if err != nil || got.Status != "backgrounded" || got.PullRequest != sess.PullRequest {
 		t.Fatalf("updated: %+v err=%v", got, err)
+	}
+	sess.RetractReason = "overwrite would have deleted README"
+	sess.RetractedAt = ts(5)
+	sess.Status = "retracted"
+	sess.UpdatedAt = ts(5)
+	if err := s.UpdateSession(ctx, sess); err != nil {
+		t.Fatalf("retract session: %v", err)
+	}
+	got, err = s.GetSession(ctx, sess.ID)
+	if err != nil || got.RetractReason != sess.RetractReason || got.RetractedAt.IsZero() {
+		t.Fatalf("retracted session: %+v err=%v", got, err)
 	}
 
 	pid := mustPlanID(t, "plan-keep")
