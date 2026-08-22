@@ -14,9 +14,10 @@ import (
 type FakeGraphQL struct {
 	mu sync.Mutex
 
-	APIKey      string
-	AgentUserID string
-	TeamID      string
+	APIKey            string
+	AgentUserID       string
+	TeamID            string
+	lastAuthorization string
 
 	issues      map[string]*fakeIssue
 	comments    []FakeComment
@@ -140,6 +141,14 @@ func (f *FakeGraphQL) Attachments() []FakeAttachment {
 	return out
 }
 
+// LastAuthorization is the raw Authorization header from the most recent
+// GraphQL request. Tests use it to prove personal vs OAuth header format.
+func (f *FakeGraphQL) LastAuthorization() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastAuthorization
+}
+
 // IssueState returns the workflow type for key.
 func (f *FakeGraphQL) IssueState(key string) string {
 	f.mu.Lock()
@@ -156,9 +165,11 @@ func (f *FakeGraphQL) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	rawAuth := r.Header.Get("Authorization")
+	auth := strings.TrimSpace(rawAuth)
 	auth = strings.TrimPrefix(auth, "Bearer ")
 	f.mu.Lock()
+	f.lastAuthorization = rawAuth
 	want := f.APIKey
 	f.mu.Unlock()
 	if auth != want {

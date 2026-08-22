@@ -65,7 +65,7 @@ func (p *Provider) roundTrip(ctx context.Context, body []byte) (gqlResponse, err
 		return gqlResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", p.apiKey)
+	req.Header.Set("Authorization", p.authorizationHeader())
 	req.Header.Set("Accept", "application/json")
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -90,6 +90,24 @@ func (p *Provider) roundTrip(ctx context.Context, body []byte) (gqlResponse, err
 		return gqlResponse{}, fmt.Errorf("tracker linear: decode http: %w", err)
 	}
 	return out, nil
+}
+
+func (p *Provider) authorizationHeader() string {
+	if p.authStyle == AuthOAuth {
+		return "Bearer " + p.apiKey
+	}
+	return p.apiKey
+}
+
+func parseAuthStyle(s AuthStyle) (AuthStyle, error) {
+	switch AuthStyle(strings.ToLower(strings.TrimSpace(string(s)))) {
+	case "", AuthPersonal:
+		return AuthPersonal, nil
+	case AuthOAuth:
+		return AuthOAuth, nil
+	default:
+		return "", fmt.Errorf("tracker linear: unknown auth style %q (want personal or oauth): %w", s, tracker.ErrInvalid)
+	}
 }
 
 func isNotFound(msg string) bool {
