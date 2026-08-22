@@ -129,15 +129,21 @@ being marked stopped in a database row.
 access token sent without `oauth` (i.e. sent raw, no `Bearer` prefix) or
 a personal API key sent with `oauth` (wrapped in a `Bearer` prefix it
 doesn't expect) both fail the same way: Linear's GraphQL API returns an
-authentication error, and nothing polls. Double-check which kind of key
-you generated and set the flag to match.
+authentication error, and `zerothd` logs `tracker linear poll` at error
+on every tick (visible at the default `info` level; `--log-level debug`
+is not required). Double-check which kind of key you generated and set
+the flag to match.
 
-**Nothing happens after assigning the issue.** Check
-`--linear-team-id`/`--linear-project-id` — if set, they filter which
-issues `zerothd` even looks at. Also confirm the issue is actually
-assigned to the id in `--linear-agent-user`, or delegated to that same
-id via Linear's native delegate field, not just labeled or commented
-on. A mention without assignee or delegate does not start a run.
+**Nothing happens after assigning the issue.** Read the daemon logs
+first. A GraphQL or auth failure is an error line, not silence. A
+healthy poll that matched nothing is a debug line (`issues=0`); raise
+`--log-level debug` if you need to tell "loop is alive" from "loop is
+broken." Then check `--linear-team-id`/`--linear-project-id` — if set,
+they filter which issues `zerothd` even looks at. Also confirm the issue
+is actually assigned to the id in `--linear-agent-user`, or delegated to
+that same id via Linear's native delegate field, not just labeled or
+commented on. A mention without assignee or delegate does not start a
+run.
 
 **The sandbox never seems to stop after un-assigning.** Confirm
 `--docker-socket` points at a reachable Docker daemon; if `zerothd` can't

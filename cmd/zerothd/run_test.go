@@ -5,9 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/avivl/zeroth/internal/tracker/linear"
 )
 
 func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
@@ -83,4 +88,77 @@ func TestRootHelp(t *testing.T) {
 	if !strings.Contains(got, "--addr") || !strings.Contains(got, "--db-path") {
 		t.Fatalf("help missing flags: %s", got)
 	}
+}
+
+func TestRunDaemonLogsLinearPollError(t *testing.T) {
+	t.Parallel()
+	fake := linear.NewFake()
+	gql := httptest.NewServer(fake)
+	t.Cleanup(gql.Close)
+
+	var buf safeBuffer
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg := Config{
+		Addr:               "127.0.0.1:0",
+		DBPath:             filepath.Join(t.TempDir(), "zeroth.db"),
+		DockerSocket:       "/tmp/docker.sock",
+		LogLevel:           "info",
+		LogEncoding:        "json",
+		LinearAPIKey:       "not-the-key",
+		LinearEndpoint:     gql.URL,
+		LinearAgentUser:    fake.AgentUserID,
+		LinearPollInterval: 20 * time.Millisecond,
+	}
+	errc := make(chan error, 1)
+	go func() {
+		errc <- runDaemon(ctx, cfg, deps{
+			writer: &buf,
+			probe:  func(context.Context, string) error { return nil },
+			serve: func(ctx context.Context, _ string, h http.Handler) error {
+				if h == nil {
+					t.Error("nil handler")
+				}
+				<-ctx.Done()
+				return nil
+			},
+		})
+	}()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		out := buf.String()
+		if strings.Contains(out, `"msg":"tracker linear poll"`) && strings.Contains(out, `"level":"error"`) {
+			cancel()
+			if err := <-errc; err != nil {
+				t.Fatalf("runDaemon: %v", err)
+			}
+			if !strings.Contains(out, "unauthorized") {
+				t.Fatalf("poll error missing unauthorized: %s", out)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-errc
+	t.Fatalf("missing info-visible poll error log: %s", buf.String())
+}
+
+type safeBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

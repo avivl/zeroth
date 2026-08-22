@@ -86,6 +86,7 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 			PollInterval:  cfg.LinearPollInterval,
 			WebhookSecret: cfg.LinearWebhookSecret,
 			AuthStyle:     linear.AuthStyle(cfg.LinearAuthStyle),
+			Log:           log,
 		})
 		if err != nil {
 			return fmt.Errorf("zerothd linear: %w", err)

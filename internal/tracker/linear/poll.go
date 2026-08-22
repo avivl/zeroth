@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/avivl/zeroth/internal/tracker"
+	"go.uber.org/zap"
 )
 
 // Assignments implements [tracker.Provider]. Polling is the stage-1 default.
@@ -37,9 +38,6 @@ func (p *Provider) Assignments(ctx context.Context) (<-chan tracker.AssignmentEv
 }
 
 func (p *Provider) pollLoop(ctx context.Context) {
-	if err := p.ensureAgent(ctx); err != nil {
-		return
-	}
 	p.tick(ctx)
 	ticker := time.NewTicker(p.poll)
 	defer ticker.Stop()
@@ -87,10 +85,22 @@ func (p *Provider) tick(ctx context.Context) {
 	if err := ctx.Err(); err != nil {
 		return
 	}
-	current, err := p.listAssigned(ctx)
-	if err != nil {
+	if err := p.ensureAgent(ctx); err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		p.log.Error("tracker linear viewer", zap.Error(err))
 		return
 	}
+	current, err := p.listAssigned(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		p.log.Error("tracker linear poll", zap.Error(err))
+		return
+	}
+	p.log.Debug("tracker linear poll", zap.Int("issues", len(current)))
 	p.diffAndEmit(current)
 }
 
