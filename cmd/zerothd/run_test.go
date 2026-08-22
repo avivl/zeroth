@@ -100,12 +100,16 @@ func TestRunDaemonLogsLinearPollError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
+	dir := t.TempDir()
 	cfg := Config{
-		Addr:               "127.0.0.1:0",
-		DBPath:             filepath.Join(t.TempDir(), "zeroth.db"),
-		DockerSocket:       "/tmp/docker.sock",
-		LogLevel:           "info",
-		LogEncoding:        "json",
+		Addr:         "127.0.0.1:0",
+		DBPath:       filepath.Join(dir, "zeroth.db"),
+		DockerSocket: "/tmp/docker.sock",
+		LogLevel:     "info",
+		LogEncoding:  "json",
+		// Skip the D-Bus keyring probe. In CI it can take seconds and
+		// starve the wait for the first poll error.
+		SigningKey:         filepath.Join(dir, "zeroth.keys"),
 		LinearAPIKey:       "not-the-key",
 		LinearEndpoint:     gql.URL,
 		LinearAgentUser:    fake.AgentUserID,
@@ -126,7 +130,7 @@ func TestRunDaemonLogsLinearPollError(t *testing.T) {
 		})
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		out := buf.String()
 		if strings.Contains(out, `"msg":"tracker linear poll"`) && strings.Contains(out, `"level":"error"`) {
