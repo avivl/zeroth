@@ -67,6 +67,9 @@ type Config struct {
 	Sandbox        sandbox.Driver
 	TrackerWebhook bool
 	WorkspaceRoot  string
+	// Publisher opens a git branch and pull request after a successful
+	// apply of file rows. Nil uses git plus the gh CLI.
+	Publisher ApplyPublisher
 }
 
 // Server serves the OpenAPI contract against a session supervisor.
@@ -84,6 +87,7 @@ type Server struct {
 	sandbox       sandbox.Driver
 	webhook       http.Handler
 	workspaceRoot string
+	publisher     ApplyPublisher
 
 	root   context.Context
 	cancel context.CancelFunc
@@ -93,6 +97,7 @@ type Server struct {
 	byTracker map[string]session.ID
 	sandboxes map[string]sandbox.ID
 	keys      map[string]string
+	prs       map[string]string
 }
 
 type liveRun struct {
@@ -152,12 +157,17 @@ func New(cfg Config) (*Server, error) {
 		tracker:       cfg.Tracker,
 		sandbox:       cfg.Sandbox,
 		workspaceRoot: strings.TrimSpace(cfg.WorkspaceRoot),
+		publisher:     cfg.Publisher,
 		root:          ctx,
 		cancel:        cancel,
 		lives:         make(map[string]*liveRun),
 		byTracker:     make(map[string]session.ID),
 		sandboxes:     make(map[string]sandbox.ID),
 		keys:          make(map[string]string),
+		prs:           make(map[string]string),
+	}
+	if s.publisher == nil {
+		s.publisher = newGitPublisher()
 	}
 	if cfg.TrackerWebhook {
 		if h, ok := cfg.Tracker.(http.Handler); ok {

@@ -176,13 +176,24 @@ func (s *Server) completeTracker(ctx context.Context, id session.ID) {
 		return
 	}
 	line := s.auditLine(ctx, id)
+	pr := s.takePR(id.String())
 	body := tracker.FormatCompletion(tracker.Completion{
-		RunID:      id.String(),
-		Transcript: "zeroth attach " + id.String(),
-		Audit:      line,
+		RunID:       id.String(),
+		Transcript:  "zeroth attach " + id.String(),
+		PullRequest: pr,
+		Audit:       line,
 	})
 	if _, err := s.tracker.Comment(ctx, key, body); err != nil {
 		s.log.Debug("tracker completion comment", zap.Error(err))
+	}
+	if pr != "" {
+		if err := s.tracker.LinkArtifact(ctx, key, tracker.Artifact{
+			Kind:  tracker.ArtifactPR,
+			URL:   pr,
+			Title: "Pull request",
+		}); err != nil {
+			s.log.Debug("tracker link pr", zap.Error(err))
+		}
 	}
 	if err := s.tracker.SetState(ctx, key, tracker.State{Kind: tracker.StateCompleted}); err != nil {
 		s.log.Debug("tracker set completed", zap.Error(err))
