@@ -110,8 +110,12 @@ Now, in Linear:
    appears there: a change-plan card with create/modify/destroy/memory
    rows, each expandable to a diff, with leases and expiries shown per
    resource, and the cross-exam verdict inline.
-5. Click **Approve**, then **Apply**. The signature chip next to the
-   applied plan should read valid — click **Verify** to confirm.
+5. Click **Approve**, then **Apply**. Each click shows a Plan gate banner
+   on the change-plan card with that REST call's real outcome (`POST
+   /plans/{id}/approve`, then `POST /plans/{id}/apply`). A live-output
+   reconnect is labeled "Live tail" on the output card and is not an
+   approve or apply result. The signature chip next to the applied plan
+   should read valid: click **Verify** to confirm.
 6. Zeroth opens a PR, links it back on the Linear issue, and moves the
    issue's status. The issue comment also carries cost, a transcript
    link, and an audit summary.
