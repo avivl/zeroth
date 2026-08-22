@@ -130,7 +130,7 @@ type Leaser interface {
 // implementation lives in signer/audit (Linear 42-27); Apply only calls
 // the port so the sequence stays complete.
 type Auditor interface {
-	SignEffect(ctx context.Context, row Row, postcondition string) error
+	SignRow(ctx context.Context, row Row, postcondition string) error
 	SignPlan(ctx context.Context, p Plan) error
 }
 
@@ -173,9 +173,13 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 
 	switch p.Status {
 	case StatusApplied:
-		return resultFrom(p, nil, len(p.Rows), ""), nil
+		through := p.AppliedThrough
+		if through == 0 {
+			through = len(p.Rows)
+		}
+		return resultFrom(p, nil, through, p.Checkpoint), nil
 	case StatusPartiallyApplied:
-		return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply: %w", ErrPartial)
+		return resultFrom(p, nil, p.AppliedThrough, p.Checkpoint), fmt.Errorf("plan apply: %w", ErrPartial)
 	case StatusStale:
 		return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply: %w", ErrStale)
 	case StatusApproved, StatusApplying:
@@ -183,7 +187,13 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 		return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply: %w", ErrNotApproved)
 	}
 
-	if approval.PlanHash != p.Hash {
+	// Approval binds to HashOf, the canonical digest, not a stored field
+	// the caller could have left pointing at an older revision.
+	digest := HashOf(p)
+	if p.Hash != digest {
+		return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply: %w", ErrHashMismatch)
+	}
+	if approval.PlanHash != digest {
 		p.ReviewComment = "approval hash does not cover this plan"
 		return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply: %w", ErrApproval)
 	}
@@ -225,6 +235,7 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 		return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply checkpoint: %w", ckErr)
 	}
 	ck = ref
+	p.Checkpoint = ck
 
 	leases, acqErr := a.Leases.Acquire(ctx, p)
 	if acqErr != nil {
@@ -270,7 +281,7 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 		if execErr != nil {
 			return a.haltPartial(ctx, p, applied, ck, fmt.Errorf("row %d: %w", i+1, execErr))
 		}
-		if signErr := a.Audit.SignEffect(ctx, row, post); signErr != nil {
+		if signErr := a.Audit.SignRow(ctx, row, post); signErr != nil {
 			applied = append(applied, Applied{Key: row.IdempotencyKey, Index: i, Postcondition: post})
 			return a.haltPartial(ctx, p, applied, ck, fmt.Errorf("sign row %d: %w", i+1, signErr))
 		}
@@ -278,11 +289,13 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 	}
 
 	p.Status = StatusApplied
+	p.AppliedThrough = len(applied)
+	p.Checkpoint = ck
 	p.ReviewComment = ""
 	if signErr := a.Audit.SignPlan(ctx, p); signErr != nil {
-		return resultFrom(p, applied, len(applied), ck), fmt.Errorf("plan apply: sign plan: %w", signErr)
+		return resultFrom(p, applied, p.AppliedThrough, ck), fmt.Errorf("plan apply: sign plan: %w", signErr)
 	}
-	return resultFrom(p, applied, len(applied), ck), nil
+	return resultFrom(p, applied, p.AppliedThrough, ck), nil
 }
 
 func authorizeRow(k *policy.Kernel, now time.Time, principal policy.PrincipalID, p Plan, row Row, leases []policy.Lease) error {
@@ -312,9 +325,11 @@ func (a *Applier) haltPartial(ctx context.Context, p Plan, applied []Applied, ck
 		return resultFrom(p, applied, 0, ck), fmt.Errorf("plan apply: %w", cause)
 	}
 	p.Status = StatusPartiallyApplied
+	p.AppliedThrough = len(applied)
+	p.Checkpoint = ck
 	p.ReviewComment = cause.Error()
 	_ = a.Audit.SignPlan(ctx, p)
-	return resultFrom(p, applied, len(applied), ck), fmt.Errorf("plan apply: %w: %w", ErrPartial, cause)
+	return resultFrom(p, applied, p.AppliedThrough, ck), fmt.Errorf("plan apply: %w: %w", ErrPartial, cause)
 }
 
 func (a *Applier) ready() error {

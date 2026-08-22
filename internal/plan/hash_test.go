@@ -49,6 +49,8 @@ func TestHashIgnoresStatusAndReview(t *testing.T) {
 	q.Status = StatusApproved
 	q.ReviewComment = "ship it"
 	q.UpdatedAt = p.UpdatedAt.Add(time.Hour)
+	q.AppliedThrough = 2
+	q.Checkpoint = "ckpt-1"
 	if HashOf(p) != HashOf(q) {
 		t.Fatal("approve must not change the canonical hash")
 	}

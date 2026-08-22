@@ -71,8 +71,15 @@ type Plan struct {
 	CrossExam     *CrossExam
 	Findings      []Finding
 	ReviewComment string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// AppliedThrough is the exclusive count of leading rows that landed
+	// during apply. It is an outcome, not part of the approved bundle, so
+	// it is not hashed. Recovery reads this rather than guessing.
+	AppliedThrough int
+	// Checkpoint is the pre-apply snapshot locator, when apply took one.
+	// Unhashed for the same reason as AppliedThrough.
+	Checkpoint CheckpointRef
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 // PolicyPlan is what the kernel sees: the canonical hash and one effect

@@ -148,8 +148,8 @@ func (c *testCK) count() int {
 
 type testAuditor struct{}
 
-func (testAuditor) SignEffect(context.Context, Row, string) error { return nil }
-func (testAuditor) SignPlan(context.Context, Plan) error          { return nil }
+func (testAuditor) SignRow(context.Context, Row, string) error { return nil }
+func (testAuditor) SignPlan(context.Context, Plan) error       { return nil }
 
 func threeApproved(t *testing.T) Plan {
 	t.Helper()
@@ -202,6 +202,9 @@ func TestApplyHappyPath(t *testing.T) {
 	}
 	if got.Status != StatusApplied || got.AppliedThrough != 3 {
 		t.Fatalf("status=%q through=%d", got.Status, got.AppliedThrough)
+	}
+	if got.Plan.AppliedThrough != 3 || got.Plan.Checkpoint == "" {
+		t.Fatalf("plan through=%d ck=%q", got.Plan.AppliedThrough, got.Plan.Checkpoint)
 	}
 	if got.Checkpoint == "" || ck.count() != 1 {
 		t.Fatal("expected a checkpoint")
@@ -257,11 +260,39 @@ func TestApplyApprovalDoesNotCoverNewRevision(t *testing.T) {
 	if !errors.Is(err, ErrApproval) {
 		t.Fatalf("err = %v, want ErrApproval", err)
 	}
+	if HashOf(rev3) == rev2.Hash {
+		t.Fatal("rev3 hash collided with rev2")
+	}
 	if got.Status != StatusApproved {
 		t.Fatalf("status = %q, want approved", got.Status)
 	}
 	if len(world.writeKeys()) != 0 {
 		t.Fatalf("writes = %v", world.writeKeys())
+	}
+	acq, rel := leases.counts()
+	if acq != 0 || rel != 0 || ck.count() != 0 {
+		t.Fatalf("side effects on refuse: leases %d/%d ck %d", acq, rel, ck.count())
+	}
+}
+
+func TestApplyTamperedRowsRefuseWithHashMismatch(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	applier, world, leases, ck, _ := applyHarness(now)
+	p := threeApproved(t)
+	stored := p.Hash
+	p.Rows = append([]Row(nil), p.Rows...)
+	p.Rows[0].Payload = "tampered"
+	if HashOf(p) == stored {
+		t.Fatal("tamper must change HashOf")
+	}
+
+	got, err := applier.Apply(t.Context(), applyActor, p, Approval{PlanHash: stored})
+	if !errors.Is(err, ErrHashMismatch) {
+		t.Fatalf("err = %v, want ErrHashMismatch", err)
+	}
+	if got.Status != StatusApproved || len(world.writeKeys()) != 0 {
+		t.Fatalf("status=%q writes=%v", got.Status, world.writeKeys())
 	}
 	acq, rel := leases.counts()
 	if acq != 0 || rel != 0 || ck.count() != 0 {
@@ -286,6 +317,9 @@ func TestApplyExpiredLeaseRecordsBoundary(t *testing.T) {
 	}
 	if got.Status != StatusPartiallyApplied || got.AppliedThrough != 1 {
 		t.Fatalf("status=%q through=%d", got.Status, got.AppliedThrough)
+	}
+	if got.Plan.AppliedThrough != 1 {
+		t.Fatalf("plan through=%d", got.Plan.AppliedThrough)
 	}
 	writes := world.writeKeys()
 	if len(writes) != 1 || writes[0] != p.Rows[0].IdempotencyKey {
@@ -314,6 +348,9 @@ func TestApplyEffectFailureRecordsCoherentState(t *testing.T) {
 	}
 	if got.Status != StatusPartiallyApplied || got.AppliedThrough != 1 {
 		t.Fatalf("status=%q through=%d", got.Status, got.AppliedThrough)
+	}
+	if got.Plan.AppliedThrough != 1 {
+		t.Fatalf("plan through=%d", got.Plan.AppliedThrough)
 	}
 	if len(got.Applied) != 1 || got.Applied[0].Postcondition != "obs:A" {
 		t.Fatalf("applied = %+v", got.Applied)
@@ -375,10 +412,16 @@ func TestApplyRefusesBlindPartialResume(t *testing.T) {
 	if !errors.Is(err, ErrPartial) {
 		t.Fatalf("err = %v", err)
 	}
+	if partial.Plan.AppliedThrough != 1 {
+		t.Fatalf("boundary lost on plan: %d", partial.Plan.AppliedThrough)
+	}
 	world.failKey = ""
-	_, err = applier.Apply(t.Context(), applyActor, partial.Plan, Approval{PlanHash: p.Hash})
+	resume, err := applier.Apply(t.Context(), applyActor, partial.Plan, Approval{PlanHash: p.Hash})
 	if !errors.Is(err, ErrPartial) {
 		t.Fatalf("resume err = %v, want ErrPartial", err)
+	}
+	if resume.AppliedThrough != 1 {
+		t.Fatalf("resume through = %d, want recorded boundary", resume.AppliedThrough)
 	}
 	if len(world.writeKeys()) != 1 {
 		t.Fatalf("blind resume wrote: %v", world.writeKeys())
