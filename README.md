@@ -49,6 +49,25 @@ zeroth/
 
 ## Develop
 
+
+### Connecting Linear (assign-to-Zeroth)
+
+Zeroth can watch a Linear workspace and start a run when an issue is
+assigned to its agent identity — the same "assign it and walk away" flow
+used to delegate work to Cursor in this repo's own backlog.
+
+Configure it with `--linear-api-key` / `ZEROTH_LINEAR_API_KEY`,
+`--linear-agent-user` / `ZEROTH_LINEAR_AGENT_USER`, and
+`--linear-auth-style` / `ZEROTH_LINEAR_AUTH_STYLE` (`personal` or `oauth`,
+default `personal`).
+
+See[`docs/linear-setup.md`](docs/linear-setup.md) for how to
+set up a dedicated "Zeroth" identity in Linear, the full configuration
+reference, and a step-by-step walkthrough from assigning an issue to a
+verified, merged PR.
+
+
+
 You need Go 1.27, Node, Docker, and [Task](https://taskfile.dev). A newcomer needs four commands:
 
 ```bash
