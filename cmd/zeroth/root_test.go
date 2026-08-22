@@ -41,7 +41,7 @@ func TestHelpListsSubcommands(t *testing.T) {
 		t.Fatalf("help: %v", err)
 	}
 	got := buf.String()
-	for _, want := range []string{"version", "run", "attach", "bg", "runs", "verify"} {
+	for _, want := range []string{"version", "run", "attach", "bg", "runs", "verify", "reject"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help missing %q: %s", want, got)
 		}

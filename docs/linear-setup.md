@@ -94,24 +94,31 @@ Now, in Linear:
 2. Assign it to the Zeroth actor, or keep yourself as assignee and
    delegate it to Zeroth (Linear's native agent-delegation, the same
    pattern this repo uses for Cursor).
-3. Within one poll interval (15s by default), Zeroth reads the issue and
-   project memory, spawns a sandbox, copies this git checkout into the
-   overlay, and posts a comment on the issue with its plan. `zerothd`
-   uses the git toplevel of the directory it was started from as that
-   checkout (the `cd zeroth` above). A modify whose target is missing
-   from the overlay fails with a workspace-observe error in the daemon
-   logs and on the issue, not a generic "no precondition observed"
-   message.
+3. Within one poll interval (15s by default), Zeroth reads the issue,
+   its comments, and project memory, spawns a sandbox, copies this git
+   checkout into the overlay, and posts a comment on the issue with its
+   plan. `zerothd` uses the git toplevel of the directory it was started
+   from as that checkout (the `cd zeroth` above). A modify whose target
+   is missing from the overlay fails with a workspace-observe error in
+   the daemon logs and on the issue, not a generic "no precondition
+   observed" message.
 4. Open `http://localhost:5173` and go to **Approvals**. The pending plan
    appears there: a change-plan card with create/modify/destroy/memory
    rows, each expandable to a diff, with leases and expiries shown per
    resource, and the cross-exam verdict inline.
-5. Click **Approve**, then **Apply**. The signature chip next to the
+5. If the plan is wrong, do not un-assign. Type the correction into
+   **Reject with comment** (or run `zeroth reject <plan-id> --comment
+   "..."`). Zeroth posts that text on the issue, appends it to the run
+   prompt, and drafts again. The next plan's generation context includes
+   your words (for example "that heading doesn't exist, use the real
+   one"), not a blank restart. A later un-assign/re-assign also rereads
+   the issue comment thread, so the same correction survives a new run.
+6. When the plan is right, click **Approve**, then **Apply**. The signature chip next to the
    applied plan should read valid — click **Verify** to confirm.
-6. Zeroth opens a PR, links it back on the Linear issue, and moves the
+7. Zeroth opens a PR, links it back on the Linear issue, and moves the
    issue's status. The issue comment also carries cost, a transcript
    link, and an audit summary.
-7. To confirm the run is genuinely auditable, stop `zerothd` entirely and
+8. To confirm the run is genuinely auditable, stop `zerothd` entirely and
    run, offline:
 
    ```bash
@@ -125,7 +132,9 @@ To cancel a run instead of approving it, un-assign the issue in Linear
 (or clear the Zeroth delegate if a human is still the assignee).
 `zerothd` fails the session and kills the sandbox — a subsequent `Exec`
 against it fails, confirming the sandbox actually died rather than just
-being marked stopped in a database row.
+being marked stopped in a database row. Un-assign is blunt: it does not
+carry a correction into the next attempt. Prefer reject-with-comment
+when you want the agent to retry with your reasoning.
 
 ## Troubleshooting
 
@@ -157,6 +166,8 @@ ZEROTH_LIVE_LINEAR=1 go test ./internal/tracker/linear -run TestLiveIssueFilterS
 ```
 
 A recorded run is in [docs/tracker/LIVE_VERIFICATION.md](tracker/LIVE_VERIFICATION.md).
+Reject-with-comment feeding the next plan is recorded in
+[REJECT_FEEDBACK.md](tracker/REJECT_FEEDBACK.md).
 To poll a real workspace, also set `ZEROTH_LINEAR_API_KEY` (and the usual
 auth-style / agent-user vars) and run `TestLiveListAssigned`.
 

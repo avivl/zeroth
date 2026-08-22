@@ -49,6 +49,7 @@ func newRoot() *cobra.Command {
 		c.newBgCmd(),
 		c.newRunsCmd(),
 		c.newVerifyCmd(),
+		c.newRejectCmd(),
 	)
 	return cmd
 }

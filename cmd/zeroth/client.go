@@ -194,6 +194,18 @@ func (c *apiClient) postRun(ctx context.Context, id, suffix string) (gen.Run, er
 	return out, nil
 }
 
+func (c *apiClient) requestChanges(ctx context.Context, id, comment string) (gen.Plan, error) {
+	raw, _, err := c.do(ctx, http.MethodPost, "/plans/"+id+"/request-changes", gen.RequestChangesRequest{Comment: comment})
+	if err != nil {
+		return gen.Plan{}, fmt.Errorf("zeroth reject: %w", err)
+	}
+	var out gen.Plan
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return gen.Plan{}, fmt.Errorf("zeroth reject: %w", err)
+	}
+	return out, nil
+}
+
 func isConflict(err error) bool {
 	var ae *apiError
 	return errors.As(err, &ae) && ae.Status == http.StatusConflict

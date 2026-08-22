@@ -187,9 +187,9 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
                   setAuditByPlan(list.data.items.find((r) => r.id === res.data.audit_id) ?? list.data.items[0] ?? null);
                 })
               }
-              onChanges={() =>
+              onChanges={(comment) =>
                 act("changes", async () => {
-                  await api.plans.requestPlanChanges(plan.id, { comment: "please revise" });
+                  await api.plans.requestPlanChanges(plan.id, { comment });
                 })
               }
               onBranch={() =>
@@ -337,7 +337,7 @@ export function ChangePlanCard({
   busy: string | null;
   onApprove: () => void;
   onApply: () => void;
-  onChanges: () => void;
+  onChanges: (comment: string) => void;
   onBranch: () => void;
   onVerify?: () => void;
 }) {
@@ -361,13 +361,14 @@ export function ChangePlanCard({
         <button type="button" className="btn" disabled={!canApply || busy !== null} onClick={onApply}>
           Apply
         </button>
-        <button type="button" className="btn" disabled={busy !== null} onClick={onChanges}>
-          Request changes
-        </button>
         <button type="button" className="btn" disabled={busy !== null} onClick={onBranch}>
           Branch
         </button>
       </div>
+      <RejectCommentBox
+        disabled={busy !== null || (!canApprove && plan.status !== PlanStatus.Draft)}
+        onReject={onChanges}
+      />
       {audit ? (
         <p className="row" style={{ marginTop: "0.75rem" }}>
           <span className="muted">Signed apply</span>
@@ -574,44 +575,119 @@ export function AgentConfigView({ api, id }: { api: Client; id: string }) {
 }
 
 export function ApprovalsView({ api }: { api: Client }) {
-  const { data, error } = useLoad(async () => {
+  const { data, error, reload } = useLoad(async () => {
     const res = await api.approvals.listApprovals({ status: ApprovalStatus.Pending, limit: 50 });
     return res.data.items;
   }, [api]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  async function reject(planId: string, comment: string) {
+    setBusy(planId);
+    setActionError(null);
+    try {
+      await api.plans.requestPlanChanges(planId, { comment });
+      reload();
+    } catch (e) {
+      setActionError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
   return (
     <section>
       <div className="page-head">
         <div>
           <h2>Approvals</h2>
-          <p className="muted">Decide on the subject resource. This inbox does not approve by itself.</p>
+          <p className="muted">
+            Rejecting with a comment feeds your reasoning back into the next plan. Approve and apply still happen on the
+            run.
+          </p>
         </div>
       </div>
-      {error ? <ErrorText>{error}</ErrorText> : null}
+      {error || actionError ? <ErrorText>{error ?? actionError}</ErrorText> : null}
       {data && data.length === 0 ? <Empty>Inbox is clear.</Empty> : null}
       <div className="stack">
         {(data ?? []).map((item) => (
-          <ApprovalRow key={item.id} item={item} />
+          <ApprovalRow
+            key={item.id}
+            item={item}
+            busy={busy}
+            onReject={item.plan_id ? (comment) => void reject(item.plan_id as string, comment) : undefined}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function ApprovalRow({ item }: { item: Approval }) {
+function ApprovalRow({
+  item,
+  busy,
+  onReject,
+}: {
+  item: Approval;
+  busy: string | null;
+  onReject?: (comment: string) => void;
+}) {
   const href = item.plan_id
     ? hrefFor({ name: "run", id: item.run_id ?? "" })
     : item.run_id
       ? hrefFor({ name: "run", id: item.run_id })
       : "#/approvals";
   return (
-    <a className="card task-row" href={item.run_id ? href : "#/approvals"}>
-      <div>
-        <div>{item.summary ?? item.kind}</div>
-        <div className="id muted">{item.id}</div>
+    <article className="card stack">
+      <a className="task-row" href={item.run_id ? href : "#/approvals"}>
+        <div>
+          <div>{item.summary ?? item.kind}</div>
+          <div className="id muted">{item.id}</div>
+        </div>
+        <Badge kind={item.kind}>{item.kind}</Badge>
+        <Badge kind={item.status}>{item.status.replaceAll("_", " ")}</Badge>
+      </a>
+      {onReject ? (
+        <RejectCommentBox disabled={busy !== null} onReject={onReject} />
+      ) : (
+        <p className="muted">Open the run to decide. This inbox does not approve by itself.</p>
+      )}
+    </article>
+  );
+}
+
+export function RejectCommentBox({
+  disabled,
+  onReject,
+}: {
+  disabled: boolean;
+  onReject: (comment: string) => void;
+}) {
+  const [comment, setComment] = useState("");
+  const trimmed = comment.trim();
+  return (
+    <div className="stack" style={{ marginTop: "0.5rem" }}>
+      <label className="muted">
+        Reject with comment
+        <textarea
+          rows={3}
+          placeholder="that heading doesn't exist, use the real one"
+          value={comment}
+          disabled={disabled}
+          onChange={(e) => setComment(e.target.value)}
+        />
+      </label>
+      <div className="row">
+        <button
+          type="button"
+          className="btn btn-danger"
+          disabled={disabled || trimmed === ""}
+          onClick={() => {
+            onReject(trimmed);
+            setComment("");
+          }}
+        >
+          Reject with comment
+        </button>
       </div>
-      <Badge kind={item.kind}>{item.kind}</Badge>
-      <Badge kind={item.status}>{item.status.replaceAll("_", " ")}</Badge>
-    </a>
+    </div>
   );
 }
 
