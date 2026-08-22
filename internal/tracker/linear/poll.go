@@ -92,6 +92,9 @@ func (p *Provider) tick(ctx context.Context) {
 		p.log.Error("tracker linear viewer", zap.Error(err))
 		return
 	}
+	p.mu.Lock()
+	gen := p.assignGen
+	p.mu.Unlock()
 	current, err := p.listAssigned(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -101,7 +104,7 @@ func (p *Provider) tick(ctx context.Context) {
 		return
 	}
 	p.log.Debug("tracker linear poll", zap.Int("issues", len(current)))
-	p.diffAndEmit(current)
+	p.diffAndEmit(current, gen)
 }
 
 func (p *Provider) listAssigned(ctx context.Context) (map[string]tracker.Issue, error) {
@@ -160,9 +163,14 @@ func (p *Provider) assignedFilter() map[string]any {
 	return filter
 }
 
-func (p *Provider) diffAndEmit(current map[string]tracker.Issue) {
+func (p *Provider) diffAndEmit(current map[string]tracker.Issue, gen uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if gen != p.assignGen {
+		// Unassign ran while this snapshot was in flight. Applying it
+		// would treat still-claimed issues as a fresh Assigned.
+		return
+	}
 	now := time.Now().UTC()
 	for key, iss := range current {
 		if _, ok := p.known[key]; ok {
