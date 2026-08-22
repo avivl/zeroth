@@ -139,7 +139,7 @@ func (p *Provider) assignedFilter() map[string]any {
 		return map[string]any{field: map[string]any{"id": map[string]any{"eq": agent}}}
 	}
 	filter := map[string]any{
-		"or": []any{userEq("assignee"), userEq("delegate")},
+		"or": []map[string]any{userEq("assignee"), userEq("delegate")},
 	}
 	if p.projectID != "" {
 		filter["project"] = map[string]any{"id": map[string]any{"eq": p.projectID}}
