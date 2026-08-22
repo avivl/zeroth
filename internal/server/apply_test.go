@@ -443,6 +443,65 @@ func TestClosePullRequestRejectsMerged(t *testing.T) {
 	}
 }
 
+func TestClosePullRequestEmptyURL(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh:     func(context.Context, ...string) (string, error) { return "", nil },
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "  ", "nope"); err == nil {
+		t.Fatal("expected empty url error")
+	}
+}
+
+func TestClosePullRequestTreatsGhAlreadyClosedAsSuccess(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "pr view") {
+				return `{"state":"OPEN"}`, nil
+			}
+			return "", errors.New("GraphQL: Pull request is already closed")
+		},
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/2", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClosePullRequestTreatsGhAlreadyMergedAsConflict(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "pr view") {
+				return "not-json", nil
+			}
+			return "", errors.New("this pull request was merged")
+		},
+		execer: newGitPublisher().execer,
+	}
+	err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/3", "nope")
+	if !errors.Is(err, errPRMerged) {
+		t.Fatalf("err %v, want errPRMerged", err)
+	}
+}
+
+func TestClosePullRequestViewError(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(context.Context, ...string) (string, error) {
+			return "", errors.New("gh: not found")
+		},
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/4", "x"); err == nil {
+		t.Fatal("expected view error")
+	}
+}
+
 func TestGithubRepoSlug(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
