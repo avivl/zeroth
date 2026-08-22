@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -127,6 +128,31 @@ func TestCLIAttachCancelDetaches(t *testing.T) {
 	}
 	if runStatusTerminal(got.Status) {
 		t.Fatalf("run died after detach: %s", got.Status)
+	}
+}
+
+func TestCLIRetract(t *testing.T) {
+	t.Parallel()
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/runs/s_48/retract" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"s_48","agent_id":"a_1","status":"retracted","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","retract_reason":"bad patch"}`))
+	}))
+	t.Cleanup(hs.Close)
+	host := strings.TrimPrefix(hs.URL, "http://")
+	var out bytes.Buffer
+	cmd := newRoot()
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--addr", host, "retract", "s_48", "--reason", "bad patch"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("retract: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "s_48 retracted") {
+		t.Fatalf("output %q", out.String())
 	}
 }
 

@@ -2,6 +2,7 @@ package linear
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -67,6 +68,70 @@ func TestAuthorizationHeaderStyles(t *testing.T) {
 				t.Fatalf("Authorization = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestUnassignClearsAgentAndBumpsGeneration(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	p, _ := testProvider(t, fake)
+	if err := p.Unassign(t.Context(), "  "); !errors.Is(err, tracker.ErrInvalid) {
+		t.Fatalf("empty key = %v, want ErrInvalid", err)
+	}
+	if err := p.Unassign(t.Context(), "no-such-issue"); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("missing = %v, want ErrNotFound", err)
+	}
+	if err := p.Unassign(t.Context(), "42-1"); err != nil {
+		t.Fatalf("already clear: %v", err)
+	}
+	fake.SetAssignee("42-1", fake.AgentUserID)
+	fake.SetDelegate("42-1", fake.AgentUserID)
+	if err := p.Unassign(t.Context(), "42-1"); err != nil {
+		t.Fatalf("Unassign: %v", err)
+	}
+	iss, err := p.GetIssue(t.Context(), "42-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if iss.AssigneeID != "" || iss.DelegateID != "" {
+		t.Fatalf("still claimed: assignee=%q delegate=%q", iss.AssigneeID, iss.DelegateID)
+	}
+}
+
+func TestUnassignDoesNotEmitCancel(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	p, _ := testProvider(t, fake)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ch, err := p.Assignments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.SetAssignee("42-1", fake.AgentUserID)
+	fake.SetDelegate("42-1", fake.AgentUserID)
+	waitKind(t, ch, tracker.Assigned)
+	if err := p.Unassign(t.Context(), "42-1"); err != nil {
+		t.Fatal(err)
+	}
+	waitNoEvent(t, ch, 150*time.Millisecond)
+	fake.SetAssignee("42-1", fake.AgentUserID)
+	waitKind(t, ch, tracker.Assigned)
+}
+
+func TestDiffAndEmitDropsStaleGeneration(t *testing.T) {
+	t.Parallel()
+	p, _ := testProvider(t, NewFake())
+	out := make(chan tracker.AssignmentEvent, 4)
+	p.mu.Lock()
+	p.assignGen = 2
+	p.out = out
+	p.mu.Unlock()
+	p.diffAndEmit(map[string]tracker.Issue{"42-1": {Key: "42-1", Title: "stale"}}, 1)
+	select {
+	case ev := <-out:
+		t.Fatalf("stale generation emitted %+v", ev)
+	default:
 	}
 }
 

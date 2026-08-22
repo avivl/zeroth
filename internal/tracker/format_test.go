@@ -98,6 +98,26 @@ func TestFormatRetractComment(t *testing.T) {
 	}
 }
 
+func TestFormatRetractCommentWithoutPR(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatRetractComment(tracker.Retract{Reason: "  "})
+	if !strings.Contains(body, "Prior run output has been retracted") {
+		t.Fatalf("missing fallback: %s", body)
+	}
+	if !strings.Contains(body, "none opened") {
+		t.Fatalf("missing none: %s", body)
+	}
+	open := tracker.FormatRetractComment(tracker.Retract{
+		PullRequest: "https://github.com/avivl/zeroth/pull/1",
+	})
+	if strings.Contains(open, "(closed)") {
+		t.Fatalf("open pr should not say closed: %s", open)
+	}
+	if !strings.Contains(open, "[open](https://github.com/avivl/zeroth/pull/1)") {
+		t.Fatalf("open pr link: %s", open)
+	}
+}
+
 func TestFormatFailedComment(t *testing.T) {
 	t.Parallel()
 	body := tracker.FormatFailedComment("s_9", "harness exited without proposing a plan")

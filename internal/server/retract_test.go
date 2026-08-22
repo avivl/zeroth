@@ -177,3 +177,148 @@ func TestRetractUnknownRun(t *testing.T) {
 		t.Fatalf("missing run %d %s", res.StatusCode, slurp)
 	}
 }
+
+func TestRetractInvalidJSON(t *testing.T) {
+	t.Parallel()
+	hs := testServer(t)
+	res, err := http.Post(hs.URL+"/runs/s_1/retract", "application/json", bytes.NewReader([]byte(`{`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		slurp, _ := io.ReadAll(res.Body)
+		t.Fatalf("invalid json %d %s", res.StatusCode, slurp)
+	}
+}
+
+func TestRetractCompletedRunWithoutPR(t *testing.T) {
+	t.Parallel()
+	hs := testServer(t)
+	run := createRun(t, hs.URL, "no pull request")
+	waitRunTerminal(t, hs.URL, string(run.Id))
+	reason := "operator spotted a bad result before a PR existed"
+	res := postJSON(t, hs.URL+"/runs/"+string(run.Id)+"/retract", gen.RetractRequest{Reason: reason})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		slurp, _ := io.ReadAll(res.Body)
+		t.Fatalf("retract %d %s", res.StatusCode, slurp)
+	}
+	var out gen.Run
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != gen.RunStatusRetracted {
+		t.Fatalf("status %s", out.Status)
+	}
+	if out.RetractReason == nil || *out.RetractReason != reason {
+		t.Fatalf("reason %+v", out.RetractReason)
+	}
+}
+
+func TestRetractCommentFailure(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	run := waitRunByTracker(t, e.hs.URL, "42-50")
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	applied.Body.Close()
+	if applied.StatusCode != http.StatusOK {
+		t.Fatalf("apply %d", applied.StatusCode)
+	}
+	e.tr.mu.Lock()
+	e.tr.commentErr = errors.New("linear down")
+	e.tr.mu.Unlock()
+	retract := postJSON(t, e.hs.URL+"/runs/"+string(run.Id)+"/retract", gen.RetractRequest{Reason: "cannot record"})
+	defer retract.Body.Close()
+	if retract.StatusCode == http.StatusOK {
+		t.Fatal("expected comment failure")
+	}
+}
+
+func TestRetractUnassignFailure(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	run := waitRunByTracker(t, e.hs.URL, "42-50")
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	applied.Body.Close()
+	if applied.StatusCode != http.StatusOK {
+		t.Fatalf("apply %d", applied.StatusCode)
+	}
+	e.tr.mu.Lock()
+	e.tr.unassignErr = errors.New("unassign refused")
+	e.tr.mu.Unlock()
+	retract := postJSON(t, e.hs.URL+"/runs/"+string(run.Id)+"/retract", gen.RetractRequest{Reason: "bad patch"})
+	defer retract.Body.Close()
+	if retract.StatusCode == http.StatusOK {
+		t.Fatal("expected unassign failure")
+	}
+}
+
+func TestRetractSetStateFailureStillSucceeds(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	run := waitRunByTracker(t, e.hs.URL, "42-50")
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	applied.Body.Close()
+	if applied.StatusCode != http.StatusOK {
+		t.Fatalf("apply %d", applied.StatusCode)
+	}
+	e.tr.mu.Lock()
+	e.tr.stateErr = errors.New("workflow missing")
+	e.tr.mu.Unlock()
+	retract := postJSON(t, e.hs.URL+"/runs/"+string(run.Id)+"/retract", gen.RetractRequest{Reason: "bad patch"})
+	defer retract.Body.Close()
+	if retract.StatusCode != http.StatusOK {
+		slurp, _ := io.ReadAll(retract.Body)
+		t.Fatalf("retract %d %s", retract.StatusCode, slurp)
+	}
+}
+
+func waitRunTerminal(t *testing.T, base, id string) gen.Run {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var last gen.Run
+	for time.Now().Before(deadline) {
+		last = getRun(t, base, id)
+		switch last.Status {
+		case gen.RunStatusCompleted, gen.RunStatusFailed:
+			return last
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("run %s did not finish, status %s", id, last.Status)
+	return last
+}
