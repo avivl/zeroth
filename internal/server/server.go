@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avivl/zeroth/internal/audit"
 	"github.com/avivl/zeroth/internal/session"
+	"github.com/avivl/zeroth/internal/signer"
 	"github.com/avivl/zeroth/internal/store"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
 	"go.uber.org/zap"
@@ -27,11 +29,13 @@ const (
 	defaultInterval   = 100 * time.Millisecond
 )
 
-// Config is the HTTP surface. Store is required. TokenInterval and
-// TokenCount bound the in-process stand-in worker that emits log events
-// until the harness loop is wired into the daemon.
+// Config is the HTTP surface. Store is required. Signer defaults to an
+// in-memory backend when nil (tests). TokenInterval and TokenCount bound
+// the in-process stand-in worker that emits log events until the harness
+// loop is wired into the daemon.
 type Config struct {
 	Store         store.Store
+	Signer        signer.Service
 	Log           *zap.Logger
 	TokenInterval time.Duration
 	TokenCount    int
@@ -40,6 +44,7 @@ type Config struct {
 // Server serves the OpenAPI contract against a session supervisor.
 type Server struct {
 	store    store.Store
+	audit    *audit.Log
 	log      *zap.Logger
 	elog     *storeLog
 	sup      *session.Supervisor
@@ -77,6 +82,14 @@ func New(cfg Config) (*Server, error) {
 	if tokens <= 0 {
 		tokens = defaultTokens
 	}
+	sg := cfg.Signer
+	if sg == nil {
+		sg = signer.NewMemory()
+	}
+	trail, err := audit.NewLog(cfg.Store, sg)
+	if err != nil {
+		return nil, fmt.Errorf("server: %w", err)
+	}
 	elog := newStoreLog(cfg.Store)
 	sup, err := session.Restore(context.Background(), elog)
 	if err != nil {
@@ -85,6 +98,7 @@ func New(cfg Config) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
 		store:    cfg.Store,
+		audit:    trail,
 		log:      log,
 		elog:     elog,
 		sup:      sup,
@@ -130,23 +144,27 @@ func (s *Server) ensureDefaultAgent(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("server default agent: %w", err)
 	}
+	created := false
 	_, err = s.store.GetAgent(ctx, id)
-	if err == nil {
-		return nil
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("server default agent: %w", err)
+		}
+		now := time.Now().UTC()
+		if err := s.store.CreateAgent(ctx, store.Agent{
+			ID:        id,
+			Name:      "default",
+			Harness:   "claudecode",
+			Status:    string(gen.Ready),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}); err != nil {
+			return fmt.Errorf("server default agent: %w", err)
+		}
+		created = true
 	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("server default agent: %w", err)
-	}
-	now := time.Now().UTC()
-	if err := s.store.CreateAgent(ctx, store.Agent{
-		ID:        id,
-		Name:      "default",
-		Harness:   "claudecode",
-		Status:    string(gen.Ready),
-		CreatedAt: now,
-		UpdatedAt: now,
-	}); err != nil {
-		return fmt.Errorf("server default agent: %w", err)
+	if err := s.audit.EnsureAgentKey(ctx, id, created); err != nil {
+		return fmt.Errorf("server default agent key: %w", err)
 	}
 	return nil
 }

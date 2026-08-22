@@ -153,3 +153,63 @@ func agentFrom(a store.Agent) gen.Agent {
 	}
 	return out
 }
+
+func auditFrom(r store.AuditRecord) gen.AuditRecord {
+	out := gen.AuditRecord{
+		Id:           gen.AuditID(r.ID.String()),
+		Action:       r.Action,
+		ResourceType: gen.AuditResourceType(r.ResourceType),
+		ResourceId:   r.ResourceID,
+		Signature:    r.Signature,
+		CreatedAt:    r.CreatedAt.UTC(),
+	}
+	if r.Actor != "" {
+		a := r.Actor
+		out.Actor = &a
+	}
+	if r.Target != "" {
+		t := r.Target
+		out.Target = &t
+	}
+	if r.PlanHash != "" {
+		h := r.PlanHash
+		out.PlanHash = &h
+	}
+	if r.Precondition != "" {
+		p := r.Precondition
+		out.Precondition = &p
+	}
+	if r.Postcondition != "" {
+		p := r.Postcondition
+		out.Postcondition = &p
+	}
+	if !r.LeaseID.IsZero() {
+		id := gen.LeaseID(r.LeaseID.String())
+		out.LeaseId = &id
+	}
+	if r.Approver != "" {
+		a := r.Approver
+		out.Approver = &a
+	}
+	if !r.AgentID.IsZero() {
+		id := gen.AgentID(r.AgentID.String())
+		out.AgentId = &id
+	}
+	if !r.SessionID.IsZero() {
+		id := gen.RunID(r.SessionID.String())
+		out.RunId = &id
+	}
+	if r.AgentPubKey != "" {
+		k := r.AgentPubKey
+		out.AgentPubkey = &k
+	}
+	if r.PrevHash != "" {
+		h := r.PrevHash
+		out.PrevHash = &h
+	}
+	if r.Hash != "" {
+		h := r.Hash
+		out.Hash = &h
+	}
+	return out
+}

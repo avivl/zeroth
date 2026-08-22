@@ -48,17 +48,12 @@ func TestHelpListsSubcommands(t *testing.T) {
 	}
 }
 
-func TestVerifyStub(t *testing.T) {
+func TestVerifyRequiresRunID(t *testing.T) {
 	t.Parallel()
 	cmd := newRoot()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"verify", "s_example"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("verify: %v", err)
-	}
-	if !strings.Contains(out.String(), "M4") {
-		t.Fatalf("verify stub: %s", out.String())
+	cmd.SetArgs([]string{"verify"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error")
 	}
 }
 

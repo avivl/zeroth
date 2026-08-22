@@ -67,6 +67,76 @@ func TestHealthAndDefaultAgent(t *testing.T) {
 	}
 }
 
+func TestAuditChainAndAgentPatch(t *testing.T) {
+	t.Parallel()
+	hs := testServer(t)
+	run := createRun(t, hs.URL, "audited")
+
+	res, err := http.Get(hs.URL + "/audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list audit %d", res.StatusCode)
+	}
+	var list gen.AuditList
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) < 2 {
+		t.Fatalf("expected agent.create and run.create, got %d", len(list.Items))
+	}
+	foundRun := false
+	for _, rec := range list.Items {
+		if rec.Action == "run.create" && rec.RunId != nil && *rec.RunId == run.Id {
+			foundRun = true
+		}
+		vr := postJSON(t, hs.URL+"/audit/"+string(rec.Id)+"/verify", struct{}{})
+		defer vr.Body.Close()
+		if vr.StatusCode != http.StatusOK {
+			t.Fatalf("verify %s: %d", rec.Id, vr.StatusCode)
+		}
+		var got gen.AuditVerification
+		if err := json.NewDecoder(vr.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.Valid {
+			t.Fatalf("record %s invalid: %v", rec.Id, got.Reason)
+		}
+	}
+	if !foundRun {
+		t.Fatal("run.create missing from audit list")
+	}
+
+	tier := "t2"
+	body, err := json.Marshal(gen.AgentPatch{AutonomyTier: &tier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPatch, hs.URL+"/agents/"+server.DefaultAgentID, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	patch, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer patch.Body.Close()
+	if patch.StatusCode != http.StatusOK {
+		slurp, _ := io.ReadAll(patch.Body)
+		t.Fatalf("patch agent %d %s", patch.StatusCode, slurp)
+	}
+	var agent gen.Agent
+	if err := json.NewDecoder(patch.Body).Decode(&agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.AutonomyTier == nil || *agent.AutonomyTier != "t2" {
+		t.Fatalf("tier %+v", agent.AutonomyTier)
+	}
+}
+
 func TestCreateListSteerBackground(t *testing.T) {
 	t.Parallel()
 	hs := testServer(t)

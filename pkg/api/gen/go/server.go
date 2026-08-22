@@ -347,16 +347,43 @@ type AuditRecord struct {
 	// Actor Local operator identity used when signing.
 	Actor *string `json:"actor,omitempty"`
 
+	// AgentId Opaque agent id. Not interchangeable with other id kinds.
+	AgentId *AgentID `json:"agent_id,omitempty"`
+
+	// AgentPubkey Hex-encoded BIP-340 x-only public key that produced signature.
+	AgentPubkey *string `json:"agent_pubkey,omitempty"`
+	Approver    *string `json:"approver,omitempty"`
+
 	// CreatedAt RFC 3339 timestamp in UTC.
 	CreatedAt time.Time `json:"created_at"`
 
+	// Hash Hex SHA-256 of this record's payload plus signature. The next row's prev_hash.
+	Hash *string `json:"hash,omitempty"`
+
 	// Id Opaque audit record id. Not interchangeable with other id kinds.
-	Id           AuditID           `json:"id"`
+	Id AuditID `json:"id"`
+
+	// LeaseId Opaque lease id. Not interchangeable with other id kinds.
+	LeaseId *LeaseID `json:"lease_id,omitempty"`
+
+	// PlanHash Canonical plan hash when the action is plan-scoped.
+	PlanHash      *string `json:"plan_hash,omitempty"`
+	Postcondition *string `json:"postcondition,omitempty"`
+	Precondition  *string `json:"precondition,omitempty"`
+
+	// PrevHash Hex SHA-256 of the previous record (payload plus signature). Empty for genesis.
+	PrevHash     *string           `json:"prev_hash,omitempty"`
 	ResourceId   string            `json:"resource_id"`
 	ResourceType AuditResourceType `json:"resource_type"`
 
+	// RunId Opaque run id. Not interchangeable with other id kinds.
+	RunId *RunID `json:"run_id,omitempty"`
+
 	// Signature secp256k1 Schnorr signature, hex-encoded (ADR-Z-0007). Not a credential.
 	Signature string `json:"signature"`
+
+	// Target Resource the action applied to.
+	Target *string `json:"target,omitempty"`
 }
 
 // AuditResourceType defines model for AuditResourceType.

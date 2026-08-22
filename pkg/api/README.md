@@ -37,7 +37,7 @@ be the resource groups on this surface.
 | Agents | `GET /agents`, `GET /agents/{id}`, `PATCH /agents/{id}`, `GET /agents/{id}/leases` | PATCH is a signed audited action (`name`, `model`, `tools`, `autonomy_tier`). Leases are read-only; they are minted during apply. |
 | Approvals | `GET /approvals` | Inbox only. `kind` is an open string. Decisions go to the subject resource. |
 | Memory | `GET/POST /memory`, `GET /memory/proposals`, `POST /memory/proposals/{id}/accept`, `POST /memory/proposals/{id}/reject` | Operator writes vs agent proposals are separate paths. |
-| Audit | `GET /audit`, `POST /audit/{id}/verify` | Verify is re-check of the Schnorr signature, not an edit. |
+| Audit | `GET /audit`, `POST /audit/{id}/verify` | HTTP verify re-checks one Schnorr signature. `zeroth verify <run-id>` walks the hash chain offline. |
 | Checkpoints | `GET /checkpoints`, `POST /runs/{id}/checkpoints`, `POST /checkpoints/{id}/restore` | Restore returns a new run forked from the snapshot. The original run is immutable. |
 
 `GET /health` is liveness for the daemon. It is not a product view.

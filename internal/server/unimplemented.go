@@ -10,23 +10,11 @@ func notImplemented(w http.ResponseWriter) {
 	writeError(w, http.StatusNotImplemented, "not_implemented", "this path is not implemented in this milestone")
 }
 
-func (s *Server) PatchAgent(w http.ResponseWriter, _ *http.Request, _ gen.AgentID) {
-	notImplemented(w)
-}
-
 func (s *Server) ListAgentLeases(w http.ResponseWriter, _ *http.Request, _ gen.AgentID) {
 	notImplemented(w)
 }
 
 func (s *Server) ListApprovals(w http.ResponseWriter, _ *http.Request, _ gen.ListApprovalsParams) {
-	notImplemented(w)
-}
-
-func (s *Server) ListAudit(w http.ResponseWriter, _ *http.Request, _ gen.ListAuditParams) {
-	notImplemented(w)
-}
-
-func (s *Server) VerifyAudit(w http.ResponseWriter, _ *http.Request, _ gen.AuditID) {
 	notImplemented(w)
 }
 

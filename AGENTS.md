@@ -26,7 +26,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | Path | Belongs here | Does not belong here |
 | --- | --- | --- |
 | `cmd/zerothd` | Local daemon process | Business rules, port implementations |
-| `cmd/zeroth` | CLI and headless entry point (`run`, `attach`, `bg`, `runs`, `verify` stub) | A second copy of the kernel |
+| `cmd/zeroth` | CLI and headless entry point (`run`, `attach`, `bg`, `runs`, `verify`) | A second copy of the kernel |
 | `internal/server` | Local HTTP surface: OpenAPI handlers, run-events WebSocket, session supervisor wiring | Vendor SDKs, policy rules |
 | `internal/policy` | Scopes, grants, leases. The kernel. | I/O, persistence, HTTP, agent loops. Agents do not modify this package. |
 | `internal/session` | Session state machine and event log | Tracker or harness I/O |

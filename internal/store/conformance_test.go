@@ -56,6 +56,7 @@ func TestStoreConformance(t *testing.T) {
 			t.Run("approvals", func(t *testing.T) { testApprovals(t, tc.open) })
 			t.Run("memory", func(t *testing.T) { testMemory(t, tc.open) })
 			t.Run("audit", func(t *testing.T) { testAudit(t, tc.open) })
+			t.Run("agent_keys", func(t *testing.T) { testAgentKeys(t, tc.open) })
 			t.Run("leases", func(t *testing.T) { testLeases(t, tc.open) })
 			t.Run("checkpoints", func(t *testing.T) { testCheckpoints(t, tc.open) })
 			t.Run("close", func(t *testing.T) { testClose(t, tc.open) })
@@ -468,32 +469,44 @@ func testAudit(t *testing.T, open func(t *testing.T) store.Store) {
 	t.Helper()
 	s := open(t)
 	ctx := t.Context()
+	sess := seedSession(t, s, "aud-agent", "aud-sess")
 	r := store.AuditRecord{
 		ID:           mustAuditID(t, "aud-1"),
 		Action:       "plan.apply",
+		Target:       "plan-1",
+		PlanHash:     "ph",
+		Approver:     "operator",
+		AgentPubKey:  "11",
+		PrevHash:     "",
+		Hash:         "h1",
 		ResourceType: "plan",
 		ResourceID:   "plan-1",
 		Actor:        "operator",
 		Signature:    "sig",
+		AgentID:      sess.AgentID,
+		SessionID:    sess.ID,
 		CreatedAt:    ts(1),
 	}
 	got, err := s.AppendAudit(ctx, r)
 	if err != nil {
 		t.Fatalf("AppendAudit: %v", err)
 	}
-	if got.CreatedAt.IsZero() {
-		t.Fatal("CreatedAt not set")
+	if got.CreatedAt.IsZero() || got.Hash != "h1" || got.Target != "plan-1" {
+		t.Fatalf("AppendAudit got %+v", got)
 	}
 	if _, err := s.AppendAudit(ctx, r); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("duplicate audit: %v", err)
 	}
 	fetched, err := s.GetAudit(ctx, r.ID)
-	if err != nil || fetched.Action != r.Action || fetched.Signature != "sig" {
+	if err != nil || fetched.Action != r.Action || fetched.Signature != "sig" || fetched.Hash != "h1" || fetched.AgentPubKey != "11" {
 		t.Fatalf("GetAudit: %+v err=%v", fetched, err)
 	}
 	r2 := r
 	r2.ID = mustAuditID(t, "aud-2")
 	r2.ResourceID = "plan-2"
+	r2.Target = "plan-2"
+	r2.PrevHash = "h1"
+	r2.Hash = "h2"
 	r2.CreatedAt = ts(2)
 	if _, err := s.AppendAudit(ctx, r2); err != nil {
 		t.Fatal(err)
@@ -501,6 +514,40 @@ func testAudit(t *testing.T, open func(t *testing.T) store.Store) {
 	page, err := s.ListAudit(ctx, store.AuditQuery{ResourceType: "plan", ResourceID: "plan-1", PageQuery: store.PageQuery{Limit: 10}})
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID.String() != "aud-1" {
 		t.Fatalf("list: %+v err=%v", page, err)
+	}
+	byRun, err := s.ListAudit(ctx, store.AuditQuery{SessionID: sess.ID, PageQuery: store.PageQuery{Limit: 10}})
+	if err != nil || len(byRun.Items) != 2 {
+		t.Fatalf("list by session: %+v err=%v", byRun, err)
+	}
+	chain, err := s.AuditChain(ctx)
+	if err != nil || len(chain) != 2 || chain[0].ID.String() != "aud-1" || chain[1].PrevHash != "h1" {
+		t.Fatalf("chain: %+v err=%v", chain, err)
+	}
+}
+
+func testAgentKeys(t *testing.T, open func(t *testing.T) store.Store) {
+	t.Helper()
+	s := open(t)
+	ctx := t.Context()
+	agent := seedAgent(t, s, "key-agent")
+	k1 := store.AgentKey{AgentID: agent.ID, PubKey: "aa", CreatedAt: ts(1)}
+	if err := s.AppendAgentKey(ctx, k1); err != nil {
+		t.Fatalf("AppendAgentKey: %v", err)
+	}
+	if err := s.AppendAgentKey(ctx, k1); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("duplicate key: %v", err)
+	}
+	k2 := store.AgentKey{AgentID: agent.ID, PubKey: "bb", CreatedAt: ts(2)}
+	if err := s.AppendAgentKey(ctx, k2); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListAgentKeys(ctx, agent.ID)
+	if err != nil || len(got) != 2 || got[0].PubKey != "aa" || got[1].PubKey != "bb" {
+		t.Fatalf("list keys: %+v err=%v", got, err)
+	}
+	all, err := s.ListAgentKeys(ctx, store.AgentID{})
+	if err != nil || len(all) != 2 {
+		t.Fatalf("list all keys: %+v err=%v", all, err)
 	}
 }
 
