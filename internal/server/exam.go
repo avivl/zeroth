@@ -91,7 +91,7 @@ func (s *Server) ExamineDraft(ctx context.Context, planID store.PlanID) (plan.Ou
 		if err := s.sup.RequestApproval(ctx, sid, p.ID.String()); err != nil {
 			return plan.Outcome{}, fmt.Errorf("server exam: %w", err)
 		}
-		if err := s.enqueueApproval(ctx, rec); err != nil {
+		if err := s.enqueueApproval(ctx, stored); err != nil {
 			return plan.Outcome{}, fmt.Errorf("server exam: %w", err)
 		}
 	}
@@ -147,13 +147,17 @@ func (s *Server) enqueueApproval(ctx context.Context, rec store.Plan) error {
 	if err != nil {
 		return err
 	}
+	summary := rec.Summary
+	if rec.CrossExam != nil && rec.CrossExam.Verdict != "" {
+		summary = rec.CrossExam.Verdict + ": " + rec.Summary
+	}
 	return s.store.CreateApproval(ctx, store.Approval{
 		ID:        id,
 		Kind:      "plan",
 		Status:    "pending",
 		PlanID:    rec.ID,
 		SessionID: rec.SessionID,
-		Summary:   rec.Summary,
+		Summary:   summary,
 		CreatedAt: time.Now().UTC(),
 	})
 }

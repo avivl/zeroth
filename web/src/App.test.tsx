@@ -22,7 +22,7 @@ test("renders cross-exam notes inline", () => {
     createElement(CrossExamNotes, {
       exam: {
         verdict: "fail",
-        reviewer_model: "sonnet",
+        reviewer_model: "gpt-4o",
         reasoning: "scope violation: .ssh/authorized_keys",
         at: "2026-08-22T00:00:00Z",
       },
@@ -30,8 +30,10 @@ test("renders cross-exam notes inline", () => {
   );
   expect(html).toContain("Cross-exam");
   expect(html).toContain("fail");
-  expect(html).toContain("sonnet");
+  expect(html).toContain("gpt-4o");
   expect(html).toContain("scope violation: .ssh/authorized_keys");
+  expect(html).toContain("Reviewer flagged a concern");
+  expect(html).toContain("role=\"alert\"");
 });
 
 const pendingPlan: Plan = {

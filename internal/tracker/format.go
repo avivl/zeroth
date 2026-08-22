@@ -5,31 +5,83 @@ import (
 	"strings"
 )
 
+// PlanExam is the cross-exam line operators read before opening the
+// collapsed plan body. Empty Verdict omits the line.
+type PlanExam struct {
+	Verdict string
+	Model   string
+	Notes   string
+}
+
+// PlanComment is the tracker body for a drafted plan. The verdict stays
+// visible. Diffs collapse.
+type PlanComment struct {
+	Hash    string
+	Summary string
+	Body    string
+	Exam    PlanExam
+}
+
 // FormatPlanComment renders a plan for a tracker comment. The full plan
 // body is collapsed so Linear (and a later GitHub Issues view) stays
-// readable; the summary stays visible.
-func FormatPlanComment(hash, summary, rendered string) string {
+// readable. The summary and cross-exam verdict stay visible: a fail
+// must not be buried in details.
+func FormatPlanComment(c PlanComment) string {
 	var b strings.Builder
 	b.WriteString("### Zeroth plan\n\n")
-	if s := strings.TrimSpace(summary); s != "" {
+	if s := strings.TrimSpace(c.Summary); s != "" {
 		b.WriteString(s)
 		b.WriteString("\n\n")
 	}
+	writeExam(&b, c.Exam)
 	b.WriteString("<details>\n<summary>Plan")
-	if h := strings.TrimSpace(hash); h != "" {
+	if h := strings.TrimSpace(c.Hash); h != "" {
 		fmt.Fprintf(&b, " <code>%s</code>", h)
 	}
 	b.WriteString("</summary>\n\n")
-	open, close := codeFence(rendered)
+	open, close := codeFence(c.Body)
 	b.WriteString(open)
 	b.WriteByte('\n')
-	b.WriteString(rendered)
-	if rendered != "" && !strings.HasSuffix(rendered, "\n") {
+	b.WriteString(c.Body)
+	if c.Body != "" && !strings.HasSuffix(c.Body, "\n") {
 		b.WriteByte('\n')
 	}
 	b.WriteString(close)
 	b.WriteString("\n\n</details>\n")
 	return b.String()
+}
+
+func writeExam(b *strings.Builder, exam PlanExam) {
+	verdict := strings.TrimSpace(exam.Verdict)
+	if verdict == "" {
+		return
+	}
+	fmt.Fprintf(b, "**Cross-exam: %s**", verdict)
+	if m := strings.TrimSpace(exam.Model); m != "" {
+		fmt.Fprintf(b, " (`%s`)", m)
+	}
+	b.WriteByte('\n')
+	if flagsConcern(verdict) {
+		b.WriteString("\nReviewer flagged a concern. Read this before approving.\n")
+	}
+	if notes := strings.TrimSpace(exam.Notes); notes != "" {
+		b.WriteByte('\n')
+		for _, line := range strings.Split(notes, "\n") {
+			b.WriteString("> ")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteByte('\n')
+}
+
+func flagsConcern(verdict string) bool {
+	switch strings.ToLower(strings.TrimSpace(verdict)) {
+	case "fail", "pass_with_notes":
+		return true
+	default:
+		return false
+	}
 }
 
 // FormatStartedComment is posted when assign-to-Zeroth opens a run.

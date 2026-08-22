@@ -45,13 +45,15 @@ export function CrossExamNotes({ exam }: { exam?: CrossExam | null }) {
   if (!exam) {
     return null;
   }
+  const concern = exam.verdict === "fail" || exam.verdict === "pass_with_notes";
   return (
-    <section className="card" aria-label="Cross-exam">
+    <section className={concern ? "card exam-concern" : "card"} aria-label="Cross-exam" role={concern ? "alert" : undefined}>
       <h3>Cross-exam</h3>
       <p>
         <Badge kind={exam.verdict}>{exam.verdict}</Badge>
         <span className="muted"> · {exam.reviewer_model}</span>
       </p>
+      {concern ? <p className="error">Reviewer flagged a concern. Read this before approving.</p> : null}
       {exam.reasoning ? <p>{exam.reasoning}</p> : <p className="muted">No notes</p>}
     </section>
   );
@@ -69,7 +71,7 @@ export function Thinking({
     <ol className="stack" style={{ listStyle: "none", padding: 0, margin: 0 }}>
       {events.map((ev) => (
         <li key={ev.id}>
-          <details className="thinking-step" open={ev.type === "log" || ev.type === "plan_drafted"}>
+            <details className="thinking-step" open={ev.type === "log" || ev.type === "plan_drafted" || ev.type === "cross_exam_verdict"}>
             <summary>
               <Badge kind={ev.type}>{ev.type.replaceAll("_", " ")}</Badge>
               {ev.type === "tool_call" ? (

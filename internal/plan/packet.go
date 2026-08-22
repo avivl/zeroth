@@ -57,7 +57,10 @@ func PacketFrom(p Plan, issue Issue) Packet {
 func (p Packet) Encode() string {
 	var b strings.Builder
 	b.WriteString("You are an independent reviewer of this plan. You have not seen the producer's reasoning. Do not assume it was careful.\n")
-	b.WriteString("Return a verdict of pass, fail, or pass_with_notes, plus notes.\n")
+	b.WriteString("Reply with exactly this shape and no markdown fence:\n")
+	b.WriteString("VERDICT: pass|fail|pass_with_notes\n")
+	b.WriteString("NOTES:\n")
+	b.WriteString("<notes, or empty>\n")
 	b.WriteString("Catch scope violations: work outside the issue, extra paths, secrets, or grants the issue did not ask for.\n\n")
 	b.WriteString("# Issue\n")
 	if p.Issue.Ref != "" {
