@@ -54,11 +54,16 @@ func (s *Store) UpdateSession(ctx context.Context, sess store.Session) error {
 	if err != nil {
 		return wrap("update session", err)
 	}
+	planID := sess.PlanID.String()
+	// A zero PlanID is a status-only sync. Keep the attached plan if one
+	// exists so a concurrent draft cannot lose the row.
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE sessions SET agent_id = ?, plan_id = ?, status = ?, prompt = ?, tracker_ref = ?,
+		UPDATE sessions SET agent_id = ?,
+			plan_id = CASE WHEN ? = '' THEN plan_id ELSE ? END,
+			status = ?, prompt = ?, tracker_ref = ?,
 			workspace_json = ?, autonomy_tier = ?, updated_at_unix_nano = ?, finished_at_unix_nano = ?
 		WHERE id = ?`,
-		sess.AgentID.String(), sess.PlanID.String(), sess.Status, sess.Prompt, sess.TrackerRef, ws,
+		sess.AgentID.String(), planID, planID, sess.Status, sess.Prompt, sess.TrackerRef, ws,
 		sess.AutonomyTier, nano(sess.UpdatedAt), toNullNano(sess.FinishedAt), sess.ID.String(),
 	)
 	if err != nil {

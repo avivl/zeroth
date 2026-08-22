@@ -98,7 +98,7 @@ func TestHarnessDraftsPlanOnceAndInboxShowsIt(t *testing.T) {
 
 	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-48", Issue: iss, At: time.Now()}
 	run := waitRunByTracker(t, hs.URL, "42-48")
-	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusWaitingApproval)
+	got := waitRunPlan(t, hs.URL, string(run.Id))
 
 	if h.startCount() != 1 {
 		t.Fatalf("harness starts = %d, want 1", h.startCount())
@@ -128,10 +128,6 @@ func TestHarnessDraftsPlanOnceAndInboxShowsIt(t *testing.T) {
 		t.Fatalf("tokens = %v, want harness payload", tokens)
 	}
 
-	got := getRun(t, hs.URL, string(run.Id))
-	if got.PlanId == nil {
-		t.Fatal("run missing plan_id")
-	}
 	inbox, err := http.Get(hs.URL + "/approvals?status=pending")
 	if err != nil {
 		t.Fatal(err)
@@ -239,12 +235,7 @@ func TestHarnessModifyObservesPrecondition(t *testing.T) {
 
 	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-49", Issue: iss, At: time.Now()}
 	run := waitRunByTracker(t, hs.URL, "42-49")
-	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusWaitingApproval)
-
-	got := getRun(t, hs.URL, string(run.Id))
-	if got.PlanId == nil {
-		t.Fatalf("run missing plan_id (status %s)", got.Status)
-	}
+	got := waitRunPlan(t, hs.URL, string(run.Id))
 	p := getPlan(t, hs.URL, string(*got.PlanId))
 	if len(p.Effects) != 1 || p.Effects[0].PreconditionHash == nil {
 		t.Fatalf("effects %+v", p.Effects)
@@ -353,11 +344,7 @@ func TestHarnessSeedsWorkspaceRootIntoOverlay(t *testing.T) {
 
 	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-49d", Issue: iss, At: time.Now()}
 	run := waitRunByTracker(t, hs.URL, "42-49d")
-	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusWaitingApproval)
-	got := getRun(t, hs.URL, string(run.Id))
-	if got.PlanId == nil {
-		t.Fatal("run missing plan_id")
-	}
+	got := waitRunPlan(t, hs.URL, string(run.Id))
 	p := getPlan(t, hs.URL, string(*got.PlanId))
 	if len(p.Effects) != 1 || p.Effects[0].PreconditionHash == nil {
 		t.Fatalf("effects %+v", p.Effects)

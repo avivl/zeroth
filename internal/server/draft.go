@@ -129,7 +129,7 @@ func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace 
 		return fmt.Errorf("store plan: %w", err)
 	}
 	if err := s.attachPlan(ctx, id, rec.ID, now); err != nil {
-		s.log.Warn("attach plan to session", zap.String("run", id.String()), zap.Error(err))
+		return fmt.Errorf("attach plan to session: %w", err)
 	}
 	if err := s.sup.ProposePlan(ctx, id, rec.ID.String()); err != nil {
 		return fmt.Errorf("session plan: %w", err)
@@ -172,17 +172,20 @@ func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace 
 func (s *Server) attachPlan(ctx context.Context, id session.ID, planID store.PlanID, now time.Time) error {
 	sid, err := store.ParseSessionID(id.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("server attach plan: %w", err)
 	}
 	s.sessMu.Lock()
 	defer s.sessMu.Unlock()
 	sess, err := s.store.GetSession(ctx, sid)
 	if err != nil {
-		return err
+		return fmt.Errorf("server attach plan: %w", err)
 	}
 	sess.PlanID = planID
 	sess.UpdatedAt = now
-	return s.store.UpdateSession(ctx, sess)
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("server attach plan: %w", err)
+	}
+	return nil
 }
 
 func planSummary(prompt, key string) string {

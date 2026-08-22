@@ -405,6 +405,24 @@ func waitRunStatus(t *testing.T, base, id string, want gen.RunStatus) {
 	t.Fatalf("run %s status = %s, want %s", id, last, want)
 }
 
+func waitRunPlan(t *testing.T, base, id string) gen.Run {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var last gen.Run
+	for time.Now().Before(deadline) {
+		last = getRun(t, base, id)
+		if last.Status == gen.RunStatusFailed {
+			t.Fatalf("run %s failed before attaching a plan", id)
+		}
+		if last.Status == gen.RunStatusWaitingApproval && last.PlanId != nil {
+			return last
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("run %s status=%s plan_id=%v, want waiting_approval with plan_id", id, last.Status, last.PlanId)
+	return last
+}
+
 func containsAll(s string, parts ...string) bool {
 	low := strings.ToLower(s)
 	for _, p := range parts {
