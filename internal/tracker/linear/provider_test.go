@@ -174,6 +174,149 @@ func TestWebhookAssignUnassign(t *testing.T) {
 	_ = srv
 }
 
+func TestPollDelegateAssignUnassign(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	human := "user_human"
+	fake.SetAssignee("42-1", human)
+	fake.SetDelegate("42-1", fake.AgentUserID)
+	p, _ := testProvider(t, fake)
+	ctx := t.Context()
+	ch, err := p.Assignments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitKind(t, ch, tracker.Assigned)
+
+	fake.SetDelegate("42-1", "")
+	waitKind(t, ch, tracker.Unassigned)
+}
+
+func TestWebhookDelegateAssignUnassign(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	secret := "whsec_test"
+	p, _ := testProviderSecret(t, fake, secret)
+	ctx := t.Context()
+	ch, err := p.Assignments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := "user_human"
+	fake.SetAssignee("42-1", human)
+	fake.SetDelegate("42-1", fake.AgentUserID)
+	body, _ := json.Marshal(map[string]any{
+		"action": "update",
+		"type":   "Issue",
+		"data": map[string]any{
+			"id":         "iss_42_1",
+			"identifier": "42-1",
+			"title":      "tracker.Provider",
+			"assigneeId": human,
+			"delegateId": fake.AgentUserID,
+		},
+	})
+	postWebhook(t, p, secret, body)
+	waitKind(t, ch, tracker.Assigned)
+
+	fake.SetDelegate("42-1", "")
+	body, _ = json.Marshal(map[string]any{
+		"action": "update",
+		"type":   "Issue",
+		"data": map[string]any{
+			"id":         "iss_42_1",
+			"identifier": "42-1",
+			"title":      "tracker.Provider",
+			"assigneeId": human,
+			"delegateId": "",
+		},
+	})
+	postWebhook(t, p, secret, body)
+	waitKind(t, ch, tracker.Unassigned)
+}
+
+func TestWebhookAgentSessionCreatedDelegated(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	secret := "whsec_test"
+	p, _ := testProviderSecret(t, fake, secret)
+	ctx := t.Context()
+	ch, err := p.Assignments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.SetAssignee("42-1", "user_human")
+	fake.SetDelegate("42-1", fake.AgentUserID)
+	body, _ := json.Marshal(map[string]any{
+		"action": "created",
+		"type":   "AgentSessionEvent",
+		"agentSession": map[string]any{
+			"id": "ags_1",
+			"issue": map[string]any{
+				"id":         "iss_42_1",
+				"identifier": "42-1",
+				"title":      "tracker.Provider",
+			},
+		},
+	})
+	postWebhook(t, p, secret, body)
+	waitKind(t, ch, tracker.Assigned)
+}
+
+func TestWebhookAgentSessionCreatedWithoutClaimIsIgnored(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	secret := "whsec_test"
+	p, _ := testProviderSecret(t, fake, secret)
+	ctx := t.Context()
+	ch, err := p.Assignments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"action": "created",
+		"type":   "AgentSessionEvent",
+		"agentSession": map[string]any{
+			"id": "ags_mention",
+			"issue": map[string]any{
+				"id":         "iss_42_1",
+				"identifier": "42-1",
+				"title":      "tracker.Provider",
+			},
+		},
+	})
+	postWebhook(t, p, secret, body)
+	waitNoEvent(t, ch, 200*time.Millisecond)
+}
+
+func TestAgentClaimed(t *testing.T) {
+	t.Parallel()
+	agent := "user_agent"
+	cases := []struct {
+		name                       string
+		action, assignee, delegate string
+		want                       bool
+	}{
+		{name: "classic_assignee", action: "update", assignee: agent, want: true},
+		{name: "delegate_human_assignee", action: "update", assignee: "user_human", delegate: agent, want: true},
+		{name: "neither", action: "update", assignee: "user_human", want: false},
+		{name: "remove_even_if_assignee", action: "remove", assignee: agent, want: false},
+		{name: "empty_agent", action: "update", assignee: agent, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			id := agent
+			if tc.name == "empty_agent" {
+				id = ""
+			}
+			if got := agentClaimed(tc.action, tc.assignee, tc.delegate, id); got != tc.want {
+				t.Fatalf("agentClaimed = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestWebhookRejectsBadSignature(t *testing.T) {
 	t.Parallel()
 	fake := NewFake()
@@ -257,5 +400,17 @@ func waitKind(t *testing.T, ch <-chan tracker.AssignmentEvent, kind tracker.Assi
 		case <-deadline:
 			t.Fatalf("timeout waiting for %s", kind)
 		}
+	}
+}
+
+func waitNoEvent(t *testing.T, ch <-chan tracker.AssignmentEvent, d time.Duration) {
+	t.Helper()
+	select {
+	case ev, ok := <-ch:
+		if !ok {
+			t.Fatal("closed")
+		}
+		t.Fatalf("unexpected event %+v", ev)
+	case <-time.After(d):
 	}
 }

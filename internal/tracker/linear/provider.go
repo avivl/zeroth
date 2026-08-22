@@ -239,6 +239,9 @@ type issueNode struct {
 	Assignee    *struct {
 		ID string `json:"id"`
 	} `json:"assignee"`
+	Delegate *struct {
+		ID string `json:"id"`
+	} `json:"delegate"`
 	State *struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -289,6 +292,7 @@ const (
   issue(id: $id) {
     id identifier title description url
     assignee { id }
+    delegate { id }
     state { id name type }
     project { name }
     team { id }
@@ -316,6 +320,7 @@ const (
     nodes {
       id identifier title description url
       assignee { id }
+      delegate { id }
       state { id name type }
       project { name }
     }

@@ -95,15 +95,7 @@ func (p *Provider) tick(ctx context.Context) {
 }
 
 func (p *Provider) listAssigned(ctx context.Context) (map[string]tracker.Issue, error) {
-	filter := map[string]any{
-		"assignee": map[string]any{"id": map[string]any{"eq": p.agentID()}},
-	}
-	if p.projectID != "" {
-		filter["project"] = map[string]any{"id": map[string]any{"eq": p.projectID}}
-	}
-	if p.teamID != "" {
-		filter["team"] = map[string]any{"id": map[string]any{"eq": p.teamID}}
-	}
+	filter := p.assignedFilter()
 	out := make(map[string]tracker.Issue)
 	var after *string
 	for {
@@ -136,6 +128,26 @@ func (p *Provider) listAssigned(ctx context.Context) (map[string]tracker.Issue, 
 		c := data.Issues.PageInfo.EndCursor
 		after = &c
 	}
+}
+
+// assignedFilter is issues claimed by the agent as classic assignee or as
+// Linear's native delegate (human may remain assignee). Team and project
+// constraints still AND with that OR.
+func (p *Provider) assignedFilter() map[string]any {
+	agent := p.agentID()
+	userEq := func(field string) map[string]any {
+		return map[string]any{field: map[string]any{"id": map[string]any{"eq": agent}}}
+	}
+	filter := map[string]any{
+		"or": []any{userEq("assignee"), userEq("delegate")},
+	}
+	if p.projectID != "" {
+		filter["project"] = map[string]any{"id": map[string]any{"eq": p.projectID}}
+	}
+	if p.teamID != "" {
+		filter["team"] = map[string]any{"id": map[string]any{"eq": p.teamID}}
+	}
+	return filter
 }
 
 func (p *Provider) diffAndEmit(current map[string]tracker.Issue) {
@@ -181,9 +193,10 @@ func (p *Provider) emitLocked(ev tracker.AssignmentEvent) {
 	}
 }
 
-// applyAssignee is used by the webhook path so a POST and a poll share
-// one known-set. wantAgent true means the issue is now on the agent.
-func (p *Provider) applyAssignee(iss tracker.Issue, wantAgent bool) {
+// applyAgent is used by the webhook path so a POST and a poll share
+// one known-set. wantAgent true means the issue is now on the agent
+// (classic assignee or native delegate).
+func (p *Provider) applyAgent(iss tracker.Issue, wantAgent bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := time.Now().UTC()

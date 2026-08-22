@@ -53,8 +53,9 @@ zeroth/
 ### Connecting Linear (assign-to-Zeroth)
 
 Zeroth can watch a Linear workspace and start a run when an issue is
-assigned to its agent identity — the same "assign it and walk away" flow
-used to delegate work to Cursor in this repo's own backlog.
+assigned to its agent identity, or delegated to it via Linear's native
+agent-delegation (the same "self-assign and delegate" flow used with
+Cursor in this repo's own backlog).
 
 Configure it with `--linear-api-key` / `ZEROTH_LINEAR_API_KEY`,
 `--linear-agent-user` / `ZEROTH_LINEAR_AGENT_USER`, and

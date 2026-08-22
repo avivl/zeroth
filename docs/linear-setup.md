@@ -1,9 +1,10 @@
 # Connecting Linear (assign-to-Zeroth)
 
 This is the operator walkthrough for 42-29: assigning a Linear issue to the
-Zeroth agent identity starts a headless run. It covers what that identity
-is, how to configure `zerothd` to talk to a real Linear workspace, and the
-end-to-end flow from assignment to a merged PR.
+Zeroth agent identity, or delegating it to that identity while a human stays
+assignee, starts a headless run. It covers what that identity is, how to
+configure `zerothd` to talk to a real Linear workspace, and the end-to-end
+flow from assignment (or delegation) to a merged PR.
 
 Every flag and environment variable below is taken directly from
 `cmd/zerothd/config.go` — if a future change renames or removes one, this
@@ -16,7 +17,7 @@ The recommended setup is a Linear **OAuth application**, the same pattern
 this project's own "Cursor" integration already uses: register an app,
 authorize it for your workspace, and it appears as its own actor (visible
 in `Settings > Members` with an `@oauthapp.linear.app`-style identity)
-that issues can be assigned to like any teammate.
+that issues can be assigned or delegated to like any teammate.
 
 1. In Linear: **Workspace Settings > API > OAuth applications > New
    application**.
@@ -46,7 +47,7 @@ environment variable (flags win over env vars, which win over
 |---|---|---|---|
 | `--linear-api-key` | `ZEROTH_LINEAR_API_KEY` | (none) | Linear API key for assign-to-Zeroth. A personal API key or an OAuth app access token, depending on `--linear-auth-style`. |
 | `--linear-auth-style` | `ZEROTH_LINEAR_AUTH_STYLE` | `personal` | `personal` sends the key raw in `Authorization`; `oauth` sends `Authorization: Bearer <key>`. Must match how the key above was issued — a mismatch here is the most common setup failure and shows up as an authentication error on the first poll. |
-| `--linear-agent-user` | `ZEROTH_LINEAR_AGENT_USER` | (none) | Linear user id of the Zeroth agent identity. This is the actor whose assignments `zerothd` watches. |
+| `--linear-agent-user` | `ZEROTH_LINEAR_AGENT_USER` | (none) | Linear user id of the Zeroth agent identity. This is the actor whose classic assignments and native delegations `zerothd` watches. |
 | `--linear-team-id` | `ZEROTH_LINEAR_TEAM_ID` | (none) | Optional: restrict polling to one Linear team. |
 | `--linear-project-id` | `ZEROTH_LINEAR_PROJECT_ID` | (none) | Optional: restrict polling to one Linear project. |
 | `--linear-poll-interval` | `ZEROTH_LINEAR_POLL_INTERVAL` | `15s` | How often `zerothd` polls for new/changed assignments. Stage 1 default; webhooks are opt-in. |
@@ -90,7 +91,9 @@ Now, in Linear:
 1. Pick (or create) an issue in the connected team/project. Start with
    something low-stakes — the dogfooding ratchet in 42-32 explicitly
    recommends the safest class first: docs or tests.
-2. Assign it to the Zeroth actor instead of yourself or Cursor.
+2. Assign it to the Zeroth actor, or keep yourself as assignee and
+   delegate it to Zeroth (Linear's native agent-delegation, the same
+   pattern this repo uses for Cursor).
 3. Within one poll interval (15s by default), Zeroth reads the issue and
    project memory, spawns a sandbox, and posts a comment on the issue
    with its plan.
@@ -113,7 +116,8 @@ Now, in Linear:
    This must pass with the daemon stopped and no network access — that is
    the point of the signed hash chain (42-27).
 
-To cancel a run instead of approving it, un-assign the issue in Linear.
+To cancel a run instead of approving it, un-assign the issue in Linear
+(or clear the Zeroth delegate if a human is still the assignee).
 `zerothd` fails the session and kills the sandbox — a subsequent `Exec`
 against it fails, confirming the sandbox actually died rather than just
 being marked stopped in a database row.
@@ -131,8 +135,9 @@ you generated and set the flag to match.
 **Nothing happens after assigning the issue.** Check
 `--linear-team-id`/`--linear-project-id` — if set, they filter which
 issues `zerothd` even looks at. Also confirm the issue is actually
-assigned to the id in `--linear-agent-user`, not just labeled or
-commented on.
+assigned to the id in `--linear-agent-user`, or delegated to that same
+id via Linear's native delegate field, not just labeled or commented
+on. A mention without assignee or delegate does not start a run.
 
 **The sandbox never seems to stop after un-assigning.** Confirm
 `--docker-socket` points at a reachable Docker daemon; if `zerothd` can't
