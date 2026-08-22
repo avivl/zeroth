@@ -341,3 +341,58 @@ func pageOf[T any](items []T, limit int, created func(T) time.Time, id func(T) s
 	}
 	return page
 }
+
+type revisionJSON struct {
+	Version    int    `json:"version"`
+	Key        string `json:"key"`
+	Body       string `json:"body"`
+	Author     string `json:"author"`
+	AuthorKind string `json:"author_kind"`
+	Action     string `json:"action"`
+	Source     string `json:"source"`
+	Deleted    bool   `json:"deleted"`
+	AtNano     int64  `json:"at_unix_nano"`
+}
+
+func marshalHistory(hist []store.MemoryRevision) (string, error) {
+	if hist == nil {
+		hist = []store.MemoryRevision{}
+	}
+	js := make([]revisionJSON, 0, len(hist))
+	for _, r := range hist {
+		js = append(js, revisionJSON{
+			Version:    r.Version,
+			Key:        r.Key,
+			Body:       r.Body,
+			Author:     r.Author,
+			AuthorKind: r.AuthorKind,
+			Action:     r.Action,
+			Source:     r.Source,
+			Deleted:    r.Deleted,
+			AtNano:     unixNano(r.At),
+		})
+	}
+	return marshalJSON(js)
+}
+
+func unmarshalHistory(s string) ([]store.MemoryRevision, error) {
+	raw, err := unmarshalSlice[revisionJSON](s)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.MemoryRevision, 0, len(raw))
+	for _, r := range raw {
+		out = append(out, store.MemoryRevision{
+			Version:    r.Version,
+			Key:        r.Key,
+			Body:       r.Body,
+			Author:     r.Author,
+			AuthorKind: r.AuthorKind,
+			Action:     r.Action,
+			Source:     r.Source,
+			Deleted:    r.Deleted,
+			At:         fromNano(r.AtNano),
+		})
+	}
+	return out, nil
+}

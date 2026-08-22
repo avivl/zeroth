@@ -51,6 +51,7 @@ type Store interface {
 
 	CreateMemory(ctx context.Context, m MemoryEntry) error
 	GetMemory(ctx context.Context, id MemoryID) (MemoryEntry, error)
+	UpdateMemory(ctx context.Context, m MemoryEntry) error
 	ListMemory(ctx context.Context, q MemoryQuery) (Page[MemoryEntry], error)
 
 	CreateMemoryProposal(ctx context.Context, p MemoryProposal) error

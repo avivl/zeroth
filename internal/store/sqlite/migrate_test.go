@@ -124,12 +124,22 @@ func TestMigrateUpAndDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 4 {
-		t.Fatalf("version = %d, want 4", v)
+	if v != 5 {
+		t.Fatalf("version = %d, want 5", v)
 	}
 	agent := store.Agent{ID: mustAID(t, "a1"), Name: "n", Harness: "h", Status: "ready"}
 	if err := s.CreateAgent(ctx, agent); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.MigrateDown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v, err = s.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 4 {
+		t.Fatalf("after 0005 down version = %d", v)
 	}
 	if err := s.MigrateDown(ctx); err != nil {
 		t.Fatal(err)
@@ -181,7 +191,7 @@ func TestMigrateUpAndDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err = s.Version(ctx)
-	if err != nil || v != 4 {
+	if err != nil || v != 5 {
 		t.Fatalf("after up version = %d err=%v", v, err)
 	}
 	if err := s.CreateAgent(ctx, agent); err != nil {

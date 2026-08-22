@@ -548,6 +548,29 @@ func testMemory(t *testing.T, open func(t *testing.T) store.Store) {
 	if err != nil || pgot.Status != "accepted" || pgot.MemoryID != m.ID || pgot.ReviewedAt.IsZero() {
 		t.Fatalf("proposal: %+v err=%v", pgot, err)
 	}
+
+	m.Key = "style.tests"
+	m.Content = "prefer table tests still"
+	m.Author = "operator"
+	m.AuthorKind = "human"
+	m.Action = "edit"
+	m.Version = 2
+	m.UpdatedAt = ts(4)
+	m.History = []store.MemoryRevision{
+		{Version: 1, Key: "style.tests", Body: "prefer table tests", Author: "operator", AuthorKind: "human", Action: "write", At: ts(1)},
+		{Version: 2, Key: "style.tests", Body: m.Content, Author: "operator", AuthorKind: "human", Action: "edit", At: ts(4)},
+	}
+	if err := s.UpdateMemory(ctx, m); err != nil {
+		t.Fatalf("UpdateMemory: %v", err)
+	}
+	got, err = s.GetMemory(ctx, m.ID)
+	if err != nil || got.Key != "style.tests" || got.Version != 2 || len(got.History) != 2 || got.History[1].Author != "operator" {
+		t.Fatalf("updated memory: %+v err=%v", got, err)
+	}
+	byKey, err := s.ListMemory(ctx, store.MemoryQuery{Kind: "session", RefID: sess.ID.String(), Key: "style.tests", PageQuery: store.PageQuery{Limit: 10}})
+	if err != nil || len(byKey.Items) != 1 {
+		t.Fatalf("ListMemory by key: %+v err=%v", byKey, err)
+	}
 }
 
 func testAudit(t *testing.T, open func(t *testing.T) store.Store) {
