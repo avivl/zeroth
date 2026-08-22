@@ -5,6 +5,7 @@ import {
   AuditResourceType,
   MemoryProposalStatus,
   PlanStatus,
+  RunStatus,
   type AgentPatch,
   type Approval,
   type AuditRecord,
@@ -14,6 +15,7 @@ import {
   type MemoryEntry,
   type MemoryProposal,
   type Plan,
+  type Run,
 } from "@zeroth/api";
 import { errorMessage } from "./api/client";
 import { useRunEvents } from "./api/useRunEvents";
@@ -134,6 +136,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
   const [planGate, setPlanGate] = useState<PlanGateOutcome | null>(null);
   const [auditByPlan, setAuditByPlan] = useState<AuditRecord | null>(null);
   const [auditValid, setAuditValid] = useState<boolean | undefined>(undefined);
+  const [retractReason, setRetractReason] = useState("");
 
   const plan = (plans ?? []).find((p) => p.id === run?.plan_id) ?? (plans ?? [])[0];
 
@@ -262,6 +265,20 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
           ) : (
             <Empty>No change plan on this run yet.</Empty>
           )}
+          {run ? (
+            <RetractCard
+              run={run}
+              reason={retractReason}
+              busy={busy}
+              onReason={setRetractReason}
+              onRetract={() =>
+                act("retract", async () => {
+                  await api.runs.retractRun(id, { reason: retractReason });
+                  setRetractReason("");
+                })
+              }
+            />
+          ) : null}
         </div>
         <aside className="stack">
           <EvalGates plan={plan} stats={agent?.stats} />
@@ -426,6 +443,73 @@ export function ChangePlanCard({
           <SignatureChip signature={audit.signature} valid={auditValid} onVerify={() => onVerify?.()} />
         </p>
       ) : null}
+    </section>
+  );
+}
+
+export function RetractCard({
+  run,
+  reason,
+  busy,
+  onReason,
+  onRetract,
+}: {
+  run: Run;
+  reason: string;
+  busy: string | null;
+  onReason: (value: string) => void;
+  onRetract: () => void;
+}) {
+  if (run.retracted_at) {
+    return (
+      <section className="card stack" aria-label="Retraction">
+        <div className="row">
+          <h3 style={{ margin: 0 }}>Retracted</h3>
+          <Badge kind="retracted">retracted</Badge>
+        </div>
+        <p>{run.retract_reason}</p>
+        {run.pull_request ? (
+          <p className="muted">
+            Pull request <a href={run.pull_request}>{run.pull_request}</a> was closed.
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+  const terminal =
+    run.status === RunStatus.Completed || run.status === RunStatus.Failed || run.status === RunStatus.Cancelled;
+  if (!terminal && !run.pull_request) {
+    return null;
+  }
+  const canRetract = reason.trim().length > 0 && busy === null;
+  return (
+    <section className="card stack" aria-label="Retract run output">
+      <h3 style={{ margin: 0 }}>Retract</h3>
+      <p className="muted">
+        Close the pull request this run opened and record why on the Linear issue. The issue goes back to Todo,
+        unassigned, so a fresh assignment can start a new run. You do not need to visit GitHub.
+      </p>
+      {run.pull_request ? (
+        <p>
+          Pull request <a href={run.pull_request}>{run.pull_request}</a>
+        </p>
+      ) : (
+        <p className="muted">No pull request on this run. Retract still records the reason on the issue thread.</p>
+      )}
+      <label>
+        Reason
+        <textarea
+          value={reason}
+          onChange={(e) => onReason(e.target.value)}
+          rows={3}
+          placeholder="What was wrong with this run's output?"
+        />
+      </label>
+      <div className="row">
+        <button type="button" className="btn btn-danger" disabled={!canRetract} onClick={onRetract}>
+          Retract
+        </button>
+      </div>
     </section>
   );
 }

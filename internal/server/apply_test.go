@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -388,6 +389,57 @@ func TestGitPublisherProducesRefAndPR(t *testing.T) {
 	joined := strings.Join(ghArgs[0], " ")
 	if !strings.Contains(joined, "pr create") || !strings.Contains(joined, "zeroth/42-50-apply-executor-is-a-stub") {
 		t.Fatalf("gh args %v", ghArgs[0])
+	}
+}
+
+func TestClosePullRequestClosesOpenAndSkipsClosed(t *testing.T) {
+	t.Parallel()
+	var ghArgs [][]string
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			ghArgs = append(ghArgs, append([]string(nil), args...))
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "pr view") {
+				return `{"state":"OPEN"}`, nil
+			}
+			return "", nil
+		},
+		execer: newGitPublisher().execer,
+	}
+	url := "https://github.com/avivl/zeroth/pull/48"
+	if err := p.ClosePullRequest(t.Context(), url, "Retracted by Zeroth.\n\nbad patch\n"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ghArgs) != 2 {
+		t.Fatalf("gh calls %v", ghArgs)
+	}
+	if !strings.Contains(strings.Join(ghArgs[1], " "), "pr close") {
+		t.Fatalf("close args %v", ghArgs[1])
+	}
+
+	p.gh = func(_ context.Context, args ...string) (string, error) {
+		if strings.Join(args, " ") == "pr view "+url+" --json state" {
+			return `{"state":"CLOSED"}`, nil
+		}
+		t.Fatalf("unexpected gh %v", args)
+		return "", nil
+	}
+	if err := p.ClosePullRequest(t.Context(), url, "again"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClosePullRequestRejectsMerged(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			return `{"state":"MERGED"}`, nil
+		},
+		execer: newGitPublisher().execer,
+	}
+	err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/1", "nope")
+	if !errors.Is(err, errPRMerged) {
+		t.Fatalf("err %v, want errPRMerged", err)
 	}
 }
 

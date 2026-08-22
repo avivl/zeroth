@@ -119,7 +119,19 @@ Now, in Linear:
 6. Zeroth opens a PR, links it back on the Linear issue, and moves the
    issue's status. The issue comment also carries cost, a transcript
    link, and an audit summary.
-7. To confirm the run is genuinely auditable, stop `zerothd` entirely and
+7. If that PR is wrong (a bad apply, a botched patch), do not close it
+   on GitHub and do not un-assign/re-assign to retry. From the run
+   detail view, or:
+
+   ```bash
+   zeroth retract <run-id> --reason "Apply overwrote README.md instead of patching it."
+   ```
+
+   That closes the PR, comments the reason on this issue, un-assigns
+   the agent, and moves the issue back to Todo. Re-assign when you want
+   a fresh run. The thread stays a complete record, including why the
+   prior output was retracted.
+8. To confirm the run is genuinely auditable, stop `zerothd` entirely and
    run, offline:
 
    ```bash
