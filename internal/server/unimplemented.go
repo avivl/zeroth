@@ -26,26 +26,6 @@ func (s *Server) RestoreCheckpoint(w http.ResponseWriter, _ *http.Request, _ gen
 	notImplemented(w)
 }
 
-func (s *Server) ListMemory(w http.ResponseWriter, _ *http.Request, _ gen.ListMemoryParams) {
-	notImplemented(w)
-}
-
-func (s *Server) CreateMemory(w http.ResponseWriter, _ *http.Request) {
-	notImplemented(w)
-}
-
-func (s *Server) ListMemoryProposals(w http.ResponseWriter, _ *http.Request, _ gen.ListMemoryProposalsParams) {
-	notImplemented(w)
-}
-
-func (s *Server) AcceptMemoryProposal(w http.ResponseWriter, _ *http.Request, _ gen.MemoryProposalID) {
-	notImplemented(w)
-}
-
-func (s *Server) RejectMemoryProposal(w http.ResponseWriter, _ *http.Request, _ gen.MemoryProposalID) {
-	notImplemented(w)
-}
-
 func (s *Server) ApplyPlan(w http.ResponseWriter, _ *http.Request, _ gen.PlanID) {
 	notImplemented(w)
 }
