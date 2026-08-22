@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/avivl/zeroth/internal/audit"
 	"github.com/avivl/zeroth/internal/plan"
@@ -90,6 +91,9 @@ func (s *Server) ExamineDraft(ctx context.Context, planID store.PlanID) (plan.Ou
 		if err := s.sup.RequestApproval(ctx, sid, p.ID.String()); err != nil {
 			return plan.Outcome{}, fmt.Errorf("server exam: %w", err)
 		}
+		if err := s.enqueueApproval(ctx, rec); err != nil {
+			return plan.Outcome{}, fmt.Errorf("server exam: %w", err)
+		}
 	}
 
 	if _, err := s.audit.Append(ctx, audit.Entry{
@@ -126,4 +130,20 @@ func reviewerConfig(a store.Agent) (plan.Config, error) {
 		Models:        models,
 		BlockOnFail:   a.BlockOnFail,
 	}, nil
+}
+
+func (s *Server) enqueueApproval(ctx context.Context, rec store.Plan) error {
+	id, err := newApprovalID()
+	if err != nil {
+		return err
+	}
+	return s.store.CreateApproval(ctx, store.Approval{
+		ID:        id,
+		Kind:      "plan",
+		Status:    "pending",
+		PlanID:    rec.ID,
+		SessionID: rec.SessionID,
+		Summary:   rec.Summary,
+		CreatedAt: time.Now().UTC(),
+	})
 }
