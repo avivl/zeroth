@@ -1,8 +1,14 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { parseRunEvent, runEventsUrl, subscribeRunEvents } from "./runEvents";
+import { liveTailLabel, parseRunEvent, runEventsUrl, subscribeRunEvents } from "./runEvents";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+test("liveTailLabel marks reconnecting as an output-stream drop", () => {
+  expect(liveTailLabel("reconnecting")).toBe("reconnecting after drop (output stream only)");
+  expect(liveTailLabel("open")).toBe("connected (output stream)");
+  expect(liveTailLabel("closed")).toBe("disconnected (output stream)");
 });
 
 test("runEventsUrl upgrades http origin and encodes the run id", () => {

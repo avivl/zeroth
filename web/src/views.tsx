@@ -23,11 +23,13 @@ import {
   DiffTable,
   Empty,
   ErrorText,
+  PlanGateBanner,
   SignatureChip,
   StreamingText,
   Thinking,
   statusLabel,
 } from "./components/ui";
+import { executePlanGate, type PlanGateOutcome } from "./planGate";
 import { hrefFor } from "./routes";
 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[]): {
@@ -129,20 +131,26 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
   const { events, status, text } = useRunEvents(id);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [planGate, setPlanGate] = useState<PlanGateOutcome | null>(null);
   const [auditByPlan, setAuditByPlan] = useState<AuditRecord | null>(null);
   const [auditValid, setAuditValid] = useState<boolean | undefined>(undefined);
 
   const plan = (plans ?? []).find((p) => p.id === run?.plan_id) ?? (plans ?? [])[0];
 
+  function refresh() {
+    reload();
+    reloadPlans();
+    reloadCk();
+    reloadMem();
+  }
+
   async function act(name: string, fn: () => Promise<void>) {
     setBusy(name);
     setActionError(null);
+    setPlanGate(null);
     try {
       await fn();
-      reload();
-      reloadPlans();
-      reloadCk();
-      reloadMem();
+      refresh();
     } catch (err) {
       setActionError(errorMessage(err));
     } finally {
@@ -163,7 +171,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
       {actionError ? <ErrorText>{actionError}</ErrorText> : null}
       <div className="rail">
         <div className="stack">
-          <StreamingText text={text} status={status === "reconnecting" ? "reconnecting after drop" : status} />
+          <StreamingText text={text} status={status} />
           <section className="card">
             <h3>Trace</h3>
             <Thinking events={events} />
@@ -174,18 +182,49 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
               audit={auditByPlan}
               auditValid={auditValid}
               busy={busy}
+              gate={planGate && planGate.planId === plan.id ? planGate : null}
               onApprove={() =>
-                act("approve", async () => {
-                  await api.plans.approvePlan(plan.id, { comment: "approved in UI" });
-                })
+                void (async () => {
+                  setBusy("approve");
+                  setActionError(null);
+                  const result = await executePlanGate(
+                    "approve",
+                    plan.id,
+                    () => api.plans.approvePlan(plan.id, { comment: "approved in UI" }),
+                    setPlanGate,
+                  );
+                  if (result.ok) {
+                    refresh();
+                  }
+                  setBusy(null);
+                })()
               }
               onApply={() =>
-                act("apply", async () => {
+                void (async () => {
+                  setBusy("apply");
+                  setActionError(null);
                   setAuditValid(undefined);
-                  const res = await api.plans.applyPlan(plan.id);
-                  const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
-                  setAuditByPlan(list.data.items.find((r) => r.id === res.data.audit_id) ?? list.data.items[0] ?? null);
-                })
+                  const result = await executePlanGate(
+                    "apply",
+                    plan.id,
+                    () => api.plans.applyPlan(plan.id),
+                    setPlanGate,
+                  );
+                  if (result.ok) {
+                    try {
+                      const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
+                      setAuditByPlan(
+                        list.data.items.find((r) => r.id === result.value.data.audit_id) ??
+                          list.data.items[0] ??
+                          null,
+                      );
+                    } catch (err) {
+                      setActionError(errorMessage(err));
+                    }
+                    refresh();
+                  }
+                  setBusy(null);
+                })()
               }
               onChanges={() =>
                 act("changes", async () => {
@@ -325,6 +364,7 @@ export function ChangePlanCard({
   audit,
   auditValid,
   busy,
+  gate,
   onApprove,
   onApply,
   onChanges,
@@ -335,6 +375,7 @@ export function ChangePlanCard({
   audit?: AuditRecord | null;
   auditValid?: boolean;
   busy: string | null;
+  gate?: PlanGateOutcome | null;
   onApprove: () => void;
   onApply: () => void;
   onChanges: () => void;
@@ -356,10 +397,10 @@ export function ChangePlanCard({
       <CrossExamNotes exam={plan.cross_exam} />
       <div className="row" style={{ marginTop: "0.75rem" }}>
         <button type="button" className="btn btn-primary" disabled={!canApprove || busy !== null} onClick={onApprove}>
-          Approve
+          {busy === "approve" ? "Sending approval…" : "Approve"}
         </button>
         <button type="button" className="btn" disabled={!canApply || busy !== null} onClick={onApply}>
-          Apply
+          {busy === "apply" ? "Sending apply…" : "Apply"}
         </button>
         <button type="button" className="btn" disabled={busy !== null} onClick={onChanges}>
           Request changes
@@ -368,6 +409,7 @@ export function ChangePlanCard({
           Branch
         </button>
       </div>
+      {gate ? <PlanGateBanner outcome={gate} /> : null}
       {audit ? (
         <p className="row" style={{ marginTop: "0.75rem" }}>
           <span className="muted">Signed apply</span>
