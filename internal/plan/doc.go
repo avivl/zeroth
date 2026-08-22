@@ -16,4 +16,12 @@
 // The builder turns harness proposed effects into those rows. An effect
 // that cannot be expressed as a row stops the run. There is no fallback
 // to direct action: a plan model with an escape hatch is not a plan model.
+//
+// Apply is deliberately boring (Linear 42-26). It rechecks every
+// precondition and fails closed on drift, verifies that the approval
+// covers exactly this plan hash, takes a checkpoint, acquires leases,
+// executes rows in order (each idempotent by key), signs what it applied,
+// and releases leases. A mid-apply failure leaves applied rows applied
+// and records the exact boundary. Recovery drafts a new plan from
+// observed postconditions rather than replaying the rest blindly.
 package plan

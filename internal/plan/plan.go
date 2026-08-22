@@ -20,6 +20,13 @@ const (
 	StatusApplying         Status = "applying"
 	StatusApplied          Status = "applied"
 	StatusAbandoned        Status = "abandoned"
+	// StatusStale is an apply outcome: a precondition drifted, nothing
+	// was written, and the agent must re-draft. Not an OpenAPI PlanStatus.
+	StatusStale Status = "stale"
+	// StatusPartiallyApplied is an apply outcome: a prefix of rows
+	// landed and the rest did not. Recovery re-drafts from the recorded
+	// boundary. Not an OpenAPI PlanStatus.
+	StatusPartiallyApplied Status = "partially_applied"
 )
 
 // Credential names a credential class the plan was drafted under.
