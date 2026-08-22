@@ -187,16 +187,21 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
                 void (async () => {
                   setBusy("approve");
                   setActionError(null);
-                  const result = await executePlanGate(
-                    "approve",
-                    plan.id,
-                    () => api.plans.approvePlan(plan.id, { comment: "approved in UI" }),
-                    setPlanGate,
-                  );
-                  if (result.ok) {
-                    refresh();
+                  try {
+                    const result = await executePlanGate(
+                      "approve",
+                      plan.id,
+                      () => api.plans.approvePlan(plan.id, { comment: "approved in UI" }),
+                      setPlanGate,
+                    );
+                    if (result.ok) {
+                      refresh();
+                    }
+                  } catch (err) {
+                    setActionError(errorMessage(err));
+                  } finally {
+                    setBusy(null);
                   }
-                  setBusy(null);
                 })()
               }
               onApply={() =>
@@ -204,26 +209,31 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
                   setBusy("apply");
                   setActionError(null);
                   setAuditValid(undefined);
-                  const result = await executePlanGate(
-                    "apply",
-                    plan.id,
-                    () => api.plans.applyPlan(plan.id),
-                    setPlanGate,
-                  );
-                  if (result.ok) {
-                    try {
-                      const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
-                      setAuditByPlan(
-                        list.data.items.find((r) => r.id === result.value.data.audit_id) ??
-                          list.data.items[0] ??
-                          null,
-                      );
-                    } catch (err) {
-                      setActionError(errorMessage(err));
+                  try {
+                    const result = await executePlanGate(
+                      "apply",
+                      plan.id,
+                      () => api.plans.applyPlan(plan.id),
+                      setPlanGate,
+                    );
+                    if (result.ok) {
+                      try {
+                        const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
+                        setAuditByPlan(
+                          list.data.items.find((r) => r.id === result.value.data.audit_id) ??
+                            list.data.items[0] ??
+                            null,
+                        );
+                      } catch (err) {
+                        setActionError(errorMessage(err));
+                      }
+                      refresh();
                     }
-                    refresh();
+                  } catch (err) {
+                    setActionError(errorMessage(err));
+                  } finally {
+                    setBusy(null);
                   }
-                  setBusy(null);
                 })()
               }
               onChanges={() =>
