@@ -98,6 +98,21 @@ func TestFormatRetractComment(t *testing.T) {
 	}
 }
 
+func TestFormatRetractCommentWithoutPR(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatRetractComment(tracker.Retract{Reason: "unsafe apply"})
+	for _, want := range []string{
+		"### Zeroth retracted",
+		"Prior run output has been retracted.",
+		"unsafe apply",
+		"none opened",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+}
+
 func TestFormatFailedComment(t *testing.T) {
 	t.Parallel()
 	body := tracker.FormatFailedComment("s_9", "harness exited without proposing a plan")

@@ -167,6 +167,55 @@ func TestRetractMergedPRConflicts(t *testing.T) {
 	}
 }
 
+func TestRetractRecordsWithoutPullRequest(t *testing.T) {
+	t.Parallel()
+	iss := tracker.Issue{Key: "42-56", Title: "bad output, no PR"}
+	tr := newStubTracker(iss)
+	sbx := newFakeSandbox()
+	hs := assignServer(t, tr, sbx, 5*time.Millisecond, 2)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-56", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-56")
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusFailed)
+
+	reason := "Harness failed after proposing a destructive plan."
+	res := postJSON(t, hs.URL+"/runs/"+string(run.Id)+"/retract", gen.RetractRequest{Reason: reason})
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		slurp, _ := io.ReadAll(res.Body)
+		t.Fatalf("retract %d %s", res.StatusCode, slurp)
+	}
+	found := false
+	for _, c := range tr.commentBodies() {
+		if strings.Contains(c, "### Zeroth retracted") && strings.Contains(c, reason) && strings.Contains(c, "none opened") {
+			found = true
+		}
+		if strings.Contains(c, "### Zeroth cancelled") {
+			t.Fatalf("retract posted a cancel comment: %s", c)
+		}
+	}
+	if !found {
+		t.Fatalf("missing retract comment: %v", tr.commentBodies())
+	}
+	if keys := tr.unassignKeys(); len(keys) != 1 || keys[0] != "42-56" {
+		t.Fatalf("unassign %v", keys)
+	}
+}
+
+func TestRetractRejectsInvalidJSON(t *testing.T) {
+	t.Parallel()
+	hs := testServer(t)
+	res, err := http.Post(hs.URL+"/runs/s_missing/retract", "application/json", bytes.NewReader([]byte(`{`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		slurp, _ := io.ReadAll(res.Body)
+		t.Fatalf("invalid json %d %s", res.StatusCode, slurp)
+	}
+}
+
 func TestRetractUnknownRun(t *testing.T) {
 	t.Parallel()
 	hs := testServer(t)
