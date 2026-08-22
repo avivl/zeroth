@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/avivl/zeroth/internal/policy"
@@ -120,14 +121,17 @@ func (p Plan) PolicyPlan() policy.Plan {
 
 // Approve returns a copy marked approved. It does not change Hash: the
 // operator is gating this exact bundle, not revising it. Expired or
-// hash-mismatched plans are rejected.
+// hash-mismatched plans are rejected. Drafts, in-flight exams, and
+// block-on-fail returns are not the human gate: only a completed
+// cross-exam that escalated (pending_approval) can be approved.
 func (p Plan) Approve(now time.Time) (Plan, error) {
 	if err := p.checkBundle(now); err != nil {
 		return Plan{}, err
 	}
-	switch p.Status {
-	case StatusDraft, StatusCrossExam, StatusPendingApproval, StatusChangesRequested:
-	default:
+	if p.CrossExam == nil {
+		return Plan{}, fmt.Errorf("plan approve: %w", ErrNotExamined)
+	}
+	if p.Status != StatusPendingApproval {
 		return Plan{}, fmtStatus("plan approve", p.Status)
 	}
 	out := p

@@ -45,6 +45,9 @@ func (s *Server) ExamineDraft(ctx context.Context, planID store.PlanID) (plan.Ou
 	if err != nil {
 		return plan.Outcome{}, err
 	}
+	// Independent context: tracker ref plus the operator prompt and
+	// the plan rows. The session event log is the producer's
+	// transcript and is never an argument here.
 	packet := plan.PacketFrom(p, plan.Issue{
 		Ref:   sess.TrackerRef,
 		Title: sess.TrackerRef,

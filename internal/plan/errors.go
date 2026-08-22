@@ -49,6 +49,10 @@ var (
 	// producer or another reviewer. Same-model second pass is not
 	// diversity and does not count (Z1-019).
 	ErrSameModel = errors.New("plan: reviewer must differ from producer")
+	// ErrNotExamined is returned when approve is asked of a plan that
+	// has not been cross-examined. The human gate is after the
+	// reviewer, not instead of it (Z1-019).
+	ErrNotExamined = errors.New("plan: not cross-examined")
 )
 
 // UnexpressibleError names the proposed effect that could not become a

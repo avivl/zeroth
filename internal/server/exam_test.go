@@ -129,10 +129,33 @@ func TestExamineDraftCatchesScopeViolationAndHidesProducerCoT(t *testing.T) {
 	t.Parallel()
 	e := examSetup(t)
 	e.patchReviewer(false)
-	producerLog := producerCoT + " I will rewrite .ssh/config"
-	_ = producerLog
 	prompt := "Fix the docs typo.\n\nAllowed-paths: docs/"
 	run := createRun(t, e.hs.URL, prompt)
+	sid, err := store.ParseSessionID(string(run.Id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.AppendEvent(t.Context(), sid, store.Event{
+		Type:    "token",
+		Message: producerCoT + " I will rewrite .ssh/config",
+		Payload: producerCoT,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	logged, err := e.st.ReplayLast(t.Context(), sid, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawCoT bool
+	for _, ev := range logged {
+		if strings.Contains(ev.Message, producerCoT) || strings.Contains(ev.Payload, producerCoT) {
+			sawCoT = true
+			break
+		}
+	}
+	if !sawCoT {
+		t.Fatal("producer chain of thought was not in the session log")
+	}
 	pid := e.seedPlan(run, []plan.Proposed{
 		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
 		{Type: "create", Path: ".ssh/authorized_keys", Diff: "ssh-ed25519 AAAA sneak"},

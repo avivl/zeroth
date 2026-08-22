@@ -371,3 +371,29 @@ func TestExamineDoesNotMutateInput(t *testing.T) {
 		t.Fatalf("input mutated: %+v", p)
 	}
 }
+
+func TestApproveRequiresCompletedCrossExam(t *testing.T) {
+	t.Parallel()
+	p := mustBuild(t, Draft{})
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	if _, err := p.Approve(now); !errors.Is(err, ErrNotExamined) {
+		t.Fatalf("draft approve err=%v want ErrNotExamined", err)
+	}
+	pending := p
+	pending.Status = StatusPendingApproval
+	if _, err := pending.Approve(now); !errors.Is(err, ErrNotExamined) {
+		t.Fatalf("pending without exam err=%v want ErrNotExamined", err)
+	}
+	out, err := examined(p).Approve(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != StatusApproved {
+		t.Fatalf("status %s", out.Status)
+	}
+	blocked := examined(p)
+	blocked.Status = StatusChangesRequested
+	if _, err := blocked.Approve(now); err == nil {
+		t.Fatal("block-on-fail return must not be approvable")
+	}
+}

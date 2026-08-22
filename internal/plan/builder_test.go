@@ -186,6 +186,19 @@ func validDraft() Draft {
 	}
 }
 
+// examined marks p as having passed independent review so apply tests
+// can exercise the post-exam human gate without spinning a reviewer.
+func examined(p Plan) Plan {
+	out := p
+	out.Status = StatusPendingApproval
+	out.CrossExam = &CrossExam{
+		Verdict:       VerdictPass,
+		ReviewerModel: "test-reviewer",
+		At:            p.UpdatedAt,
+	}
+	return out
+}
+
 func mustBuild(t *testing.T, extra Draft) Plan {
 	t.Helper()
 	d := validDraft()
