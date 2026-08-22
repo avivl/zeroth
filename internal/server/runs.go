@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/avivl/zeroth/internal/audit"
 	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/store"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
@@ -120,6 +121,18 @@ func (s *Server) CreateRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.sup.StartWith(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	if _, err := s.audit.Append(r.Context(), audit.Entry{
+		Action:       audit.ActionRunCreate,
+		Target:       sid.String(),
+		Approver:     audit.ApproverOperator,
+		AgentID:      aid,
+		SessionID:    sid,
+		ResourceType: "run",
+		ResourceID:   sid.String(),
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}

@@ -40,7 +40,7 @@ tags:
   - name: memory
     description: Store-backed session and agent memory, plus human review of proposals.
   - name: audit
-    description: Append-only signed trail. Verify checks a record's signature.
+    description: Append-only signed trail. HTTP verify re-checks one Schnorr signature. `zeroth verify` walks the hash chain offline.
   - name: checkpoints
     description: Snapshots of run state. Restore forks a new run; it never rewrites the original.
 paths:
@@ -690,7 +690,10 @@ paths:
     post:
       tags: [audit]
       summary: Verify an audit record
-      description: Re-check the record's secp256k1 Schnorr signature (ADR-Z-0007). Does not rewrite the log.
+      description: |
+        Re-check the record's secp256k1 Schnorr signature (ADR-Z-0007) against
+        the append-only key registry. Does not rewrite the log. Offline chain
+        verification is `zeroth verify <run-id>` against the SQLite file.
       operationId: verifyAudit
       parameters:
         - $ref: "#/components/parameters/AuditID"
@@ -1520,6 +1523,39 @@ components:
           type: string
           minLength: 1
           description: Local operator identity used when signing.
+        target:
+          type: string
+          minLength: 1
+          description: Resource the action applied to.
+        plan_hash:
+          type: string
+          minLength: 1
+          description: Canonical plan hash when the action is plan-scoped.
+        precondition:
+          type: string
+        postcondition:
+          type: string
+        lease_id:
+          $ref: "#/components/schemas/LeaseID"
+        approver:
+          type: string
+          minLength: 1
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        run_id:
+          $ref: "#/components/schemas/RunID"
+        agent_pubkey:
+          type: string
+          minLength: 64
+          maxLength: 64
+          description: Hex-encoded BIP-340 x-only public key that produced signature.
+        prev_hash:
+          type: string
+          description: Hex SHA-256 of the previous record (payload plus signature). Empty for genesis.
+        hash:
+          type: string
+          minLength: 1
+          description: Hex SHA-256 of this record's payload plus signature. The next row's prev_hash.
         signature:
           type: string
           minLength: 1

@@ -625,6 +625,39 @@ export interface AuditRecord {
    */
   actor?: string;
   /**
+   * Resource the action applied to.
+   * @minLength 1
+   */
+  target?: string;
+  /**
+   * Canonical plan hash when the action is plan-scoped.
+   * @minLength 1
+   */
+  plan_hash?: string;
+  precondition?: string;
+  postcondition?: string;
+  /** Opaque lease id. Not interchangeable with other id kinds. */
+  lease_id?: LeaseID;
+  /** @minLength 1 */
+  approver?: string;
+  /** Opaque agent id. Not interchangeable with other id kinds. */
+  agent_id?: AgentID;
+  /** Opaque run id. Not interchangeable with other id kinds. */
+  run_id?: RunID;
+  /**
+   * Hex-encoded BIP-340 x-only public key that produced signature.
+   * @minLength 64
+   * @maxLength 64
+   */
+  agent_pubkey?: string;
+  /** Hex SHA-256 of the previous record (payload plus signature). Empty for genesis. */
+  prev_hash?: string;
+  /**
+   * Hex SHA-256 of this record's payload plus signature. The next row's prev_hash.
+   * @minLength 1
+   */
+  hash?: string;
+  /**
    * secp256k1 Schnorr signature, hex-encoded (ADR-Z-0007). Not a credential.
    * @minLength 1
    */
@@ -1572,7 +1605,7 @@ export class Api<
       }),
 
     /**
-     * @description Re-check the record's secp256k1 Schnorr signature (ADR-Z-0007). Does not rewrite the log.
+     * @description Re-check the record's secp256k1 Schnorr signature (ADR-Z-0007) against the append-only key registry. Does not rewrite the log. Offline chain verification is `zeroth verify <run-id>` against the SQLite file.
      *
      * @tags audit
      * @name VerifyAudit

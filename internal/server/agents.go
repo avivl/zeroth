@@ -3,7 +3,9 @@ package server
 import (
 	"errors"
 	"net/http"
+	"time"
 
+	"github.com/avivl/zeroth/internal/audit"
 	"github.com/avivl/zeroth/internal/store"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
 )
@@ -53,6 +55,57 @@ func (s *Server) GetAgent(w http.ResponseWriter, r *http.Request, id gen.AgentID
 			writeError(w, http.StatusNotFound, "not_found", "agent not found")
 			return
 		}
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, agentFrom(a))
+}
+
+func (s *Server) PatchAgent(w http.ResponseWriter, r *http.Request, id gen.AgentID) {
+	aid, err := store.ParseAgentID(string(id))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	var req gen.AgentPatch
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid json")
+		return
+	}
+	a, err := s.store.GetAgent(r.Context(), aid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "agent not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	if req.Name != nil {
+		a.Name = *req.Name
+	}
+	if req.Model != nil {
+		a.Model = *req.Model
+	}
+	if req.Tools != nil {
+		a.Tools = append([]string(nil), (*req.Tools)...)
+	}
+	if req.AutonomyTier != nil {
+		a.AutonomyTier = *req.AutonomyTier
+	}
+	a.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateAgent(r.Context(), a); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	if _, err := s.audit.Append(r.Context(), audit.Entry{
+		Action:       audit.ActionAgentUpdate,
+		Target:       aid.String(),
+		Approver:     audit.ApproverOperator,
+		AgentID:      aid,
+		ResourceType: "agent",
+		ResourceID:   aid.String(),
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}

@@ -49,6 +49,8 @@ web/dist-ssr/
 *.db
 *.sqlite
 *.sqlite3
+zeroth.keys
+*.keys
 
 # OS
 .DS_Store

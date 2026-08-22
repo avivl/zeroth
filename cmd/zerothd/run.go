@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/avivl/zeroth/internal/logging"
 	"github.com/avivl/zeroth/internal/resilience"
 	"github.com/avivl/zeroth/internal/server"
+	"github.com/avivl/zeroth/internal/signer"
 	"github.com/avivl/zeroth/internal/store/sqlite"
 	"go.uber.org/zap"
 )
@@ -61,13 +66,18 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 	}
 	defer func() { _ = st.Close() }()
 
-	srv, err := server.New(server.Config{Store: st, Log: log})
+	sg, backend, err := openSigner(cfg)
+	if err != nil {
+		return fmt.Errorf("zerothd signer: %w", err)
+	}
+
+	srv, err := server.New(server.Config{Store: st, Signer: sg, Log: log})
 	if err != nil {
 		return fmt.Errorf("zerothd server: %w", err)
 	}
 	defer srv.Close()
 
-	log.Info("zerothd listening", zap.String("addr", cfg.Addr))
+	log.Info("zerothd listening", zap.String("addr", cfg.Addr), zap.String("signer", backend))
 	serve := d.serve
 	if serve == nil {
 		serve = listenAndServe
@@ -105,4 +115,21 @@ func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
 		}
 		return err
 	}
+}
+
+func openSigner(cfg Config) (signer.Service, string, error) {
+	pass := os.Getenv("ZEROTH_SIGNING_PASSPHRASE")
+	if path := strings.TrimSpace(cfg.SigningKey); path != "" {
+		sg, err := signer.NewFile(path, pass)
+		return sg, "file", err
+	}
+	if sg, err := signer.NewKeyring("zeroth"); err == nil {
+		if _, err := sg.PublicKey(context.Background(), "__zeroth_probe__"); errors.Is(err, signer.ErrNotFound) {
+			return sg, "keyring", nil
+		}
+	}
+	dir := filepath.Dir(cfg.DBPath)
+	path := filepath.Join(dir, "zeroth.keys")
+	sg, err := signer.NewFile(path, pass)
+	return sg, "file", err
 }
