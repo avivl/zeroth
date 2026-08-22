@@ -380,18 +380,20 @@ export interface CredentialConstraint {
 
 export interface CrossExam {
   /**
-   * Outcome of the automatic cross-exam. Open string; clients must tolerate unknown verdicts.
+   * Outcome of the automatic cross-exam. Known values: pass, fail,
+   * pass_with_notes. Clients must tolerate unknown verdicts.
    * @minLength 1
    */
   verdict: string;
   /**
-   * Model that performed the cross-exam.
+   * Model that performed the cross-exam. Dual reviews join models with a comma.
    * @minLength 1
    */
   reviewer_model: string;
   /**
-   * Why the reviewer reached this verdict.
-   * @minLength 1
+   * Reviewer notes, rendered inline. Empty notes on a nontrivial
+   * plan are a signal (a reviewer that never writes notes is not
+   * reviewing).
    */
   reasoning: string;
   /**
@@ -457,6 +459,7 @@ export interface Agent {
    * @minLength 1
    */
   autonomy_tier?: string;
+  reviewer?: ReviewerConfig;
   /**
    * RFC 3339 timestamp in UTC.
    * @format date-time
@@ -480,6 +483,52 @@ export interface AgentPatch {
    * @minLength 1
    */
   autonomy_tier?: string;
+  reviewer?: ReviewerConfig;
+}
+
+export interface ReviewerConfig {
+  /**
+   * Reviewer model. Must differ from the producer model. Same-model second pass is rejected.
+   * @minLength 1
+   */
+  model?: string;
+  /** When true, second_model also reviews in an independent context. Both must pass. */
+  dual?: boolean;
+  /**
+   * Second reviewer model when dual is true. Must differ from model and from the producer.
+   * @minLength 1
+   */
+  second_model?: string;
+  /** When true, a failed cross-exam returns the plan to the agent with the notes attached instead of escalating to the human. */
+  block_on_fail?: boolean;
+}
+
+export interface CrossExamStats {
+  /** Opaque agent id. Not interchangeable with other id kinds. */
+  agent_id: AgentID;
+  /**
+   * Plans that have a recorded reviewer verdict.
+   * @min 0
+   */
+  examined: number;
+  /** @min 0 */
+  pass: number;
+  /** @min 0 */
+  fail: number;
+  /** @min 0 */
+  pass_with_notes: number;
+  /**
+   * (pass + pass_with_notes) / examined. Zero when examined is zero.
+   * @format double
+   * @min 0
+   * @max 1
+   */
+  pass_rate: number;
+  /**
+   * Verdicts with empty notes on a nontrivial plan.
+   * @min 0
+   */
+  empty_notes_nontrivial: number;
 }
 
 export interface AgentList {
@@ -1391,6 +1440,22 @@ export class Api<
         method: "PATCH",
         body: data,
         type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Queryable reviewer scoreboard (Z1-019). Pass rate is (pass + pass_with_notes) / examined. empty_notes_nontrivial counts silent passes on nontrivial plans: a reviewer that always passes without notes is not reviewing.
+     *
+     * @tags agents
+     * @name GetAgentCrossExamStats
+     * @summary Cross-exam pass rate for an agent
+     * @request GET:/agents/{id}/cross-exam-stats
+     */
+    getAgentCrossExamStats: (id: AgentID, params: RequestParams = {}) =>
+      this.request<CrossExamStats, Error>({
+        path: `/agents/${id}/cross-exam-stats`,
+        method: "GET",
         format: "json",
         ...params,
       }),

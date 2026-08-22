@@ -20,6 +20,9 @@ type Store interface {
 	GetAgent(ctx context.Context, id AgentID) (Agent, error)
 	UpdateAgent(ctx context.Context, a Agent) error
 	ListAgents(ctx context.Context, q PageQuery) (Page[Agent], error)
+	// CrossExamStats aggregates reviewer verdicts for plans whose
+	// session belongs to this agent. A missing agent is ErrNotFound.
+	CrossExamStats(ctx context.Context, agentID AgentID) (CrossExamStats, error)
 
 	CreateSession(ctx context.Context, s Session) error
 	GetSession(ctx context.Context, id SessionID) (Session, error)

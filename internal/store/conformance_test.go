@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,6 +51,7 @@ func TestStoreConformance(t *testing.T) {
 			}
 
 			t.Run("agents", func(t *testing.T) { testAgents(t, tc.open) })
+			t.Run("cross_exam_stats", func(t *testing.T) { testCrossExamStats(t, tc.open) })
 			t.Run("sessions", func(t *testing.T) { testSessions(t, tc.open) })
 			t.Run("events", func(t *testing.T) { testEvents(t, tc.open) })
 			t.Run("plans", func(t *testing.T) { testPlans(t, tc.open) })
@@ -83,15 +85,19 @@ func testAgents(t *testing.T, open func(t *testing.T) store.Store) {
 	s := open(t)
 	ctx := t.Context()
 	a := store.Agent{
-		ID:           mustAgentID(t, "agent-1"),
-		Name:         "claude",
-		Harness:      "claudecode",
-		Status:       "ready",
-		Model:        "claude-opus",
-		Tools:        []string{"bash", "read"},
-		AutonomyTier: "t1",
-		CreatedAt:    ts(1),
-		UpdatedAt:    ts(1),
+		ID:             mustAgentID(t, "agent-1"),
+		Name:           "claude",
+		Harness:        "claudecode",
+		Status:         "ready",
+		Model:          "claude-opus",
+		Tools:          []string{"bash", "read"},
+		AutonomyTier:   "t1",
+		ReviewerModel:  "claude-sonnet",
+		ReviewerModel2: "claude-haiku",
+		ReviewerDual:   true,
+		BlockOnFail:    true,
+		CreatedAt:      ts(1),
+		UpdatedAt:      ts(1),
 	}
 	if err := s.CreateAgent(ctx, a); err != nil {
 		t.Fatalf("CreateAgent: %v", err)
@@ -102,6 +108,9 @@ func testAgents(t *testing.T, open func(t *testing.T) store.Store) {
 	}
 	if got.Name != a.Name || got.Harness != a.Harness || len(got.Tools) != 2 || got.Tools[0] != "bash" {
 		t.Fatalf("GetAgent = %+v", got)
+	}
+	if got.ReviewerModel != "claude-sonnet" || got.ReviewerModel2 != "claude-haiku" || !got.ReviewerDual || !got.BlockOnFail {
+		t.Fatalf("reviewer config: %+v", got)
 	}
 	if err := s.CreateAgent(ctx, a); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("duplicate CreateAgent: %v, want ErrConflict", err)
@@ -153,6 +162,82 @@ func testAgents(t *testing.T, open func(t *testing.T) store.Store) {
 	}
 	if len(page2.Items) != 2 {
 		t.Fatalf("page2 len=%d", len(page2.Items))
+	}
+}
+
+func testCrossExamStats(t *testing.T, open func(t *testing.T) store.Store) {
+	t.Helper()
+	s := open(t)
+	ctx := t.Context()
+	sess := seedSession(t, s, "stats-agent", "stats-sess")
+	other := seedSession(t, s, "other-agent", "other-sess")
+
+	mk := func(id, verdict, notes, diff string, extra bool) store.Plan {
+		effects := []store.PlanEffect{{
+			Type: "modify", Path: "a.md", Diff: diff,
+			PreconditionHash: "p", PostconditionHash: "q",
+			IdempotencyKey: "i-" + id, LeaseID: mustLeaseID(t, "lease-"+id),
+		}}
+		if extra {
+			effects = append(effects, store.PlanEffect{
+				Type: "modify", Path: "b.md", Diff: diff,
+				PreconditionHash: "p", PostconditionHash: "q",
+				IdempotencyKey: "j-" + id, LeaseID: mustLeaseID(t, "lease2-"+id),
+			})
+		}
+		return store.Plan{
+			ID:        mustPlanID(t, id),
+			SessionID: sess.ID,
+			Status:    "pending_approval",
+			Summary:   "s",
+			Hash:      "h-" + id,
+			ExpiresAt: ts(10),
+			ScopeID:   mustScopeID(t, "scope-a"),
+			Effects:   effects,
+			CrossExam: &store.CrossExam{
+				Verdict: verdict, ReviewerModel: "sonnet", Reasoning: notes, At: ts(2),
+			},
+			CreatedAt: ts(1),
+			UpdatedAt: ts(1),
+		}
+	}
+	plans := []store.Plan{
+		mk("p-pass", "pass", "looks fine", strings.Repeat("x", 90), true),
+		mk("p-fail", "fail", "scope violation", "x", false),
+		mk("p-notes", "pass_with_notes", "nits", "x", false),
+		mk("p-silent", "pass", "", strings.Repeat("y", 90), true),
+	}
+	for i := range plans {
+		if err := s.CreatePlan(ctx, plans[i]); err != nil {
+			t.Fatalf("CreatePlan %s: %v", plans[i].ID, err)
+		}
+	}
+	out := store.Plan{
+		ID: mustPlanID(t, "p-other"), SessionID: other.ID, Status: "draft", Summary: "o",
+		Hash: "ho", ExpiresAt: ts(10), ScopeID: mustScopeID(t, "scope-a"),
+		Effects:   []store.PlanEffect{{Type: "modify", Path: "z.md", Diff: "z", PreconditionHash: "p", PostconditionHash: "q", IdempotencyKey: "io", LeaseID: mustLeaseID(t, "lo")}},
+		CrossExam: &store.CrossExam{Verdict: "pass", ReviewerModel: "sonnet", Reasoning: "other", At: ts(2)},
+		CreatedAt: ts(1), UpdatedAt: ts(1),
+	}
+	if err := s.CreatePlan(ctx, out); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.CrossExamStats(ctx, sess.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Examined != 4 || got.Pass != 2 || got.Fail != 1 || got.PassWithNotes != 1 {
+		t.Fatalf("counts %+v", got)
+	}
+	if got.EmptyNotesNontrivial != 1 {
+		t.Fatalf("empty notes %+v", got)
+	}
+	if got.PassRate() != 0.75 {
+		t.Fatalf("pass rate %v", got.PassRate())
+	}
+	if _, err := s.CrossExamStats(ctx, mustAgentID(t, "missing-agent")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing: %v", err)
 	}
 }
 

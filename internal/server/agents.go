@@ -93,6 +93,20 @@ func (s *Server) PatchAgent(w http.ResponseWriter, r *http.Request, id gen.Agent
 	if req.AutonomyTier != nil {
 		a.AutonomyTier = *req.AutonomyTier
 	}
+	if req.Reviewer != nil {
+		if req.Reviewer.Model != nil {
+			a.ReviewerModel = *req.Reviewer.Model
+		}
+		if req.Reviewer.SecondModel != nil {
+			a.ReviewerModel2 = *req.Reviewer.SecondModel
+		}
+		if req.Reviewer.Dual != nil {
+			a.ReviewerDual = *req.Reviewer.Dual
+		}
+		if req.Reviewer.BlockOnFail != nil {
+			a.BlockOnFail = *req.Reviewer.BlockOnFail
+		}
+	}
 	a.UpdatedAt = time.Now().UTC()
 	if err := s.store.UpdateAgent(r.Context(), a); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
@@ -110,4 +124,30 @@ func (s *Server) PatchAgent(w http.ResponseWriter, r *http.Request, id gen.Agent
 		return
 	}
 	writeJSON(w, http.StatusOK, agentFrom(a))
+}
+
+func (s *Server) GetAgentCrossExamStats(w http.ResponseWriter, r *http.Request, id gen.AgentID) {
+	aid, err := store.ParseAgentID(string(id))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	stats, err := s.store.CrossExamStats(r.Context(), aid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "agent not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, gen.CrossExamStats{
+		AgentId:              gen.AgentID(stats.AgentID.String()),
+		Examined:             stats.Examined,
+		Pass:                 stats.Pass,
+		Fail:                 stats.Fail,
+		PassWithNotes:        stats.PassWithNotes,
+		PassRate:             stats.PassRate(),
+		EmptyNotesNontrivial: stats.EmptyNotesNontrivial,
+	})
 }

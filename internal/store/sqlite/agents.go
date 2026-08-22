@@ -9,7 +9,7 @@ import (
 	"github.com/avivl/zeroth/internal/store"
 )
 
-const agentCols = `id, name, harness, status, model, tools_json, autonomy_tier, created_at_unix_nano, updated_at_unix_nano`
+const agentCols = `id, name, harness, status, model, tools_json, autonomy_tier, reviewer_model, reviewer_model_2, reviewer_dual, block_on_fail, created_at_unix_nano, updated_at_unix_nano`
 
 func (s *Store) CreateAgent(ctx context.Context, a store.Agent) error {
 	if err := s.guard(); err != nil {
@@ -24,8 +24,9 @@ func (s *Store) CreateAgent(ctx context.Context, a store.Agent) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO agents (`+agentCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID.String(), a.Name, a.Harness, a.Status, a.Model, tools, a.AutonomyTier,
+		a.ReviewerModel, a.ReviewerModel2, boolInt(a.ReviewerDual), boolInt(a.BlockOnFail),
 		nano(a.CreatedAt), nano(a.UpdatedAt),
 	)
 	if err != nil {
@@ -57,9 +58,12 @@ func (s *Store) UpdateAgent(ctx context.Context, a store.Agent) error {
 	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE agents SET name = ?, harness = ?, status = ?, model = ?, tools_json = ?,
-			autonomy_tier = ?, updated_at_unix_nano = ?
+			autonomy_tier = ?, reviewer_model = ?, reviewer_model_2 = ?, reviewer_dual = ?,
+			block_on_fail = ?, updated_at_unix_nano = ?
 		WHERE id = ?`,
-		a.Name, a.Harness, a.Status, a.Model, tools, a.AutonomyTier, nano(a.UpdatedAt), a.ID.String(),
+		a.Name, a.Harness, a.Status, a.Model, tools, a.AutonomyTier,
+		a.ReviewerModel, a.ReviewerModel2, boolInt(a.ReviewerDual), boolInt(a.BlockOnFail),
+		nano(a.UpdatedAt), a.ID.String(),
 	)
 	if err != nil {
 		return wrap("update agent", err)
@@ -97,11 +101,15 @@ func (s *Store) ListAgents(ctx context.Context, q store.PageQuery) (store.Page[s
 func scanAgent(row *sql.Row) (store.Agent, error) {
 	var a store.Agent
 	var id, tools string
+	var dual, block int
 	var created, updated int64
-	err := row.Scan(&id, &a.Name, &a.Harness, &a.Status, &a.Model, &tools, &a.AutonomyTier, &created, &updated)
+	err := row.Scan(&id, &a.Name, &a.Harness, &a.Status, &a.Model, &tools, &a.AutonomyTier,
+		&a.ReviewerModel, &a.ReviewerModel2, &dual, &block, &created, &updated)
 	if err != nil {
 		return store.Agent{}, wrap("get agent", err)
 	}
+	a.ReviewerDual = dual != 0
+	a.BlockOnFail = block != 0
 	return finishAgent(a, id, tools, created, updated, "get agent")
 }
 
@@ -110,10 +118,14 @@ func scanAgents(rows *sql.Rows) ([]store.Agent, error) {
 	for rows.Next() {
 		var a store.Agent
 		var id, tools string
+		var dual, block int
 		var created, updated int64
-		if err := rows.Scan(&id, &a.Name, &a.Harness, &a.Status, &a.Model, &tools, &a.AutonomyTier, &created, &updated); err != nil {
+		if err := rows.Scan(&id, &a.Name, &a.Harness, &a.Status, &a.Model, &tools, &a.AutonomyTier,
+			&a.ReviewerModel, &a.ReviewerModel2, &dual, &block, &created, &updated); err != nil {
 			return nil, wrap("list agents", err)
 		}
+		a.ReviewerDual = dual != 0
+		a.BlockOnFail = block != 0
 		a, err := finishAgent(a, id, tools, created, updated, "list agents")
 		if err != nil {
 			return nil, err
@@ -142,6 +154,75 @@ func finishAgent(a store.Agent, id, tools string, created, updated int64, op str
 	a.CreatedAt = fromNano(created)
 	a.UpdatedAt = fromNano(updated)
 	return a, nil
+}
+
+func (s *Store) CrossExamStats(ctx context.Context, agentID store.AgentID) (store.CrossExamStats, error) {
+	if err := s.guard(); err != nil {
+		return store.CrossExamStats{}, err
+	}
+	if agentID.IsZero() {
+		return store.CrossExamStats{}, wrap("cross-exam stats", store.ErrInvalid)
+	}
+	if _, err := s.GetAgent(ctx, agentID); err != nil {
+		return store.CrossExamStats{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT p.effects_json, p.cross_exam_json
+		FROM plans p
+		JOIN sessions s ON s.id = p.session_id
+		WHERE s.agent_id = ? AND p.cross_exam_json != ''`,
+		agentID.String(),
+	)
+	if err != nil {
+		return store.CrossExamStats{}, wrap("cross-exam stats", err)
+	}
+	defer rows.Close()
+	stats := store.CrossExamStats{AgentID: agentID}
+	for rows.Next() {
+		var effectsJSON, examJSON string
+		if err := rows.Scan(&effectsJSON, &examJSON); err != nil {
+			return store.CrossExamStats{}, wrap("cross-exam stats", err)
+		}
+		exam, err := unmarshalCrossExam(examJSON)
+		if err != nil {
+			return store.CrossExamStats{}, wrap("cross-exam stats", err)
+		}
+		if exam == nil || exam.Verdict == "" {
+			continue
+		}
+		effects, err := unmarshalEffects(effectsJSON)
+		if err != nil {
+			return store.CrossExamStats{}, wrap("cross-exam stats", err)
+		}
+		stats.Examined++
+		switch exam.Verdict {
+		case "pass":
+			stats.Pass++
+		case "fail":
+			stats.Fail++
+		case "pass_with_notes":
+			stats.PassWithNotes++
+		}
+		if strings.TrimSpace(exam.Reasoning) == "" && nontrivialEffects(effects) {
+			stats.EmptyNotesNontrivial++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return store.CrossExamStats{}, wrap("cross-exam stats", err)
+	}
+	return stats, nil
+}
+
+func nontrivialEffects(effects []store.PlanEffect) bool {
+	if len(effects) > 1 {
+		return true
+	}
+	for _, e := range effects {
+		if len(e.Diff) > 80 {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) CreateLease(ctx context.Context, l store.Lease) error {

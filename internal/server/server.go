@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/avivl/zeroth/internal/audit"
+	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/signer"
 	"github.com/avivl/zeroth/internal/store"
@@ -37,6 +38,7 @@ type Config struct {
 	Store         store.Store
 	Signer        signer.Service
 	Log           *zap.Logger
+	Reviewer      plan.Reviewer
 	TokenInterval time.Duration
 	TokenCount    int
 }
@@ -46,6 +48,7 @@ type Server struct {
 	store    store.Store
 	audit    *audit.Log
 	log      *zap.Logger
+	reviewer plan.Reviewer
 	elog     *storeLog
 	sup      *session.Supervisor
 	interval time.Duration
@@ -100,6 +103,7 @@ func New(cfg Config) (*Server, error) {
 		store:    cfg.Store,
 		audit:    trail,
 		log:      log,
+		reviewer: cfg.Reviewer,
 		elog:     elog,
 		sup:      sup,
 		interval: interval,

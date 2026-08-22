@@ -30,6 +30,7 @@ var stage1Paths = []string{
 	"/plans/{id}/apply",
 	"/agents",
 	"/agents/{id}",
+	"/agents/{id}/cross-exam-stats",
 	"/agents/{id}/leases",
 	"/approvals",
 	"/memory",
@@ -75,6 +76,7 @@ func TestStage1Operations(t *testing.T) {
 		"listAgents",
 		"getAgent",
 		"patchAgent",
+		"getAgentCrossExamStats",
 		"listAgentLeases",
 		"listApprovals",
 		"listMemory",
@@ -139,6 +141,22 @@ func TestCreateRunHasNoSandboxField(t *testing.T) {
 		if strings.Contains(strings.ToLower(block), banned) {
 			t.Errorf("CreateRunRequest must not include %q (stage 1 driver is not selectable)", banned)
 		}
+	}
+}
+
+func TestCrossExamVerdictsAreDocumented(t *testing.T) {
+	t.Parallel()
+	block := schemaBlock(readSpec(t), "CrossExam:")
+	for _, v := range []string{"pass", "fail", "pass_with_notes"} {
+		if !strings.Contains(block, v) {
+			t.Errorf("CrossExam.verdict description missing %s", v)
+		}
+	}
+	if schemaBlock(readSpec(t), "CrossExamStats:") == "" {
+		t.Fatal("CrossExamStats schema missing")
+	}
+	if schemaBlock(readSpec(t), "ReviewerConfig:") == "" {
+		t.Fatal("ReviewerConfig schema missing")
 	}
 }
 

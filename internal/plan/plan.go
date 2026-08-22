@@ -37,13 +37,37 @@ type Credential struct {
 	Kind     string
 }
 
+// Known cross-exam verdicts. The wire format is an open string; these are
+// the values this package produces. Clients must tolerate unknowns.
+const (
+	VerdictPass          = "pass"
+	VerdictFail          = "fail"
+	VerdictPassWithNotes = "pass_with_notes"
+)
+
 // CrossExam is the automatic challenge of a draft. It is not part of the
 // canonical hash: a reviewer verdict does not rewrite what was approved.
+// Reasoning is the free-text notes shown inline. Empty notes on a
+// nontrivial plan are themselves a signal.
 type CrossExam struct {
 	Verdict       string
 	ReviewerModel string
 	Reasoning     string
 	At            time.Time
+}
+
+// Nontrivial reports whether p is large enough that a silent pass (a
+// verdict with no notes) is worth tracking. One tiny row is not.
+func (p Plan) Nontrivial() bool {
+	if len(p.Rows) > 1 {
+		return true
+	}
+	for _, r := range p.Rows {
+		if len(r.Payload) > 80 {
+			return true
+		}
+	}
+	return false
 }
 
 // Finding names a secretscan hit without the secret itself.

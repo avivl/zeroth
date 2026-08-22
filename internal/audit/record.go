@@ -22,6 +22,7 @@ const (
 	ActionAgentRotateKey = "agent.rotate_key"
 	ActionRunCreate      = "run.create"
 	ActionPlanApply      = "plan.apply"
+	ActionPlanCrossExam  = "plan.cross_exam"
 
 	ApproverOperator = "operator"
 )

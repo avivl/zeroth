@@ -289,6 +289,13 @@ func unmarshalFindings(s string) ([]store.SecretScanFinding, error) {
 	return out, nil
 }
 
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
 func affectedOne(res sql.Result, op string) error {
 	n, err := res.RowsAffected()
 	if err != nil {

@@ -46,14 +46,6 @@ func (s *Server) RejectMemoryProposal(w http.ResponseWriter, _ *http.Request, _ 
 	notImplemented(w)
 }
 
-func (s *Server) ListPlans(w http.ResponseWriter, _ *http.Request, _ gen.ListPlansParams) {
-	notImplemented(w)
-}
-
-func (s *Server) GetPlan(w http.ResponseWriter, _ *http.Request, _ gen.PlanID) {
-	notImplemented(w)
-}
-
 func (s *Server) ApplyPlan(w http.ResponseWriter, _ *http.Request, _ gen.PlanID) {
 	notImplemented(w)
 }

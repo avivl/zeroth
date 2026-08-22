@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/avivl/zeroth/internal/session"
@@ -83,6 +84,16 @@ func apiEvent(ev session.Event) gen.RunEvent {
 	if msg != "" {
 		out.Message = &msg
 	}
+	if ev.Type == session.EventCrossExam || ev.Type == session.EventPlanProposed || ev.Type == session.EventApprovalRequested {
+		var payload crossExamPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &payload); err == nil && payload.PlanID != "" {
+			pid := gen.PlanID(payload.PlanID)
+			out.PlanId = &pid
+		} else if ev.Payload != "" && ev.Type != session.EventCrossExam {
+			pid := gen.PlanID(ev.Payload)
+			out.PlanId = &pid
+		}
+	}
 	return out
 }
 
@@ -94,6 +105,8 @@ func apiEventType(t session.EventType) string {
 		return "tool_call"
 	case session.EventPlanProposed:
 		return "plan_drafted"
+	case session.EventCrossExam:
+		return "cross_exam_verdict"
 	case session.EventCheckpointTaken:
 		return "checkpoint_created"
 	case session.EventError:
@@ -121,6 +134,15 @@ func eventMessage(ev session.Event) string {
 		return "backgrounded"
 	case session.EventAttached:
 		return "attached"
+	case session.EventCrossExam:
+		var payload crossExamPayload
+		if err := json.Unmarshal([]byte(ev.Payload), &payload); err == nil && payload.Verdict != "" {
+			if payload.Notes != "" {
+				return payload.Verdict + ": " + payload.Notes
+			}
+			return payload.Verdict
+		}
+		return ev.Payload
 	default:
 		return ev.Payload
 	}
@@ -150,6 +172,26 @@ func agentFrom(a store.Agent) gen.Agent {
 	if len(a.Tools) > 0 {
 		tools := append([]string(nil), a.Tools...)
 		out.Tools = &tools
+	}
+	if a.ReviewerModel != "" || a.ReviewerModel2 != "" || a.ReviewerDual || a.BlockOnFail {
+		rc := gen.ReviewerConfig{}
+		if a.ReviewerModel != "" {
+			m := a.ReviewerModel
+			rc.Model = &m
+		}
+		if a.ReviewerModel2 != "" {
+			m := a.ReviewerModel2
+			rc.SecondModel = &m
+		}
+		if a.ReviewerDual {
+			d := true
+			rc.Dual = &d
+		}
+		if a.BlockOnFail {
+			b := true
+			rc.BlockOnFail = &b
+		}
+		out.Reviewer = &rc
 	}
 	return out
 }
@@ -210,6 +252,107 @@ func auditFrom(r store.AuditRecord) gen.AuditRecord {
 	if r.Hash != "" {
 		h := r.Hash
 		out.Hash = &h
+	}
+	return out
+}
+
+func planFrom(p store.Plan) gen.Plan {
+	out := gen.Plan{
+		Id:        gen.PlanID(p.ID.String()),
+		RunId:     gen.RunID(p.SessionID.String()),
+		Status:    gen.PlanStatus(p.Status),
+		Summary:   p.Summary,
+		Effects:   planEffectsFrom(p.Effects),
+		CreatedAt: p.CreatedAt.UTC(),
+		UpdatedAt: p.UpdatedAt.UTC(),
+	}
+	if !p.ParentPlanID.IsZero() {
+		id := gen.PlanID(p.ParentPlanID.String())
+		out.ParentPlanId = &id
+	}
+	if p.Hash != "" {
+		h := p.Hash
+		out.Hash = &h
+	}
+	if !p.ExpiresAt.IsZero() {
+		t := p.ExpiresAt.UTC()
+		out.ExpiresAt = &t
+	}
+	if p.CostCeiling != 0 {
+		c := p.CostCeiling
+		out.CostCeiling = &c
+	}
+	if !p.ScopeID.IsZero() {
+		id := gen.ScopeID(p.ScopeID.String())
+		out.ScopeId = &id
+	}
+	if len(p.Credentials) > 0 {
+		creds := make([]gen.CredentialConstraint, 0, len(p.Credentials))
+		for _, c := range p.Credentials {
+			creds = append(creds, gen.CredentialConstraint{Provider: c.Provider, Kind: c.Kind})
+		}
+		out.Credentials = &creds
+	}
+	if p.CrossExam != nil {
+		out.CrossExam = &gen.CrossExam{
+			Verdict:       p.CrossExam.Verdict,
+			ReviewerModel: p.CrossExam.ReviewerModel,
+			Reasoning:     p.CrossExam.Reasoning,
+			At:            p.CrossExam.At.UTC(),
+		}
+	}
+	if p.SecretScanFindings != nil {
+		findings := make([]gen.SecretScanFinding, 0, len(p.SecretScanFindings))
+		for _, f := range p.SecretScanFindings {
+			item := gen.SecretScanFinding{Path: f.Path, Rule: f.Rule}
+			if f.Line > 0 {
+				line := f.Line
+				item.Line = &line
+			}
+			findings = append(findings, item)
+		}
+		out.SecretScanFindings = &findings
+	}
+	if p.ReviewComment != "" {
+		c := p.ReviewComment
+		out.ReviewComment = &c
+	}
+	return out
+}
+
+func planEffectsFrom(in []store.PlanEffect) []gen.PlanEffect {
+	out := make([]gen.PlanEffect, 0, len(in))
+	for _, e := range in {
+		item := gen.PlanEffect{Type: gen.PlanEffectType(e.Type)}
+		if e.Path != "" {
+			p := e.Path
+			item.Path = &p
+		}
+		if e.Diff != "" {
+			d := e.Diff
+			item.Diff = &d
+		}
+		if e.PreconditionHash != "" {
+			h := e.PreconditionHash
+			item.PreconditionHash = &h
+		}
+		if e.PostconditionHash != "" {
+			h := e.PostconditionHash
+			item.PostconditionHash = &h
+		}
+		if e.IdempotencyKey != "" {
+			k := e.IdempotencyKey
+			item.IdempotencyKey = &k
+		}
+		if !e.LeaseID.IsZero() {
+			id := gen.LeaseID(e.LeaseID.String())
+			item.LeaseId = &id
+		}
+		if e.CostEstimate != "" {
+			c := e.CostEstimate
+			item.CostEstimate = &c
+		}
+		out = append(out, item)
 	}
 	return out
 }

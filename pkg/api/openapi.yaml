@@ -513,6 +513,27 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+  "/agents/{id}/cross-exam-stats":
+    get:
+      tags: [agents]
+      summary: Cross-exam pass rate for an agent
+      description: |
+        Queryable reviewer scoreboard (Z1-019). Pass rate is
+        (pass + pass_with_notes) / examined. empty_notes_nontrivial
+        counts silent passes on nontrivial plans: a reviewer that
+        always passes without notes is not reviewing.
+      operationId: getAgentCrossExamStats
+      parameters:
+        - $ref: "#/components/parameters/AgentID"
+      responses:
+        "200":
+          description: Aggregated cross-exam verdicts for this agent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrossExamStats"
+        "404":
+          $ref: "#/components/responses/NotFound"
   "/agents/{id}/leases":
     get:
       tags: [agents]
@@ -1217,15 +1238,19 @@ components:
         verdict:
           type: string
           minLength: 1
-          description: Outcome of the automatic cross-exam. Open string; clients must tolerate unknown verdicts.
+          description: |
+            Outcome of the automatic cross-exam. Known values: pass, fail,
+            pass_with_notes. Clients must tolerate unknown verdicts.
         reviewer_model:
           type: string
           minLength: 1
-          description: Model that performed the cross-exam.
+          description: Model that performed the cross-exam. Dual reviews join models with a comma.
         reasoning:
           type: string
-          minLength: 1
-          description: Why the reviewer reached this verdict.
+          description: |
+            Reviewer notes, rendered inline. Empty notes on a nontrivial
+            plan are a signal (a reviewer that never writes notes is not
+            reviewing).
         at:
           type: string
           format: date-time
@@ -1307,6 +1332,8 @@ components:
           type: string
           minLength: 1
           description: Default autonomy tier for new runs of this agent. Unknown tiers deny by default.
+        reviewer:
+          $ref: "#/components/schemas/ReviewerConfig"
         created_at:
           type: string
           format: date-time
@@ -1334,6 +1361,56 @@ components:
           type: string
           minLength: 1
           description: Explicit operator tier change. Stage 1 does not auto-promote.
+        reviewer:
+          $ref: "#/components/schemas/ReviewerConfig"
+    ReviewerConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        model:
+          type: string
+          minLength: 1
+          description: Reviewer model. Must differ from the producer model. Same-model second pass is rejected.
+        dual:
+          type: boolean
+          description: When true, second_model also reviews in an independent context. Both must pass.
+        second_model:
+          type: string
+          minLength: 1
+          description: Second reviewer model when dual is true. Must differ from model and from the producer.
+        block_on_fail:
+          type: boolean
+          description: When true, a failed cross-exam returns the plan to the agent with the notes attached instead of escalating to the human.
+    CrossExamStats:
+      type: object
+      additionalProperties: false
+      required: [agent_id, examined, pass, fail, pass_with_notes, pass_rate, empty_notes_nontrivial]
+      properties:
+        agent_id:
+          $ref: "#/components/schemas/AgentID"
+        examined:
+          type: integer
+          minimum: 0
+          description: Plans that have a recorded reviewer verdict.
+        pass:
+          type: integer
+          minimum: 0
+        fail:
+          type: integer
+          minimum: 0
+        pass_with_notes:
+          type: integer
+          minimum: 0
+        pass_rate:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: (pass + pass_with_notes) / examined. Zero when examined is zero.
+        empty_notes_nontrivial:
+          type: integer
+          minimum: 0
+          description: Verdicts with empty notes on a nontrivial plan.
     AgentList:
       type: object
       additionalProperties: false

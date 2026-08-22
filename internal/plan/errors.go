@@ -42,6 +42,13 @@ var (
 	// ErrSecret is returned when secretscan finds a leak in a row that
 	// has not yet been applied. Nothing is written.
 	ErrSecret = errors.New("plan: secret scan blocked apply")
+	// ErrNoReviewer is returned when cross-exam is asked with no
+	// reviewer model configured. Missing review is a deny, not a skip.
+	ErrNoReviewer = errors.New("plan: no reviewer configured")
+	// ErrSameModel is returned when a reviewer model equals the
+	// producer or another reviewer. Same-model second pass is not
+	// diversity and does not count (Z1-019).
+	ErrSameModel = errors.New("plan: reviewer must differ from producer")
 )
 
 // UnexpressibleError names the proposed effect that could not become a

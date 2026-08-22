@@ -56,6 +56,9 @@ const (
 	EventToolCall EventType = "tool_call"
 	// EventPlanProposed records a plan draft. Status stays running.
 	EventPlanProposed EventType = "plan_proposed"
+	// EventCrossExam records a reviewer verdict. Status stays running
+	// until approval is requested or changes are returned to the agent.
+	EventCrossExam EventType = "cross_exam"
 	// EventApprovalRequested moves running -> awaiting-approval.
 	EventApprovalRequested EventType = "approval_requested"
 	// EventChangesRequested moves awaiting-approval -> running.
@@ -226,7 +229,7 @@ func Apply(st State, ev Event) (State, error) {
 		if st.Status != StatusRunning && st.Status != StatusApplying {
 			return State{}, illegal
 		}
-	case EventPlanProposed:
+	case EventPlanProposed, EventCrossExam:
 		if st.Status != StatusRunning {
 			return State{}, illegal
 		}

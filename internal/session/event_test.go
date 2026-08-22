@@ -30,6 +30,7 @@ func legalTransitions() []transCase {
 			transCase{from: session.StatusRunning, attach: att, typ: session.EventToken, payload: "hi", to: session.StatusRunning, toAtt: att},
 			transCase{from: session.StatusRunning, attach: att, typ: session.EventToolCall, payload: "bash", to: session.StatusRunning, toAtt: att},
 			transCase{from: session.StatusRunning, attach: att, typ: session.EventPlanProposed, payload: "plan-1", to: session.StatusRunning, toAtt: att},
+			transCase{from: session.StatusRunning, attach: att, typ: session.EventCrossExam, payload: "fail", to: session.StatusRunning, toAtt: att},
 			transCase{from: session.StatusRunning, attach: att, typ: session.EventApprovalRequested, payload: "plan-1", to: session.StatusAwaitingApproval, toAtt: att},
 			transCase{from: session.StatusRunning, attach: att, typ: session.EventCheckpointTaken, payload: "ckpt", to: session.StatusRunning, toAtt: att},
 			transCase{from: session.StatusRunning, attach: att, typ: session.EventError, payload: "boom", to: session.StatusRunning, toAtt: att},
@@ -92,6 +93,7 @@ func TestEveryTransition(t *testing.T) {
 		session.EventToken,
 		session.EventToolCall,
 		session.EventPlanProposed,
+		session.EventCrossExam,
 		session.EventApprovalRequested,
 		session.EventChangesRequested,
 		session.EventApplying,
@@ -113,6 +115,8 @@ func TestEveryTransition(t *testing.T) {
 			return []string{"bash"}
 		case session.EventPlanProposed, session.EventApprovalRequested:
 			return []string{"plan-1"}
+		case session.EventCrossExam:
+			return []string{"fail"}
 		case session.EventCheckpointTaken:
 			return []string{"ckpt"}
 		case session.EventError:
@@ -251,6 +255,7 @@ func TestReplayMatchesWalk(t *testing.T) {
 		func() error { return m.EmitToken(ctx, "tok") },
 		func() error { return m.EmitToolCall(ctx, "bash") },
 		func() error { return m.ProposePlan(ctx, "plan-1") },
+		func() error { return m.RecordCrossExam(ctx, "pass") },
 		func() error { return m.RequestApproval(ctx, "plan-1") },
 		func() error { return m.RequestChanges(ctx) },
 		func() error { return m.Background(ctx, nil) },
