@@ -320,6 +320,97 @@ func planFrom(p store.Plan) gen.Plan {
 	return out
 }
 
+func approvalFrom(a store.Approval) gen.Approval {
+	out := gen.Approval{
+		Id:        gen.ApprovalID(a.ID.String()),
+		Kind:      a.Kind,
+		Status:    gen.ApprovalStatus(a.Status),
+		CreatedAt: a.CreatedAt.UTC(),
+	}
+	if !a.PlanID.IsZero() {
+		id := gen.PlanID(a.PlanID.String())
+		out.PlanId = &id
+	}
+	if !a.SessionID.IsZero() {
+		id := gen.RunID(a.SessionID.String())
+		out.RunId = &id
+	}
+	if a.Summary != "" {
+		s := a.Summary
+		out.Summary = &s
+	}
+	return out
+}
+
+func memoryFrom(m store.MemoryEntry) gen.MemoryEntry {
+	out := gen.MemoryEntry{
+		Id:        gen.MemoryID(m.ID.String()),
+		Kind:      gen.MemoryKind(m.Kind),
+		Content:   m.Content,
+		CreatedAt: m.CreatedAt.UTC(),
+	}
+	if m.RefID != "" {
+		ref := m.RefID
+		out.RefId = &ref
+	}
+	return out
+}
+
+func memoryProposalFrom(p store.MemoryProposal) gen.MemoryProposal {
+	out := gen.MemoryProposal{
+		Id:        gen.MemoryProposalID(p.ID.String()),
+		Kind:      gen.MemoryKind(p.Kind),
+		Content:   p.Content,
+		Status:    gen.MemoryProposalStatus(p.Status),
+		CreatedAt: p.CreatedAt.UTC(),
+	}
+	if p.RefID != "" {
+		ref := p.RefID
+		out.RefId = &ref
+	}
+	if !p.SessionID.IsZero() {
+		id := gen.RunID(p.SessionID.String())
+		out.RunId = &id
+	}
+	if !p.MemoryID.IsZero() {
+		id := gen.MemoryID(p.MemoryID.String())
+		out.MemoryId = &id
+	}
+	if !p.ReviewedAt.IsZero() {
+		t := p.ReviewedAt.UTC()
+		out.ReviewedAt = &t
+	}
+	return out
+}
+
+func leaseFrom(l store.Lease) gen.Lease {
+	out := gen.Lease{
+		Id:        gen.LeaseID(l.ID.String()),
+		GrantId:   gen.GrantID(l.GrantID.String()),
+		ScopeId:   gen.ScopeID(l.ScopeID.String()),
+		AgentId:   gen.AgentID(l.AgentID.String()),
+		ExpiresAt: l.ExpiresAt.UTC(),
+	}
+	if !l.MintedAt.IsZero() {
+		t := l.MintedAt.UTC()
+		out.MintedAt = &t
+	}
+	return out
+}
+
+func checkpointFrom(c store.Checkpoint) gen.Checkpoint {
+	out := gen.Checkpoint{
+		Id:        gen.CheckpointID(c.ID.String()),
+		RunId:     gen.RunID(c.SessionID.String()),
+		CreatedAt: c.CreatedAt.UTC(),
+	}
+	if c.Label != "" {
+		label := c.Label
+		out.Label = &label
+	}
+	return out
+}
+
 func planEffectsFrom(in []store.PlanEffect) []gen.PlanEffect {
 	out := make([]gen.PlanEffect, 0, len(in))
 	for _, e := range in {

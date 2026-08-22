@@ -21,8 +21,15 @@ const (
 	ActionAgentUpdate    = "agent.update"
 	ActionAgentRotateKey = "agent.rotate_key"
 	ActionRunCreate      = "run.create"
+	ActionPlanApprove    = "plan.approve"
 	ActionPlanApply      = "plan.apply"
 	ActionPlanCrossExam  = "plan.cross_exam"
+	ActionPlanBranch     = "plan.branch"
+	ActionMemoryAccept   = "memory.accept"
+	ActionMemoryReject   = "memory.reject"
+	ActionMemoryCreate   = "memory.create"
+	ActionCheckpoint     = "checkpoint.create"
+	ActionCheckpointRest = "checkpoint.restore"
 
 	ApproverOperator = "operator"
 )
