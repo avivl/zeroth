@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/avivl/zeroth/internal/plan"
+	"github.com/avivl/zeroth/internal/store"
+	"github.com/avivl/zeroth/internal/store/sqlite"
 )
 
 func TestApplyWorldExecuteWritesAndHashes(t *testing.T) {
@@ -518,5 +521,49 @@ func TestGithubRepoSlug(t *testing.T) {
 		if got != tc.want || ok != tc.ok {
 			t.Fatalf("%s: got %q %v", tc.in, got, ok)
 		}
+	}
+}
+
+func TestPeekPRFallsBackToStore(t *testing.T) {
+	t.Parallel()
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv, err := New(Config{Store: st, TokenInterval: time.Hour, TokenCount: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	aid, err := store.ParseAgentID(DefaultAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := store.ParseSessionID("s_retract_store")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	url := "https://github.com/avivl/zeroth/pull/48"
+	if err := st.CreateSession(t.Context(), store.Session{
+		ID:          sid,
+		AgentID:     aid,
+		Status:      "done",
+		PullRequest: url,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		FinishedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.peekPR(sid.String()); got != url {
+		t.Fatalf("peekPR from store = %q", got)
+	}
+	srv.rememberPR("", url)
+	srv.rememberPR(sid.String(), "")
+	if got := srv.peekPR("not-an-id"); got != "" {
+		t.Fatalf("invalid id peekPR = %q", got)
 	}
 }
