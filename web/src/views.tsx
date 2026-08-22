@@ -130,6 +130,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [auditByPlan, setAuditByPlan] = useState<AuditRecord | null>(null);
+  const [auditValid, setAuditValid] = useState<boolean | undefined>(undefined);
 
   const plan = (plans ?? []).find((p) => p.id === run?.plan_id) ?? (plans ?? [])[0];
 
@@ -171,6 +172,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
             <ChangePlanCard
               plan={plan}
               audit={auditByPlan}
+              auditValid={auditValid}
               busy={busy}
               onApprove={() =>
                 act("approve", async () => {
@@ -179,6 +181,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
               }
               onApply={() =>
                 act("apply", async () => {
+                  setAuditValid(undefined);
                   const res = await api.plans.applyPlan(plan.id);
                   const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
                   setAuditByPlan(list.data.items.find((r) => r.id === res.data.audit_id) ?? list.data.items[0] ?? null);
@@ -199,7 +202,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
                   ? () =>
                       act("verify", async () => {
                         const v = await api.audit.verifyAudit(auditByPlan.id);
-                        setAuditByPlan({ ...auditByPlan, ...(v.data.valid ? {} : {}) });
+                        setAuditValid(v.data.valid);
                         if (!v.data.valid) {
                           throw new Error(v.data.reason ?? "invalid signature");
                         }
@@ -320,6 +323,7 @@ function MemoryQueue({
 export function ChangePlanCard({
   plan,
   audit,
+  auditValid,
   busy,
   onApprove,
   onApply,
@@ -329,6 +333,7 @@ export function ChangePlanCard({
 }: {
   plan: Plan;
   audit?: AuditRecord | null;
+  auditValid?: boolean;
   busy: string | null;
   onApprove: () => void;
   onApply: () => void;
@@ -366,7 +371,7 @@ export function ChangePlanCard({
       {audit ? (
         <p className="row" style={{ marginTop: "0.75rem" }}>
           <span className="muted">Signed apply</span>
-          <SignatureChip signature={audit.signature} onVerify={() => onVerify?.()} />
+          <SignatureChip signature={audit.signature} valid={auditValid} onVerify={() => onVerify?.()} />
         </p>
       ) : null}
     </section>
