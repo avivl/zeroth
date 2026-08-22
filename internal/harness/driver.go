@@ -45,7 +45,10 @@ type Driver interface {
 // Spec is what Start needs to run one agent turn.
 type Spec struct {
 	// Workspace is the directory the subprocess uses as cwd. It is the
-	// sandbox overlay. The driver must not write credentials into it.
+	// sandbox overlay's host path (HostWorkspace). Stage 1 runs the
+	// agent as a host subprocess against that tree, not inside
+	// sandbox.Exec (ADR-Z-0010). The driver must not write credentials
+	// into it.
 	Workspace string
 	// Prompt is the user task. Empty is ErrInvalid.
 	Prompt string

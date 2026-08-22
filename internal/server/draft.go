@@ -20,10 +20,12 @@ import (
 )
 
 // hostOverlay is implemented by sandbox drivers that can point the
-// harness at the overlay's host directory. Docker does this. When a
-// sandbox is in play, missing this method is a hard error: falling
-// back to an empty temp dir hides the real checkout and drops
-// preconditions at draft time.
+// harness at the overlay's host directory. Docker does this. Stage 1
+// runs the harness as a host subprocess against that path (ADR-Z-0010),
+// so the plan builder and the agent see the same tree. When a sandbox
+// is in play, missing this method is a hard error: falling back to an
+// empty temp dir hides the real checkout and drops preconditions at
+// draft time.
 type hostOverlay interface {
 	HostWorkspace(id sandbox.ID) (string, error)
 }

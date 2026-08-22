@@ -42,7 +42,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | `internal/sandbox` | `Driver` port plus `conformance_test.go` | Concrete runtimes (those go in subpackages) |
 | `internal/sandbox/docker` | Stage-1 `Driver` implementation | Changes to the port that are not reflected in conformance tests |
 | `internal/harness` | `Driver` port plus `conformance_test.go` | Vendor SDKs |
-| `internal/harness/claudecode` | Stage-1 harness implementation | Shortcuts that bypass plan-then-apply |
+| `internal/harness/claudecode` | Stage-1 harness implementation. Host subprocess against `HostWorkspace` (ADR-Z-0010), not `sandbox.Exec`. | Shortcuts that bypass plan-then-apply. Do not claim in-container execution until a new ADR. |
 | `internal/tracker` | `Provider` port plus `conformance_test.go` | Vendor SDKs |
 | `internal/tracker/linear` | Stage-1 tracker implementation | Kernel policy |
 | `internal/store` | `Store` port plus `conformance_test.go` | Cloud databases in stage 1 |
