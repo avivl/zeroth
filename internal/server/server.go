@@ -98,6 +98,12 @@ type Server struct {
 	sandboxes map[string]sandbox.ID
 	keys      map[string]string
 	prs       map[string]string
+
+	// sessMu serializes GetSession+UpdateSession. Status sync after
+	// startWorker was a lost-update: it could rewrite plan_id to empty
+	// after attachPlan had already stored it, so a waiting-approval run
+	// had no plan on the wire (Linear 42-51 CI).
+	sessMu sync.Mutex
 }
 
 type liveRun struct {
@@ -300,6 +306,8 @@ func (s *Server) syncSession(ctx context.Context, id session.ID) error {
 	if err != nil {
 		return fmt.Errorf("server sync session: %w", err)
 	}
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
 	sess, err := s.store.GetSession(ctx, sid)
 	if err != nil {
 		return fmt.Errorf("server sync session: %w", err)

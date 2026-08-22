@@ -174,6 +174,8 @@ func (s *Server) attachPlan(ctx context.Context, id session.ID, planID store.Pla
 	if err != nil {
 		return err
 	}
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
 	sess, err := s.store.GetSession(ctx, sid)
 	if err != nil {
 		return err

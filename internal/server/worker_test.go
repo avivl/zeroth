@@ -243,7 +243,7 @@ func TestHarnessModifyObservesPrecondition(t *testing.T) {
 
 	got := getRun(t, hs.URL, string(run.Id))
 	if got.PlanId == nil {
-		t.Fatal("run missing plan_id")
+		t.Fatalf("run missing plan_id (status %s)", got.Status)
 	}
 	p := getPlan(t, hs.URL, string(*got.PlanId))
 	if len(p.Effects) != 1 || p.Effects[0].PreconditionHash == nil {
