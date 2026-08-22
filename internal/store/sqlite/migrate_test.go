@@ -81,8 +81,12 @@ func TestEventsAndAuditAreAppendOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.AppendAudit(ctx, store.AuditRecord{
-		ID: mustAuID(t, "u1"), Action: "x", ResourceType: "run", ResourceID: "s1", Signature: "sig",
+		ID: mustAuID(t, "u1"), Action: "x", ResourceType: "run", ResourceID: "s1",
+		Signature: "sig", Hash: "h1", AgentPubKey: "pk",
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendAgentKey(ctx, store.AgentKey{AgentID: agent.ID, PubKey: "pk"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -106,6 +110,9 @@ func TestEventsAndAuditAreAppendOnly(t *testing.T) {
 	if _, err := db.Exec(`DELETE FROM audit_records`); err == nil {
 		t.Fatal("DELETE audit: expected append-only abort")
 	}
+	if _, err := db.Exec(`DELETE FROM agent_keys`); err == nil {
+		t.Fatal("DELETE agent_keys: expected append-only abort")
+	}
 }
 
 func TestMigrateUpAndDown(t *testing.T) {
@@ -116,12 +123,22 @@ func TestMigrateUpAndDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 2 {
-		t.Fatalf("version = %d, want 2", v)
+	if v != 3 {
+		t.Fatalf("version = %d, want 3", v)
 	}
 	agent := store.Agent{ID: mustAID(t, "a1"), Name: "n", Harness: "h", Status: "ready"}
 	if err := s.CreateAgent(ctx, agent); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.MigrateDown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v, err = s.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 2 {
+		t.Fatalf("after 0003 down version = %d", v)
 	}
 	if err := s.MigrateDown(ctx); err != nil {
 		t.Fatal(err)
@@ -153,7 +170,7 @@ func TestMigrateUpAndDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err = s.Version(ctx)
-	if err != nil || v != 2 {
+	if err != nil || v != 3 {
 		t.Fatalf("after up version = %d err=%v", v, err)
 	}
 	if err := s.CreateAgent(ctx, agent); err != nil {

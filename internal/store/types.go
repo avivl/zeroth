@@ -161,15 +161,29 @@ type MemoryProposalQuery struct {
 	Status string
 }
 
-// AuditRecord is one signed, append-only trail row.
+// AuditRecord is one signed, append-only trail row. The signed payload is
+// the issue's record shape (action, target, plan hash, pre/post, lease,
+// approver, agent pubkey, prev_hash, ts). Hash is SHA-256 of that payload
+// plus the signature, and is what the next row's PrevHash must match.
 type AuditRecord struct {
-	ID           AuditID
-	Action       string
-	ResourceType string
-	ResourceID   string
-	Actor        string
-	Signature    string
-	CreatedAt    time.Time
+	ID            AuditID
+	Action        string
+	Target        string
+	PlanHash      string
+	Precondition  string
+	Postcondition string
+	LeaseID       LeaseID
+	Approver      string
+	AgentPubKey   string
+	PrevHash      string
+	Hash          string
+	Signature     string
+	AgentID       AgentID
+	SessionID     SessionID
+	ResourceType  string
+	ResourceID    string
+	Actor         string
+	CreatedAt     time.Time
 }
 
 // AuditQuery filters ListAudit. Newest first.
@@ -177,6 +191,15 @@ type AuditQuery struct {
 	PageQuery
 	ResourceType string
 	ResourceID   string
+	SessionID    SessionID
+}
+
+// AgentKey is one row in the append-only pubkey registry. Rotation inserts
+// a new row; historical signatures keep verifying against earlier keys.
+type AgentKey struct {
+	AgentID   AgentID
+	PubKey    string
+	CreatedAt time.Time
 }
 
 // Lease is a time-bounded grant. Policy defines what a lease may be; the

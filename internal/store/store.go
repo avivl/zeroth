@@ -58,6 +58,13 @@ type Store interface {
 	AppendAudit(ctx context.Context, r AuditRecord) (AuditRecord, error)
 	GetAudit(ctx context.Context, id AuditID) (AuditRecord, error)
 	ListAudit(ctx context.Context, q AuditQuery) (Page[AuditRecord], error)
+	// AuditChain returns every audit record oldest-first. Verify walks this.
+	AuditChain(ctx context.Context) ([]AuditRecord, error)
+
+	AppendAgentKey(ctx context.Context, k AgentKey) error
+	// ListAgentKeys returns pubkeys oldest-first. A zero agentID lists every
+	// registered key so offline verify can load the registry in one call.
+	ListAgentKeys(ctx context.Context, agentID AgentID) ([]AgentKey, error)
 
 	CreateLease(ctx context.Context, l Lease) error
 	GetLease(ctx context.Context, id LeaseID) (Lease, error)
