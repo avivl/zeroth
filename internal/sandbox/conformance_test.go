@@ -157,6 +157,9 @@ func testEnvVisibility(t *testing.T, open func(t *testing.T) sandbox.Driver) {
 }
 
 func testHostIsolation(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	// Covers sandbox.Exec only. The Claude Code harness is a host
+	// subprocess (ADR-Z-0010) and is proven in
+	// claudecode.TestSpawnIsHostSubprocess, not here.
 	t.Helper()
 	d := open(t)
 	sb := mustSpawn(t, d, nil)

@@ -149,8 +149,13 @@ Once `zerothd` is running with the configuration above:
 2. **Zeroth notices**, via webhook if configured, otherwise on the next poll.
 3. **It reads context**: the issue title, description, and comment thread, plus
    the accumulated project memory for that team/project.
-4. **It works in a sandbox.** The run is isolated; nothing touches your working
-   copy or the default branch.
+4. **It copies the checkout into a sandbox overlay.** The agent's cwd is
+   that copy, not your working tree, and apply lands on a branch plus PR
+   rather than saving into your checkout. The Claude Code process itself
+   is a host subprocess of `zerothd`, not a process inside the container
+   ([ADR-Z-0010](../adr/Z-0010-harness-host-subprocess.md)). Host paths
+   outside the overlay are still reachable. Plan-then-apply is what
+   stops the agent from mutating the world.
 5. **It comments its plan on the issue** and then *stops*. Zeroth does not merge
    anything on its own initiative — the plan comment is a request for approval.
 6. **You approve (or reject)** in either of two places:
@@ -163,8 +168,9 @@ Once `zerothd` is running with the configuration above:
    * a link to the **pull request**, if one was opened,
    * an **audit summary** of what it actually did.
 8. **If you un-assign the issue mid-run**, that is the cancel signal. The run is
-   cancelled, the sandbox is torn down, and the issue records that the run was
-   cancelled rather than silently abandoned.
+   cancelled, the harness subprocess is stopped, the sandbox is torn down, and
+   the issue records that the run was cancelled rather than silently abandoned.
+   Killing the sandbox container alone does not stop `claude`.
 9. **If a completed run opened a bad pull request**, retract it from Zeroth
    (`zeroth retract <run-id> --reason "..."` or Retract on the run detail
    view). That closes the PR, comments the reason on this issue, un-assigns
@@ -174,6 +180,27 @@ Once `zerothd` is running with the configuration above:
 
 The first successful loop through steps 1–7 is the thing to aim for. If you get
 a plan comment on an issue you assigned, the integration is working.
+
+### Confirming harness vs sandbox (stage 1)
+
+This is the runbook step that keeps ADR-Z-0010 from drifting. During a live run:
+
+```sh
+# Host: claude is a child of zerothd, cwd is the overlay temp dir.
+pgrep -a claude
+ls -l /proc/$(pgrep -n claude)/cwd
+
+# Sandbox: the container has no claude process.
+docker ps --filter name=zeroth-sbx --format '{{.Names}}'
+docker exec <zeroth-sbx-name> ps aux | grep -i claude || echo "no claude in sandbox (expected)"
+```
+
+`ls -l /proc/.../cwd` should resolve under the sandbox temp root (for example
+`/tmp/zeroth-sbx-...`), not the git checkout you started `task up` from. If
+`claude` is missing from `pgrep` and only appears inside `docker exec`, the
+harness has moved into the sandbox and ADR-Z-0010 needs a successor. Automated
+coverage is `TestSpawnIsHostSubprocess` and
+`TestHarnessStartUsesSandboxOverlayNotCheckout`.
 
 ---
 

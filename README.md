@@ -15,6 +15,8 @@ In Asimov's robot stories, the Three Laws were eventually found to be incomplete
 
 Stage 1 is **local and single-player**. You run a daemon (`zerothd`) and a CLI (`zeroth`) on your own machine. The kernel is policy (scopes, grants, leases). The workflow is plan-then-apply: draft, cross-exam, approve, apply. Sandbox, harness, tracker, and store are ports with one implementation each (Docker, Claude Code, Linear, SQLite). The UI is Vite + React. The repo is public and MIT licensed from day one.
 
+The Docker sandbox holds a **copy** of your git checkout (the overlay). The Claude Code harness is a **host subprocess** of `zerothd` whose working directory is that overlay, not a `docker exec` inside the container ([ADR-Z-0010](docs/adr/Z-0010-harness-host-subprocess.md)). Relative writes land in the copy. The process can still see host paths outside it. Plan-then-apply is what stops the agent from mutating the world. In-sandbox harness execution is not a stage-1 property.
+
 ## What this is not yet
 
 - **Not a hosted product.** There is no deployment story in stage 1. No cloud, no shared cluster, no “deploy Zeroth for the team.”
