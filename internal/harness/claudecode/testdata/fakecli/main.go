@@ -52,6 +52,9 @@ func main() {
 		emitTool()
 		emitResult()
 	default:
+		// Start writes the user prompt on stdin after exec. Exit only
+		// after that write, or the parent hits a broken-pipe on prompt.
+		_ = readUserText()
 		emitDelta("hello-token")
 		emitTool()
 		emitResult()
