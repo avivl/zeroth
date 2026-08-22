@@ -101,6 +101,9 @@ flag. Flags win over environment variables.
 | `ZEROTH_LINEAR_PROJECT_ID` | `--linear-project-id` | no | Narrows the watch further to a single project. Leave unset to watch the whole team. |
 | `ZEROTH_LINEAR_POLL_INTERVAL` | `--linear-poll-interval` | no | How often to poll Linear for newly assigned issues, as a Go duration (`30s`, `2m`). Polling is the baseline delivery mechanism and always runs. |
 | `ZEROTH_LINEAR_WEBHOOK_SECRET` | `--linear-webhook-secret` | no | Opt-in. Set it to enable webhook delivery and to verify inbound webhook signatures. Unset means polling only — which is a perfectly good default. |
+| `ZEROTH_REVIEWER_MODEL` | `--reviewer-model` | no | Independent cross-exam model (default `gpt-4o`). Must differ from the Claude Code producer. |
+| `ZEROTH_REVIEWER_BASE_URL` | `--reviewer-base-url` | no | OpenAI-compatible Chat Completions root (default `https://api.openai.com/v1`). |
+| `ZEROTH_REVIEWER_API_KEY` | `--reviewer-api-key` | no | Reviewer API key. `OPENAI_API_KEY` is also accepted. Without a key, every plan gets a pass-through placeholder instead of a real second-model review. |
 
 A local `.env`-style setup for a first run:
 
@@ -111,6 +114,7 @@ export ZEROTH_LINEAR_AGENT_USER='…'      # the Zeroth app actor
 export ZEROTH_LINEAR_TEAM_ID='…'
 export ZEROTH_LINEAR_PROJECT_ID='…'      # optional
 export ZEROTH_LINEAR_POLL_INTERVAL=30s   # optional
+export ZEROTH_REVIEWER_API_KEY='…'       # or OPENAI_API_KEY; without this, cross-exam is a placeholder
 # export ZEROTH_LINEAR_WEBHOOK_SECRET='…'  # optional, opt-in
 ```
 
@@ -153,6 +157,8 @@ Once `zerothd` is running with the configuration above:
    copy or the default branch.
 5. **It comments its plan on the issue** and then *stops*. Zeroth does not merge
    anything on its own initiative — the plan comment is a request for approval.
+   The cross-exam verdict sits above the collapsed plan body. A fail or
+   `pass_with_notes` is a concern to read before you approve.
 6. **You approve (or reject)** in either of two places:
    * the CLI, or
    * the **Approvals inbox** in the web UI, which collects every waiting run in

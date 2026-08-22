@@ -49,6 +49,7 @@ These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z
 7. **Plan-then-apply is mandatory** for consequential actions. Autonomy tiers change how much a session may do, not whether a plan exists.
 8. **Trunk-based development.** Short-lived branches, squash merge onto `main`, `main` always green. A PR is required. CI is required. CODEOWNERS require a human on `internal/policy/`, `internal/plan/`, and `pkg/api/`, including agent-authored PRs. See `.github/workflows/ci.yml` and `.github/CODEOWNERS`.
 9. **The SHA is the version.** Identify builds by git commit SHA. Do not add semver tags or a product version constant inside the repo.
+10. **Stage-1 cross-examiner is a different vendor than the producer.** Claude Code produces the plan. OpenAI Chat Completions reviews it. See [ADR-Z-0011](../adr/Z-0011-independent-cross-exam-vendor.md).
 
 ### Open decisions
 
