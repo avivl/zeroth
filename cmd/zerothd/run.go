@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/avivl/zeroth/internal/harness/claudecode"
 	"github.com/avivl/zeroth/internal/logging"
 	"github.com/avivl/zeroth/internal/resilience"
 	"github.com/avivl/zeroth/internal/sandbox/docker"
@@ -96,12 +97,20 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		log.Info("linear tracker enabled")
 	}
 
+	h := claudecode.New()
+	if err := claudecode.APIKeyConfigured(); err != nil {
+		log.Warn("harness will fail until ANTHROPIC_API_KEY is set", zap.String("harness", h.Name()))
+	} else {
+		log.Info("harness enabled", zap.String("harness", h.Name()))
+	}
+
 	srv, err := server.New(server.Config{
 		Store:          st,
 		Signer:         sg,
 		Log:            log,
 		Tracker:        tr,
 		Sandbox:        docker.New(),
+		Harness:        h,
 		TrackerWebhook: webhook,
 	})
 	if err != nil {

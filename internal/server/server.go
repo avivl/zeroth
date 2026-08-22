@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/avivl/zeroth/internal/audit"
+	"github.com/avivl/zeroth/internal/harness"
 	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/sandbox"
 	"github.com/avivl/zeroth/internal/session"
@@ -31,20 +32,31 @@ const (
 	defaultTokens     = 120
 	defaultInterval   = 100 * time.Millisecond
 
+	// harnessTurnTimeout bounds one plan-generation attempt. The real
+	// Claude Code CLI can stay up after the first result so Steer can
+	// write another turn; we Stop after effects or this deadline.
+	harnessTurnTimeout = 15 * time.Minute
+
+	draftScope = "scope-workspace"
+
 	// TrackerWebhookPath is mounted only when a webhook secret is configured.
 	TrackerWebhookPath = "/webhooks/tracker"
 )
 
 // Config is the HTTP surface. Store is required. Signer defaults to an
-// in-memory backend when nil (tests). TokenInterval and TokenCount bound
-// the in-process stand-in worker that emits log events until the harness
-// loop is wired into the daemon. Tracker and Sandbox are ports; the
-// daemon injects Linear and Docker by name, this package does not.
+// in-memory backend when nil (tests). Harness, when set, is the one
+// plan-generation attempt per run: Stream effects become a draft, then
+// cross-exam. Missing effects fail the run instead of marking it
+// completed. TokenInterval and TokenCount bound the in-process stand-in
+// used only when Harness is nil (tests that need a live event log).
+// Tracker and Sandbox are ports; the daemon injects Linear, Docker, and
+// Claude Code by name, this package does not.
 type Config struct {
 	Store          store.Store
 	Signer         signer.Service
 	Log            *zap.Logger
 	Reviewer       plan.Reviewer
+	Harness        harness.Driver
 	TokenInterval  time.Duration
 	TokenCount     int
 	Tracker        tracker.Provider
@@ -58,6 +70,7 @@ type Server struct {
 	audit    *audit.Log
 	log      *zap.Logger
 	reviewer plan.Reviewer
+	harness  harness.Driver
 	elog     *storeLog
 	sup      *session.Supervisor
 	interval time.Duration
@@ -77,9 +90,10 @@ type Server struct {
 }
 
 type liveRun struct {
-	id    session.ID
-	steer chan string
-	stop  context.CancelFunc
+	id        session.ID
+	steer     chan string
+	stop      context.CancelFunc
+	harnessID harness.ID
 }
 
 // New opens a supervisor on the store-backed log, seeds the default
@@ -104,6 +118,11 @@ func New(cfg Config) (*Server, error) {
 	if sg == nil {
 		sg = signer.NewMemory()
 	}
+	reviewer := cfg.Reviewer
+	if reviewer == nil {
+		reviewer = passNotesReviewer{}
+		log.Warn("cross-exam using pass-through reviewer; human approval remains the gate")
+	}
 	trail, err := audit.NewLog(cfg.Store, sg)
 	if err != nil {
 		return nil, fmt.Errorf("server: %w", err)
@@ -118,7 +137,8 @@ func New(cfg Config) (*Server, error) {
 		store:     cfg.Store,
 		audit:     trail,
 		log:       log,
-		reviewer:  cfg.Reviewer,
+		reviewer:  reviewer,
+		harness:   cfg.Harness,
 		elog:      elog,
 		sup:       sup,
 		interval:  interval,

@@ -155,6 +155,13 @@ A recorded run is in [docs/tracker/LIVE_VERIFICATION.md](tracker/LIVE_VERIFICATI
 To poll a real workspace, also set `ZEROTH_LINEAR_API_KEY` (and the usual
 auth-style / agent-user vars) and run `TestLiveListAssigned`.
 
+**The run flips to completed with no plan.** That was a stand-in
+worker dumping the issue description as live-output tokens, then
+succeeding. The daemon now starts the Claude Code harness once per run.
+A missing `ANTHROPIC_API_KEY`, a missing `claude` binary, or a turn that
+emits no proposed effects fails the run and comments the reason on the
+issue. Look in `zerothd` logs for `run failed without a change plan`.
+
 **The sandbox never seems to stop after un-assigning.** Confirm
 `--docker-socket` points at a reachable Docker daemon; if `zerothd` can't
 reach Docker at all, cancellation can't actually kill anything, only mark

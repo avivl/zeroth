@@ -75,3 +75,18 @@ func TestFormatStartedAndCancel(t *testing.T) {
 		t.Fatalf("cancel must say the sandbox stopped: %s", cancel)
 	}
 }
+
+func TestFormatFailedComment(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatFailedComment("s_9", "harness exited without proposing a plan")
+	for _, want := range []string{
+		"### Zeroth failed",
+		"harness exited without proposing a plan",
+		"`s_9`",
+		"See local daemon logs",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+}
