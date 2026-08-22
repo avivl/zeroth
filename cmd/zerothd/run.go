@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -104,6 +105,11 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		log.Info("harness enabled", zap.String("harness", h.Name()))
 	}
 
+	workspaceRoot := detectWorkspaceRoot()
+	if workspaceRoot != "" {
+		log.Info("workspace root", zap.String("dir", workspaceRoot))
+	}
+
 	srv, err := server.New(server.Config{
 		Store:          st,
 		Signer:         sg,
@@ -112,6 +118,7 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		Sandbox:        docker.New(),
 		Harness:        h,
 		TrackerWebhook: webhook,
+		WorkspaceRoot:  workspaceRoot,
 	})
 	if err != nil {
 		return fmt.Errorf("zerothd server: %w", err)
@@ -156,6 +163,24 @@ func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
 		}
 		return err
 	}
+}
+
+func detectWorkspaceRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = cwd
+	out, err := cmd.Output()
+	if err != nil {
+		return cwd
+	}
+	root := strings.TrimSpace(string(out))
+	if root == "" {
+		return cwd
+	}
+	return root
 }
 
 func openSigner(cfg Config) (signer.Service, string, error) {

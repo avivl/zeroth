@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,7 +51,10 @@ const (
 // completed. TokenInterval and TokenCount bound the in-process stand-in
 // used only when Harness is nil (tests that need a live event log).
 // Tracker and Sandbox are ports; the daemon injects Linear, Docker, and
-// Claude Code by name, this package does not.
+// Claude Code by name, this package does not. WorkspaceRoot is the
+// operator's local checkout copied into the sandbox overlay at spawn
+// so draft-time preconditions can be hashed. Empty skips the copy
+// (tests that seed the overlay themselves).
 type Config struct {
 	Store          store.Store
 	Signer         signer.Service
@@ -62,22 +66,24 @@ type Config struct {
 	Tracker        tracker.Provider
 	Sandbox        sandbox.Driver
 	TrackerWebhook bool
+	WorkspaceRoot  string
 }
 
 // Server serves the OpenAPI contract against a session supervisor.
 type Server struct {
-	store    store.Store
-	audit    *audit.Log
-	log      *zap.Logger
-	reviewer plan.Reviewer
-	harness  harness.Driver
-	elog     *storeLog
-	sup      *session.Supervisor
-	interval time.Duration
-	tokens   int
-	tracker  tracker.Provider
-	sandbox  sandbox.Driver
-	webhook  http.Handler
+	store         store.Store
+	audit         *audit.Log
+	log           *zap.Logger
+	reviewer      plan.Reviewer
+	harness       harness.Driver
+	elog          *storeLog
+	sup           *session.Supervisor
+	interval      time.Duration
+	tokens        int
+	tracker       tracker.Provider
+	sandbox       sandbox.Driver
+	webhook       http.Handler
+	workspaceRoot string
 
 	root   context.Context
 	cancel context.CancelFunc
@@ -134,23 +140,24 @@ func New(cfg Config) (*Server, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		store:     cfg.Store,
-		audit:     trail,
-		log:       log,
-		reviewer:  reviewer,
-		harness:   cfg.Harness,
-		elog:      elog,
-		sup:       sup,
-		interval:  interval,
-		tokens:    tokens,
-		tracker:   cfg.Tracker,
-		sandbox:   cfg.Sandbox,
-		root:      ctx,
-		cancel:    cancel,
-		lives:     make(map[string]*liveRun),
-		byTracker: make(map[string]session.ID),
-		sandboxes: make(map[string]sandbox.ID),
-		keys:      make(map[string]string),
+		store:         cfg.Store,
+		audit:         trail,
+		log:           log,
+		reviewer:      reviewer,
+		harness:       cfg.Harness,
+		elog:          elog,
+		sup:           sup,
+		interval:      interval,
+		tokens:        tokens,
+		tracker:       cfg.Tracker,
+		sandbox:       cfg.Sandbox,
+		workspaceRoot: strings.TrimSpace(cfg.WorkspaceRoot),
+		root:          ctx,
+		cancel:        cancel,
+		lives:         make(map[string]*liveRun),
+		byTracker:     make(map[string]session.ID),
+		sandboxes:     make(map[string]sandbox.ID),
+		keys:          make(map[string]string),
 	}
 	if cfg.TrackerWebhook {
 		if h, ok := cfg.Tracker.(http.Handler); ok {

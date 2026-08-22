@@ -7,9 +7,13 @@
 // GET /plans, plan approve / request-changes / branch / apply,
 // approvals, checkpoints, leases, GET /agents/{id}/cross-exam-stats,
 // and memory notebook write plus proposal accept/reject. Sandbox spawn
-// compiles the notebook slice into AGENTS.md before the worker starts
-// (Z1-118). A plan memory_proposal row is applied as Notebook.Propose,
-// never as a direct write (Z1-022). Stop remains 501 until the session
+// copies the operator's local checkout into the overlay (when configured)
+// and compiles the notebook slice into AGENTS.md before the worker starts
+// (Z1-118). Draft observation hashes files from that overlay; a missing
+// modify/destroy target fails with a workspace-observe error rather than
+// an opaque plan-builder rejection. A plan memory_proposal row is applied
+// as Notebook.Propose, never as a direct write (Z1-022). Stop remains 501
+// until the session
 // machine grows a cancelled terminal. The daemon wires this package to
 // the store, signer, session supervisor, tracker.Provider,
 // sandbox.Driver, and harness.Driver; it does not import Linear, Docker,

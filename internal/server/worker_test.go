@@ -2,10 +2,13 @@ package server_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -219,6 +222,178 @@ func TestHarnessStartErrorFailsRun(t *testing.T) {
 	}
 }
 
+func TestHarnessModifyObservesPrecondition(t *testing.T) {
+	t.Parallel()
+	body := []byte("current README\n")
+	iss := tracker.Issue{Key: "42-49", Title: "document assign-to-Zeroth"}
+	tr := newStubTracker(iss)
+	h := &stubHarness{
+		events: []harness.Event{
+			{Kind: harness.EventEffects, Effects: []harness.Effect{
+				{Type: "modify", Path: "README.md", Diff: "-current\n+updated"},
+			}},
+			{Kind: harness.EventExited, Payload: "0"},
+		},
+	}
+	hs := harnessAssignServer(t, tr, newSeededSandbox(map[string]string{"README.md": string(body)}), h)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-49", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-49")
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusWaitingApproval)
+
+	got := getRun(t, hs.URL, string(run.Id))
+	if got.PlanId == nil {
+		t.Fatal("run missing plan_id")
+	}
+	p := getPlan(t, hs.URL, string(*got.PlanId))
+	if len(p.Effects) != 1 || p.Effects[0].PreconditionHash == nil {
+		t.Fatalf("effects %+v", p.Effects)
+	}
+	sum := sha256.Sum256(body)
+	want := hex.EncodeToString(sum[:])
+	if *p.Effects[0].PreconditionHash != want {
+		t.Fatalf("precondition %q, want %q", *p.Effects[0].PreconditionHash, want)
+	}
+}
+
+func TestHarnessModifyMissingFileFailsLoudly(t *testing.T) {
+	t.Parallel()
+	iss := tracker.Issue{Key: "42-49b", Title: "modify missing"}
+	tr := newStubTracker(iss)
+	h := &stubHarness{
+		events: []harness.Event{
+			{Kind: harness.EventEffects, Effects: []harness.Effect{
+				{Type: "modify", Path: "README.md", Diff: "+docs"},
+			}},
+			{Kind: harness.EventExited, Payload: "0"},
+		},
+	}
+	hs := harnessAssignServer(t, tr, newFakeSandbox(), h)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-49b", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-49b")
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusFailed)
+
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		for _, c := range tr.commentBodies() {
+			if strings.Contains(c, "could not observe workspace at draft time") &&
+				strings.Contains(c, "README.md") &&
+				!strings.Contains(c, "no precondition observed at draft time") {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if !found {
+		t.Fatalf("missing diagnosable observe failure: %v", tr.commentBodies())
+	}
+}
+
+func TestHarnessBrokenHostWorkspaceFailsLoudly(t *testing.T) {
+	t.Parallel()
+	iss := tracker.Issue{Key: "42-49c", Title: "broken overlay"}
+	tr := newStubTracker(iss)
+	h := &stubHarness{
+		events: []harness.Event{
+			{Kind: harness.EventEffects, Effects: []harness.Effect{
+				{Type: "modify", Path: "README.md", Diff: "+docs"},
+			}},
+		},
+	}
+	hs := harnessAssignServer(t, tr, &brokenOverlay{fakeSandbox: newFakeSandbox()}, h)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-49c", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-49c")
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusFailed)
+	if h.startCount() != 0 {
+		t.Fatalf("harness should not start without a workspace, starts = %d", h.startCount())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		for _, c := range tr.commentBodies() {
+			if strings.Contains(c, "host workspace") && strings.Contains(c, "overlay missing") &&
+				!strings.Contains(c, "no precondition observed at draft time") {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if !found {
+		t.Fatalf("missing diagnosable workspace error: %v", tr.commentBodies())
+	}
+}
+
+func TestHarnessSeedsWorkspaceRootIntoOverlay(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	body := []byte("host checkout README\n")
+	if err := os.WriteFile(filepath.Join(root, "README.md"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	iss := tracker.Issue{Key: "42-49d", Title: "docs from host checkout"}
+	tr := newStubTracker(iss)
+	h := &stubHarness{
+		events: []harness.Event{
+			{Kind: harness.EventEffects, Effects: []harness.Effect{
+				{Type: "modify", Path: "README.md", Diff: "-host\n+updated"},
+			}},
+			{Kind: harness.EventExited, Payload: "0"},
+		},
+	}
+	hs := harnessAssignServerCfg(t, tr, newFakeSandbox(), h, root)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-49d", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-49d")
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusWaitingApproval)
+	got := getRun(t, hs.URL, string(run.Id))
+	if got.PlanId == nil {
+		t.Fatal("run missing plan_id")
+	}
+	p := getPlan(t, hs.URL, string(*got.PlanId))
+	if len(p.Effects) != 1 || p.Effects[0].PreconditionHash == nil {
+		t.Fatalf("effects %+v", p.Effects)
+	}
+	sum := sha256.Sum256(body)
+	want := hex.EncodeToString(sum[:])
+	if *p.Effects[0].PreconditionHash != want {
+		t.Fatalf("precondition %q, want %q", *p.Effects[0].PreconditionHash, want)
+	}
+}
+
+type brokenOverlay struct {
+	*fakeSandbox
+}
+
+func (b *brokenOverlay) HostWorkspace(sandbox.ID) (string, error) {
+	return "", fmt.Errorf("overlay missing")
+}
+
+func getPlan(t *testing.T, base, id string) gen.Plan {
+	t.Helper()
+	res, err := http.Get(base + "/plans/" + id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("get plan %d", res.StatusCode)
+	}
+	var p gen.Plan
+	if err := json.NewDecoder(res.Body).Decode(&p); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestStandinDoesNotDumpPrompt(t *testing.T) {
 	t.Parallel()
 	prompt := "Linear 42-43: unique-body-must-not-repeat"
@@ -235,16 +410,22 @@ func TestStandinDoesNotDumpPrompt(t *testing.T) {
 
 func harnessAssignServer(t *testing.T, tr tracker.Provider, sbx sandbox.Driver, h harness.Driver) *httptest.Server {
 	t.Helper()
+	return harnessAssignServerCfg(t, tr, sbx, h, "")
+}
+
+func harnessAssignServerCfg(t *testing.T, tr tracker.Provider, sbx sandbox.Driver, h harness.Driver, workspaceRoot string) *httptest.Server {
+	t.Helper()
 	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	srv, err := server.New(server.Config{
-		Store:   st,
-		Tracker: tr,
-		Sandbox: sbx,
-		Harness: h,
+		Store:         st,
+		Tracker:       tr,
+		Sandbox:       sbx,
+		Harness:       h,
+		WorkspaceRoot: workspaceRoot,
 	})
 	if err != nil {
 		t.Fatal(err)
