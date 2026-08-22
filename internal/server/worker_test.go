@@ -230,7 +230,7 @@ func TestHarnessModifyObservesPrecondition(t *testing.T) {
 	h := &stubHarness{
 		events: []harness.Event{
 			{Kind: harness.EventEffects, Effects: []harness.Effect{
-				{Type: "modify", Path: "README.md", Diff: "-current\n+updated"},
+				{Type: "modify", Path: "README.md", Diff: "-current README\n+updated README"},
 			}},
 			{Kind: harness.EventExited, Payload: "0"},
 		},
@@ -344,7 +344,7 @@ func TestHarnessSeedsWorkspaceRootIntoOverlay(t *testing.T) {
 	h := &stubHarness{
 		events: []harness.Event{
 			{Kind: harness.EventEffects, Effects: []harness.Effect{
-				{Type: "modify", Path: "README.md", Diff: "-host\n+updated"},
+				{Type: "modify", Path: "README.md", Diff: "-host checkout README\n+updated README"},
 			}},
 			{Kind: harness.EventExited, Payload: "0"},
 		},

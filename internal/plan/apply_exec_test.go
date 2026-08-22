@@ -52,7 +52,10 @@ func (w *memWorld) Execute(_ context.Context, row Row) (string, error) {
 		}
 		return "", err
 	}
-	post := "obs:" + row.Payload
+	post := row.Postcondition
+	if post == "" {
+		post = "obs:" + row.Payload
+	}
 	w.hashes[row.Target] = post
 	w.applied[row.IdempotencyKey] = post
 	w.writes = append(w.writes, row.IdempotencyKey)
@@ -325,7 +328,7 @@ func TestApplyExpiredLeaseRecordsBoundary(t *testing.T) {
 	if len(writes) != 1 || writes[0] != p.Rows[0].IdempotencyKey {
 		t.Fatalf("writes = %v", writes)
 	}
-	if world.hash("a.txt") != "obs:A" || world.hash("b.txt") != "h2" || world.hash("c.txt") != "h3" {
+	if world.hash("a.txt") != p.Rows[0].Postcondition || world.hash("b.txt") != "h2" || world.hash("c.txt") != "h3" {
 		t.Fatalf("incoherent world a=%q b=%q c=%q", world.hash("a.txt"), world.hash("b.txt"), world.hash("c.txt"))
 	}
 	acq, rel := leases.counts()
@@ -352,10 +355,10 @@ func TestApplyEffectFailureRecordsCoherentState(t *testing.T) {
 	if got.Plan.AppliedThrough != 1 {
 		t.Fatalf("plan through=%d", got.Plan.AppliedThrough)
 	}
-	if len(got.Applied) != 1 || got.Applied[0].Postcondition != "obs:A" {
+	if len(got.Applied) != 1 || got.Applied[0].Postcondition != p.Rows[0].Postcondition {
 		t.Fatalf("applied = %+v", got.Applied)
 	}
-	if world.hash("a.txt") != "obs:A" || world.hash("b.txt") != "h2" || world.hash("c.txt") != "h3" {
+	if world.hash("a.txt") != p.Rows[0].Postcondition || world.hash("b.txt") != "h2" || world.hash("c.txt") != "h3" {
 		t.Fatalf("incoherent world a=%q b=%q c=%q", world.hash("a.txt"), world.hash("b.txt"), world.hash("c.txt"))
 	}
 	acq, rel := leases.counts()
@@ -456,6 +459,48 @@ func TestApplySecretScanBlocks(t *testing.T) {
 	if acq != 1 || rel != 1 || ck.count() != 1 {
 		t.Fatalf("leases %d/%d ck %d", acq, rel, ck.count())
 	}
+}
+
+func TestApplyRefusesOnPostconditionMismatch(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	inner, leases, ck := func() (*memWorld, *testLeaser, *testCK) {
+		applier, world, leases, ck, _ := applyHarness(now)
+		_ = applier
+		return world, leases, ck
+	}()
+	applier := &Applier{
+		Kernel:      policy.New(),
+		Clock:       &testClock{now: now},
+		World:       lyingWorld{memWorld: inner},
+		Leases:      leases,
+		Checkpoints: ck,
+		Audit:       testAuditor{},
+	}
+	p := threeApproved(t)
+
+	got, err := applier.Apply(t.Context(), applyActor, p, Approval{PlanHash: p.Hash})
+	if !errors.Is(err, ErrPostcondition) {
+		t.Fatalf("err = %v, want ErrPostcondition", err)
+	}
+	if got.AppliedThrough != 0 {
+		t.Fatalf("through=%d, want 0 so a mismatch cannot land a PR", got.AppliedThrough)
+	}
+	acq, rel := leases.counts()
+	if acq != 1 || rel != 1 || ck.count() != 1 {
+		t.Fatalf("leases %d/%d ck %d", acq, rel, ck.count())
+	}
+}
+
+type lyingWorld struct {
+	*memWorld
+}
+
+func (w lyingWorld) Execute(ctx context.Context, row Row) (string, error) {
+	if _, err := w.memWorld.Execute(ctx, row); err != nil {
+		return "", err
+	}
+	return "not-the-recorded-post", nil
 }
 
 func TestApplyMissingPorts(t *testing.T) {

@@ -25,7 +25,7 @@ func TestObserveWorkspaceHashesExistingFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := observeWorkspace(dir, []plan.Proposed{
+	got, _, err := observeWorkspace(dir, []plan.Proposed{
 		{Type: "modify", Path: "README.md", Diff: "+docs"},
 		{Type: "create", Path: "docs/new.md", Diff: "+new"},
 	})
@@ -45,7 +45,7 @@ func TestObserveWorkspaceHashesExistingFile(t *testing.T) {
 func TestObserveWorkspaceModifyMissingFileIsDiagnosable(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	_, err := observeWorkspace(dir, []plan.Proposed{
+	_, _, err := observeWorkspace(dir, []plan.Proposed{
 		{Type: "modify", Path: "README.md", Diff: "+docs"},
 	})
 	if err == nil {
@@ -65,7 +65,7 @@ func TestObserveWorkspaceModifyMissingFileIsDiagnosable(t *testing.T) {
 
 func TestObserveWorkspaceEmptyRootIsDiagnosable(t *testing.T) {
 	t.Parallel()
-	_, err := observeWorkspace("  ", []plan.Proposed{{Type: "modify", Path: "README.md", Diff: "x"}})
+	_, _, err := observeWorkspace("  ", []plan.Proposed{{Type: "modify", Path: "README.md", Diff: "x"}})
 	if err == nil {
 		t.Fatal("expected empty-root error")
 	}

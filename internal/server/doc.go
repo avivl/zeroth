@@ -12,9 +12,10 @@
 // (Z1-118). Draft observation hashes files from that overlay; a missing
 // modify/destroy target fails with a workspace-observe error rather than
 // an opaque plan-builder rejection. Apply rechecks those hashes against
-// the live overlay, writes each approved effect, then commits, pushes,
-// and opens a GitHub pull request so the tracker completion comment can
-// link it. A plan memory_proposal row is applied as Notebook.Propose,
+// the live overlay, patches modify rows onto existing files (never a
+// silent full-file overwrite), rechecks the recorded postcondition
+// hash, then commits, pushes, and opens a GitHub pull request so the
+// tracker completion comment can link it. A plan memory_proposal row is applied as Notebook.Propose,
 // never as a direct write (Z1-022). Stop remains 501 until the session
 // machine grows a cancelled terminal. The daemon wires this package to
 // the store, signer, session supervisor, tracker.Provider,

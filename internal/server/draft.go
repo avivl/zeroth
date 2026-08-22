@@ -102,7 +102,7 @@ func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace 
 	now := time.Now().UTC()
 	prompt := s.promptOf(ctx, id)
 	key := s.trackerKey(id)
-	observed, err := observeWorkspace(workspace, proposed)
+	observed, bodies, err := observeWorkspace(workspace, proposed)
 	if err != nil {
 		return err
 	}
@@ -112,6 +112,7 @@ func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace 
 		Summary:   planSummary(prompt, key),
 		Effects:   proposed,
 		Observed:  observed,
+		Bodies:    bodies,
 		Lease:     policy.LeaseID(leaseRaw),
 		ExpiresAt: now.Add(24 * time.Hour),
 		Scope:     draftScope,
@@ -202,18 +203,19 @@ func planSummary(prompt, key string) string {
 	return line
 }
 
-func observeWorkspace(root string, effects []plan.Proposed) (map[string]string, error) {
+func observeWorkspace(root string, effects []plan.Proposed) (map[string]string, map[string]string, error) {
 	if strings.TrimSpace(root) == "" {
-		return nil, fmt.Errorf("could not observe workspace at draft time: empty workspace root")
+		return nil, nil, fmt.Errorf("could not observe workspace at draft time: empty workspace root")
 	}
 	info, err := os.Stat(root)
 	if err != nil {
-		return nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", root, err)
+		return nil, nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", root, err)
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("could not observe workspace at draft time: %s is not a directory", root)
+		return nil, nil, fmt.Errorf("could not observe workspace at draft time: %s is not a directory", root)
 	}
 	out := make(map[string]string, len(effects))
+	bodies := make(map[string]string, len(effects))
 	for _, e := range effects {
 		key := observeKey(e.Path)
 		rel := filepath.FromSlash(key)
@@ -225,15 +227,16 @@ func observeWorkspace(root string, effects []plan.Proposed) (map[string]string, 
 		if err != nil {
 			if os.IsNotExist(err) {
 				if needsPrecondition(e.Type) {
-					return nil, fmt.Errorf("could not observe workspace at draft time: %s: file not found under %s", key, root)
+					return nil, nil, fmt.Errorf("could not observe workspace at draft time: %s: file not found under %s", key, root)
 				}
 				continue
 			}
-			return nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", key, err)
+			return nil, nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", key, err)
 		}
 		out[key] = contentHash(body)
+		bodies[key] = string(body)
 	}
-	return out, nil
+	return out, bodies, nil
 }
 
 func observeKey(p string) string {

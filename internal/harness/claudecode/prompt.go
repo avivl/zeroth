@@ -13,12 +13,14 @@ Hard rules:
 Output exactly one JSON object and nothing else. No markdown fences. No commentary.
 
 Schema:
-{"effects":[{"op":"modify","target":"relative/path","diff":"unified diff or proposed contents"}]}
+{"effects":[{"op":"modify","target":"relative/path","diff":"unified diff with context"}]}
 
 Rules for the object:
 - effects has one entry per file you would change.
 - op is create, modify, or destroy.
 - target is a workspace-relative path.
-- Each effect includes diff (unified diff or proposed contents) or payload (full file contents). One of the two is required.
+- For create, diff is the full new file contents.
+- For modify, diff MUST be a unified diff against the current file: ---/+++ headers, @@ hunk headers with line ranges, and context lines around every change. Include the unchanged surrounding lines. Never send only the new section. Never send a bare @@ with only + lines. Apply patches the existing file; a payload without context will not replace it.
+- For destroy, diff is a short note of what is removed.
 - Do not include extra keys.
 `

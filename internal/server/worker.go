@@ -250,14 +250,20 @@ func (s *Server) failRun(id session.ID, reason string) {
 	if err := s.sup.Fail(bg, id, reason); err != nil {
 		s.log.Warn("session fail", zap.String("run", id.String()), zap.Error(err))
 	}
-	if key := s.trackerKey(id); s.tracker != nil && key != "" {
-		if _, err := s.tracker.Comment(bg, key, tracker.FormatFailedComment(id.String(), reason)); err != nil {
-			s.log.Warn("tracker fail comment", zap.String("key", key), zap.Error(err))
-		}
-	}
+	s.commentRunFailed(bg, id, reason)
 	s.stopSandbox(id)
 	if err := s.syncSession(bg, id); err != nil {
 		s.log.Warn("fail sync", zap.String("run", id.String()), zap.Error(err))
+	}
+}
+
+func (s *Server) commentRunFailed(ctx context.Context, id session.ID, reason string) {
+	key := s.trackerKey(id)
+	if s.tracker == nil || key == "" {
+		return
+	}
+	if _, err := s.tracker.Comment(ctx, key, tracker.FormatFailedComment(id.String(), reason)); err != nil {
+		s.log.Warn("tracker fail comment", zap.String("key", key), zap.Error(err))
 	}
 }
 

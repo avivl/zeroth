@@ -190,7 +190,9 @@ func (s *Server) ApplyPlan(w http.ResponseWriter, r *http.Request, id gen.PlanID
 	}
 	result, auditID, err := s.applyApproved(r.Context(), sess, p)
 	if err != nil {
-		_ = s.sup.Fail(r.Context(), sid, err.Error())
+		reason := err.Error()
+		_ = s.sup.Fail(r.Context(), sid, reason)
+		s.commentRunFailed(r.Context(), sid, reason)
 		_ = s.syncSession(r.Context(), sid)
 		writePlanError(w, err)
 		return
@@ -258,6 +260,7 @@ func writePlanError(w http.ResponseWriter, err error) {
 	case errors.Is(err, plan.ErrNotExamined), errors.Is(err, plan.ErrNotApproved),
 		errors.Is(err, plan.ErrExpired), errors.Is(err, plan.ErrSecret),
 		errors.Is(err, plan.ErrApproval), errors.Is(err, plan.ErrStale),
+		errors.Is(err, plan.ErrPostcondition),
 		errors.Is(err, plan.ErrDenied), errors.Is(err, plan.ErrPartial),
 		errors.As(err, &st):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
