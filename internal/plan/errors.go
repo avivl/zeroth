@@ -26,6 +26,22 @@ var (
 	// ErrInvalid is returned for empty identifiers, missing expiry, or
 	// other draft inputs that are not an effect-level failure.
 	ErrInvalid = errors.New("invalid plan")
+	// ErrStale is returned when a precondition no longer matches. Nothing
+	// was written. The plan is marked stale so the agent re-drafts.
+	ErrStale = errors.New("plan: stale preconditions")
+	// ErrApproval is returned when the approval's plan hash is not this
+	// plan's hash. Approving rev2 does not authorize rev3.
+	ErrApproval = errors.New("plan: approval does not cover this plan hash")
+	// ErrPartial is returned when some prefix of the rows was applied and
+	// the rest was not. Applied rows stay applied. The boundary is on
+	// Result.AppliedThrough.
+	ErrPartial = errors.New("plan: partially applied")
+	// ErrDenied is returned when the policy kernel denies a row before
+	// any new write. Mid-apply denials wrap ErrPartial instead.
+	ErrDenied = errors.New("plan: kernel denied")
+	// ErrSecret is returned when secretscan finds a leak in a row that
+	// has not yet been applied. Nothing is written.
+	ErrSecret = errors.New("plan: secret scan blocked apply")
 )
 
 // UnexpressibleError names the proposed effect that could not become a

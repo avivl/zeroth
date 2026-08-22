@@ -16,11 +16,12 @@ import (
 const hashVersion = "zeroth-plan-v1"
 
 // HashOf returns the canonical hash of p's rows and draft constraints.
-// Identity, status, review metadata, and timestamps are excluded: approve
-// gates this bundle, it does not rewrite it. Independent rows (different
-// targets) are sorted by target so a permutation of those rows is the same
-// plan. Rows that share a target keep their relative order, because create
-// then modify is not modify then create.
+// Identity, status, review metadata, apply outcomes (AppliedThrough,
+// Checkpoint), and timestamps are excluded: approve gates this bundle, it
+// does not rewrite it. Independent rows (different targets) are sorted by
+// target so a permutation of those rows is the same plan. Rows that share
+// a target keep their relative order, because create then modify is not
+// modify then create.
 func HashOf(p Plan) policy.PlanHash {
 	rows := canonicalRows(p.Rows)
 	creds := canonicalCreds(p.Credentials)
