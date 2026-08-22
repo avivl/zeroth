@@ -33,10 +33,11 @@ Zeroth is a local control plane. The daemon holds the kernel. Everything that ta
 - **memory**: a notebook of atomic facts with dates, provenance, and
   version history. Humans write directly. Agents only propose; a fact
   enters the notebook on human accept, and that rule is not configurable
-  (Z1-022). At session hydration the live slice compiles into `AGENTS.md`
-  (and companion harness files) inside the sandbox. The compiled file is a
-  build artifact, excluded from checkpoints and commits, never the source
-  of truth (Z1-118).
+  (Z1-022). Sandbox spawn compiles the relevant slice into `AGENTS.md`
+  (and companion harness files) inside the overlay before the harness
+  starts. Apply of a `memory_proposal` row calls `Notebook.Propose`; it
+  does not write a fact. The compiled file is a build artifact, excluded
+  from checkpoints and commits, never the source of truth (Z1-118).
 
 ## Ports
 

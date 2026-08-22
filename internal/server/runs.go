@@ -120,10 +120,17 @@ func (s *Server) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	if err := s.sup.StartWith(r.Context(), id); err != nil {
+	sbx, err := s.spawnHydratedSandbox(r.Context(), sess)
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	if err := s.sup.StartWith(r.Context(), id); err != nil {
+		s.stopSandboxID(sbx)
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	s.rememberSandbox(id.String(), sbx)
 	if _, err := s.audit.Append(r.Context(), audit.Entry{
 		Action:       audit.ActionRunCreate,
 		Target:       sid.String(),

@@ -65,28 +65,16 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	}
 	prompt := issuePrompt(key, iss)
 
-	var sbx sandbox.ID
-	if s.sandbox != nil {
-		handle, err := s.sandbox.Spawn(ctx, sandbox.Spec{})
-		if err != nil {
-			return fmt.Errorf("server assign sandbox: %w", err)
-		}
-		sbx = handle.ID
-	}
-
 	id, err := session.NewID()
 	if err != nil {
-		s.stopSandboxID(sbx)
 		return fmt.Errorf("server assign: %w", err)
 	}
 	sid, err := store.ParseSessionID(id.String())
 	if err != nil {
-		s.stopSandboxID(sbx)
 		return fmt.Errorf("server assign: %w", err)
 	}
 	aid, err := store.ParseAgentID(DefaultAgentID)
 	if err != nil {
-		s.stopSandboxID(sbx)
 		return fmt.Errorf("server assign: %w", err)
 	}
 	now := time.Now().UTC()
@@ -98,6 +86,10 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 		TrackerRef: key,
 		CreatedAt:  now,
 		UpdatedAt:  now,
+	}
+	sbx, err := s.spawnHydratedSandbox(ctx, sess)
+	if err != nil {
+		return err
 	}
 	if err := s.store.CreateSession(ctx, sess); err != nil {
 		s.stopSandboxID(sbx)
@@ -126,10 +118,8 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	s.mu.Lock()
 	s.byTracker[key] = id
 	s.keys[id.String()] = key
-	if !sbx.IsZero() {
-		s.sandboxes[id.String()] = sbx
-	}
 	s.mu.Unlock()
+	s.rememberSandbox(id.String(), sbx)
 
 	s.startWorker(id)
 	if err := s.syncSession(ctx, id); err != nil {
