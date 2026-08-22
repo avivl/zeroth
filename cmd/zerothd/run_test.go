@@ -5,9 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/avivl/zeroth/internal/tracker/linear"
 )
 
 func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
@@ -83,4 +88,105 @@ func TestRootHelp(t *testing.T) {
 	if !strings.Contains(got, "--addr") || !strings.Contains(got, "--db-path") {
 		t.Fatalf("help missing flags: %s", got)
 	}
+}
+
+func TestRunDaemonLogsLinearPollError(t *testing.T) {
+	t.Parallel()
+	fake := linear.NewFake()
+	gql := httptest.NewServer(fake)
+	t.Cleanup(gql.Close)
+
+	var buf safeBuffer
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg := Config{
+		Addr:               "127.0.0.1:0",
+		DBPath:             filepath.Join(t.TempDir(), "zeroth.db"),
+		DockerSocket:       "/tmp/docker.sock",
+		LogLevel:           "info",
+		LogEncoding:        "json",
+		LinearAPIKey:       "not-the-key",
+		LinearEndpoint:     gql.URL,
+		LinearAgentUser:    fake.AgentUserID,
+		LinearPollInterval: 20 * time.Millisecond,
+	}
+	errc := make(chan error, 1)
+	go func() {
+		errc <- runDaemon(ctx, cfg, deps{
+			writer: &buf,
+			probe:  func(context.Context, string) error { return nil },
+			serve: func(ctx context.Context, _ string, h http.Handler) error {
+				if h == nil {
+					t.Error("nil handler")
+				}
+				<-ctx.Done()
+				return nil
+			},
+		})
+	}()
+
+	if !waitLog(t, &buf, errc, 15*time.Second, `"msg":"linear tracker enabled"`) {
+		cancel()
+		drainErr(errc)
+		t.Fatalf("daemon never enabled linear tracker: %s", buf.String())
+	}
+	if !waitLog(t, &buf, errc, 10*time.Second, `"msg":"tracker linear poll"`, `"level":"error"`, "unauthorized") {
+		cancel()
+		drainErr(errc)
+		t.Fatalf("missing info-visible poll error log: %s", buf.String())
+	}
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("runDaemon: %v", err)
+	}
+}
+
+func waitLog(t *testing.T, buf *safeBuffer, errc <-chan error, d time.Duration, needles ...string) bool {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		select {
+		case err := <-errc:
+			t.Fatalf("runDaemon exited early: %v\nlogs: %s", err, buf.String())
+		default:
+		}
+		out := buf.String()
+		ok := true
+		for _, n := range needles {
+			if !strings.Contains(out, n) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+func drainErr(errc <-chan error) {
+	select {
+	case <-errc:
+	case <-time.After(2 * time.Second):
+	}
+}
+
+type safeBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }

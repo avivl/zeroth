@@ -10,5 +10,5 @@
 // GraphQL auth is a Linear personal API key by default (Authorization is
 // the raw key). [Config.AuthStyle] [AuthOAuth] is for an OAuth application
 // actor token, sent as "Bearer <token>". The styles are not auto-detected:
-// a wrong header is a silent 401.
+// a wrong header is a 401, logged at error on every poll.
 package linear

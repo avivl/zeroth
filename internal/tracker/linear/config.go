@@ -3,6 +3,8 @@ package linear
 import (
 	"net/http"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -42,4 +44,7 @@ type Config struct {
 	// WebhookSecret, when set, enables [Provider.ServeHTTP] (Z1-082 opt-in).
 	WebhookSecret string
 	HTTPClient    *http.Client
+	// Log receives poll-loop diagnostics. Nil is a no-op logger: the loop
+	// still runs, it just does not emit. zerothd always injects one.
+	Log *zap.Logger
 }

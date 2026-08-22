@@ -19,11 +19,12 @@ type FakeGraphQL struct {
 	TeamID            string
 	lastAuthorization string
 
-	issues      map[string]*fakeIssue
-	comments    []FakeComment
-	attachments []FakeAttachment
-	states      []workflowState
-	next        int
+	issues       map[string]*fakeIssue
+	comments     []FakeComment
+	attachments  []FakeAttachment
+	states       []workflowState
+	next         int
+	failAssigned string
 }
 
 // FakeComment is one posted comment.
@@ -133,6 +134,13 @@ func (f *FakeGraphQL) SetDelegate(key, userID string) {
 	}
 }
 
+// FailAssigned makes AssignedIssues return a GraphQL error. Empty clears it.
+func (f *FakeGraphQL) FailAssigned(msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failAssigned = msg
+}
+
 // Comments returns a copy of posted comments.
 func (f *FakeGraphQL) Comments() []FakeComment {
 	f.mu.Lock()
@@ -220,6 +228,12 @@ func (f *FakeGraphQL) dispatch(req gqlRequest) (any, string) {
 	case "IssueStates":
 		return f.issueStates(strVar(req.Variables, "id"))
 	case "AssignedIssues":
+		f.mu.Lock()
+		fail := f.failAssigned
+		f.mu.Unlock()
+		if fail != "" {
+			return nil, fail
+		}
 		return f.assigned(req.Variables)
 	case "CommentCreate":
 		return f.commentCreate(req.Variables)

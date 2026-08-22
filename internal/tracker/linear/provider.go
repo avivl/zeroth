@@ -10,6 +10,7 @@ import (
 
 	"github.com/avivl/zeroth/internal/tracker"
 	"github.com/failsafe-go/failsafe-go"
+	"go.uber.org/zap"
 )
 
 // Provider is a Linear tracker.
@@ -23,6 +24,7 @@ type Provider struct {
 	webhookSecret string
 	client        *http.Client
 	execer        failsafe.Executor[gqlResponse]
+	log           *zap.Logger
 
 	mu          sync.Mutex
 	agentUserID string
@@ -53,6 +55,10 @@ func New(cfg Config) (*Provider, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
+	log := cfg.Log
+	if log == nil {
+		log = zap.NewNop()
+	}
 	return &Provider{
 		apiKey:        key,
 		authStyle:     style,
@@ -63,6 +69,7 @@ func New(cfg Config) (*Provider, error) {
 		webhookSecret: strings.TrimSpace(cfg.WebhookSecret),
 		client:        client,
 		execer:        newExecutor(),
+		log:           log,
 		agentUserID:   strings.TrimSpace(cfg.AgentUserID),
 		known:         make(map[string]tracker.Issue),
 	}, nil

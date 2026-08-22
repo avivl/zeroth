@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/avivl/zeroth/internal/tracker"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestNewEmptyAPIKey(t *testing.T) {
@@ -339,6 +342,153 @@ func TestWebhookWithoutSecretIsNotFound(t *testing.T) {
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d", rec.Code)
 	}
+}
+
+func TestTickLogsPollErrorAtErrorLevel(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	fake.FailAssigned("Unknown argument \"delegate\" on field \"IssueFilter\".")
+	p, logs := testProviderLog(t, fake, zap.InfoLevel)
+	p.tick(t.Context())
+	ents := logs.FilterMessage("tracker linear poll").FilterLevelExact(zap.ErrorLevel).All()
+	if len(ents) != 1 {
+		t.Fatalf("error logs = %d (%v), want 1", len(ents), logs.All())
+	}
+	if !strings.Contains(ents[0].Message, "tracker linear poll") {
+		t.Fatalf("msg = %q", ents[0].Message)
+	}
+	errField := errFrom(ents[0])
+	if !strings.Contains(errField, "delegate") {
+		t.Fatalf("error field = %q, want the GraphQL message", errField)
+	}
+	if logs.FilterLevelExact(zap.DebugLevel).Len() != 0 {
+		t.Fatalf("unexpected debug logs: %v", logs.All())
+	}
+}
+
+func TestTickLogsUnauthorizedAtErrorLevel(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	core, logs := observer.New(zap.InfoLevel)
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+	p, err := New(Config{
+		APIKey:       "not-the-key",
+		Endpoint:     srv.URL,
+		AgentUserID:  fake.AgentUserID,
+		PollInterval: time.Hour,
+		Log:          zap.New(core),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.tick(t.Context())
+	ents := logs.FilterMessage("tracker linear poll").FilterLevelExact(zap.ErrorLevel).All()
+	if len(ents) != 1 {
+		t.Fatalf("error logs = %d (%v), want 1", len(ents), logs.All())
+	}
+	if !strings.Contains(errFrom(ents[0]), "unauthorized") {
+		t.Fatalf("error field = %q, want unauthorized", errFrom(ents[0]))
+	}
+}
+
+func TestTickLogsViewerErrorAtErrorLevel(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	core, logs := observer.New(zap.InfoLevel)
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+	p, err := New(Config{
+		APIKey:       "not-the-key",
+		Endpoint:     srv.URL,
+		PollInterval: time.Hour,
+		Log:          zap.New(core),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.tick(t.Context())
+	ents := logs.FilterMessage("tracker linear viewer").FilterLevelExact(zap.ErrorLevel).All()
+	if len(ents) != 1 {
+		t.Fatalf("viewer error logs = %d (%v), want 1", len(ents), logs.All())
+	}
+}
+
+func TestTickLogsMatchedCountAtDebug(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	fake.SetAssignee("42-1", fake.AgentUserID)
+	p, logs := testProviderLog(t, fake, zap.DebugLevel)
+	p.tick(t.Context())
+	ents := logs.FilterMessage("tracker linear poll").FilterLevelExact(zap.DebugLevel).All()
+	if len(ents) != 1 {
+		t.Fatalf("debug logs = %d (%v), want 1", len(ents), logs.All())
+	}
+	got := ents[0].ContextMap()["issues"]
+	if got != int64(1) && got != 1 {
+		t.Fatalf("issues = %v (%T), want 1", got, got)
+	}
+	if logs.FilterLevelExact(zap.ErrorLevel).Len() != 0 {
+		t.Fatalf("unexpected error logs: %v", logs.All())
+	}
+}
+
+func TestTickSuccessIsSilentAtInfo(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	p, logs := testProviderLog(t, fake, zap.InfoLevel)
+	p.tick(t.Context())
+	if logs.Len() != 0 {
+		t.Fatalf("info+ logs on a healthy empty poll: %v", logs.All())
+	}
+}
+
+func TestAssignedFilterOrAssigneeAndDelegate(t *testing.T) {
+	t.Parallel()
+	p, _ := testProvider(t, NewFake())
+	filter := p.assignedFilter()
+	or, ok := filter["or"].([]map[string]any)
+	if !ok || len(or) != 2 {
+		t.Fatalf("or = %#v, want two user filters", filter["or"])
+	}
+	if nestedIDEq(or[0]["assignee"]) != p.agentID() {
+		t.Fatalf("assignee filter = %#v", or[0])
+	}
+	if nestedIDEq(or[1]["delegate"]) != p.agentID() {
+		t.Fatalf("delegate filter = %#v", or[1])
+	}
+}
+
+func errFrom(ent observer.LoggedEntry) string {
+	for _, f := range ent.Context {
+		if f.Key == "error" {
+			if f.Type == zapcore.ErrorType {
+				if err, ok := f.Interface.(error); ok {
+					return err.Error()
+				}
+			}
+			return f.String
+		}
+	}
+	return ""
+}
+
+func testProviderLog(t *testing.T, fake *FakeGraphQL, level zapcore.Level) (*Provider, *observer.ObservedLogs) {
+	t.Helper()
+	core, logs := observer.New(level)
+	srv := httptest.NewServer(fake)
+	t.Cleanup(srv.Close)
+	p, err := New(Config{
+		APIKey:       fake.APIKey,
+		Endpoint:     srv.URL,
+		AgentUserID:  fake.AgentUserID,
+		PollInterval: time.Hour,
+		Log:          zap.New(core),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, logs
 }
 
 func testProvider(t *testing.T, fake *FakeGraphQL) (*Provider, *httptest.Server) {
