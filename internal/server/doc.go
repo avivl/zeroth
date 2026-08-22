@@ -23,7 +23,11 @@
 // or Claude Code by name. Assign-to-Zeroth is the tracker watch loop:
 // Assigned starts a headless run, Unassigned fails it and stops the
 // sandbox. The worker drives one harness plan-generation attempt per
-// run. A run that produces no draft fails instead of completing.
+// draft. Request-changes posts the operator comment on the tracker
+// issue, appends it to the run prompt, and starts another attempt on
+// the same run. A new assign also reads the issue comment thread so
+// the correction survives un-assign. A run that produces no draft
+// fails instead of completing.
 // Draft attaches the plan id to the session row before proposing;
 // status sync must not clear that id.
 package server

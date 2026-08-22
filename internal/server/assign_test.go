@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +56,23 @@ func (s *stubTracker) Comment(_ context.Context, _, body string) (tracker.Commen
 	defer s.mu.Unlock()
 	s.comments = append(s.comments, body)
 	return tracker.CommentRef{ID: "c1"}, nil
+}
+func (s *stubTracker) ListComments(_ context.Context, key string) ([]tracker.IssueComment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.issue.Key != key && s.issue.ID != key {
+		return nil, tracker.ErrNotFound
+	}
+	out := make([]tracker.IssueComment, 0, len(s.comments))
+	for i, body := range s.comments {
+		out = append(out, tracker.IssueComment{
+			ID:        fmt.Sprintf("c%d", i+1),
+			Body:      body,
+			Author:    "operator",
+			CreatedAt: time.Unix(int64(i+1), 0).UTC(),
+		})
+	}
+	return out, nil
 }
 func (s *stubTracker) SetState(_ context.Context, _ string, state tracker.State) error {
 	s.mu.Lock()

@@ -25,6 +25,7 @@ const (
 	ActionPlanApply      = "plan.apply"
 	ActionPlanCrossExam  = "plan.cross_exam"
 	ActionPlanBranch     = "plan.branch"
+	ActionPlanReject     = "plan.reject"
 	ActionMemoryWrite    = "memory.write"
 	ActionMemoryPropose  = "memory.propose"
 	ActionMemoryAccept   = "memory.propose.accept"

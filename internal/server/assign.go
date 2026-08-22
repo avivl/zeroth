@@ -65,6 +65,14 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 		}
 	}
 	prompt := issuePrompt(key, iss)
+	if s.tracker != nil {
+		comments, err := s.tracker.ListComments(ctx, key)
+		if err != nil {
+			s.log.Warn("tracker list comments on assign", zap.String("key", key), zap.Error(err))
+		} else {
+			prompt = appendIssueComments(prompt, comments)
+		}
+	}
 
 	id, err := session.NewID()
 	if err != nil {
@@ -311,5 +319,48 @@ func issuePrompt(key string, iss tracker.Issue) string {
 		b.WriteString("\n\n")
 		b.WriteString(d)
 	}
+	return b.String()
+}
+
+const operatorRejectionHeading = "## Operator rejection"
+
+func appendOperatorRejection(prompt, comment string) string {
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\n")
+	b.WriteString(operatorRejectionHeading)
+	b.WriteString("\n\n")
+	b.WriteString(comment)
+	b.WriteByte('\n')
+	return b.String()
+}
+
+func appendIssueComments(prompt string, comments []tracker.IssueComment) string {
+	var body strings.Builder
+	n := 0
+	for _, c := range comments {
+		text := strings.TrimSpace(c.Body)
+		if text == "" {
+			continue
+		}
+		n++
+		body.WriteByte('\n')
+		author := strings.TrimSpace(c.Author)
+		if author == "" {
+			author = "comment"
+		}
+		fmt.Fprintf(&body, "### %s\n\n%s\n", author, text)
+	}
+	if n == 0 {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\n## Issue comments\n")
+	b.WriteString(body.String())
 	return b.String()
 }

@@ -335,13 +335,13 @@ func (s *Supervisor) RequestApproval(ctx context.Context, id ID, ref string) err
 }
 
 // RequestChanges moves awaiting-approval -> running.
-func (s *Supervisor) RequestChanges(ctx context.Context, id ID) error {
+func (s *Supervisor) RequestChanges(ctx context.Context, id ID, comment string) error {
 	return s.do(ctx, id, func() error {
 		m, err := s.machine(id)
 		if err != nil {
 			return err
 		}
-		return m.RequestChanges(ctx)
+		return m.RequestChanges(ctx, comment)
 	})
 }
 

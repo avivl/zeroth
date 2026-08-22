@@ -455,6 +455,9 @@ func TestRequestChangesAndBranch(t *testing.T) {
 	if changed.Status != gen.PlanStatusChangesRequested {
 		t.Fatalf("status %s", changed.Status)
 	}
+	if changed.ReviewComment == nil || *changed.ReviewComment != "narrow the diff" {
+		t.Fatalf("review_comment %+v", changed.ReviewComment)
+	}
 
 	note := "safer alternative"
 	br := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/branch", gen.BranchPlanRequest{Note: &note})

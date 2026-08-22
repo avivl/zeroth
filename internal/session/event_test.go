@@ -257,7 +257,7 @@ func TestReplayMatchesWalk(t *testing.T) {
 		func() error { return m.ProposePlan(ctx, "plan-1") },
 		func() error { return m.RecordCrossExam(ctx, "pass") },
 		func() error { return m.RequestApproval(ctx, "plan-1") },
-		func() error { return m.RequestChanges(ctx) },
+		func() error { return m.RequestChanges(ctx, "narrow the diff") },
 		func() error { return m.Background(ctx, nil) },
 		func() error { return m.RequestApproval(ctx, "plan-2") },
 		func() error { return m.BeginApply(ctx) },
