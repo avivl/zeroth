@@ -7,7 +7,7 @@ import (
 
 func TestProposeEffectsPromptForbidsWrites(t *testing.T) {
 	t.Parallel()
-	for _, needle := range []string{"Do not write", "Do not call tools", `"effects"`} {
+	for _, needle := range []string{"Do not write", "Do not call tools", `"effects"`, "unified diff", "context lines"} {
 		if !strings.Contains(ProposeEffectsPrompt, needle) {
 			t.Fatalf("prompt missing %q", needle)
 		}

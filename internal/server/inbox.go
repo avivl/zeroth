@@ -183,10 +183,10 @@ func (s *Server) RestoreCheckpoint(w http.ResponseWriter, r *http.Request, id ge
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	s.startWorker(nid)
 	if err := s.syncSession(r.Context(), nid); err != nil {
 		s.log.Debug("restore sync", zap.Error(err))
 	}
+	s.startWorker(nid)
 	run, ok, err := s.loadRun(r.Context(), nid.String())
 	if err != nil || !ok {
 		writeError(w, http.StatusInternalServerError, "internal", "run forked but not readable")

@@ -29,6 +29,9 @@ var (
 	// ErrStale is returned when a precondition no longer matches. Nothing
 	// was written. The plan is marked stale so the agent re-drafts.
 	ErrStale = errors.New("plan: stale preconditions")
+	// ErrPostcondition is returned when the bytes that landed do not
+	// hash to the row's recorded postcondition. Nothing is published.
+	ErrPostcondition = errors.New("plan: postcondition mismatch")
 	// ErrApproval is returned when the approval's plan hash is not this
 	// plan's hash. Approving rev2 does not authorize rev3.
 	ErrApproval = errors.New("plan: approval does not cover this plan hash")

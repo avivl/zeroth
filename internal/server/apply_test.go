@@ -138,7 +138,7 @@ func TestApplyUnifiedDiffFromG4(t *testing.T) {
 	t.Parallel()
 	original := []byte("# demo\n")
 	diff := "--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n # demo\n+Version: 2\n"
-	got, err := applyUnifiedDiff(original, diff)
+	got, err := plan.ApplyPatch(original, diff)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,12 +176,111 @@ func TestApplyRowUsesUnifiedDiff(t *testing.T) {
 
 func TestApplyUnifiedDiffConflict(t *testing.T) {
 	t.Parallel()
-	_, err := applyUnifiedDiff([]byte("other\n"), "@@ -1 +1,2 @@\n # demo\n+Version: 2\n")
+	_, err := plan.ApplyPatch([]byte("other\n"), "@@ -1 +1,2 @@\n # demo\n+Version: 2\n")
 	if err == nil {
 		t.Fatal("expected conflict")
 	}
 	if !strings.Contains(err.Error(), "conflict") {
 		t.Fatalf("err %v", err)
+	}
+}
+
+func TestApplyModifyPreservesUntargetedREADMEContent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	original := "# Zeroth\n\n## Why Zeroth?\nAgents work at machine speed. Humans keep control.\n\n## Layout\ncmd/ zerothd and zeroth\n\n## Develop\nYou need Go 1.27.\n\n## License\nMIT\n"
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload := "--- a/README.md\n+++ b/README.md\n@@\n+## Connecting Linear (assign-to-Zeroth)\n+\n+Assign an issue to the agent identity.\n"
+	post, err := applyRow(root, plan.Row{
+		Op:      plan.OpModify,
+		Target:  "README.md",
+		Payload: payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, keep := range []string{"# Zeroth", "## Why Zeroth?", "Humans keep control.", "## Layout", "## Develop", "## License", "MIT"} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("lost %q; file became:\n%s", keep, got)
+		}
+	}
+	if !strings.Contains(got, "## Connecting Linear (assign-to-Zeroth)") {
+		t.Fatalf("missing added section:\n%s", got)
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "--- a/README.md") || strings.Contains(got, "+## Connecting") {
+		t.Fatalf("wrote the diff as the file:\n%s", got)
+	}
+	if post != contentHash(body) {
+		t.Fatalf("post %q", post)
+	}
+	if contentHash(body) == contentHash([]byte(payload)) {
+		t.Fatal("post hash is the payload, which means the file was replaced with the diff")
+	}
+}
+
+func TestApplyModifyRefusesShrinkingOverwrite(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	var old strings.Builder
+	old.WriteString("# Zeroth\n\n")
+	for i := 0; i < 80; i++ {
+		old.WriteString("This is a real overview paragraph that must survive apply.\n")
+	}
+	old.WriteString("## License\nMIT\n")
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte(old.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := applyRow(root, plan.Row{
+		Op:      plan.OpModify,
+		Target:  "README.md",
+		Payload: "## Connecting Linear\n\nAssign an issue.\n",
+	})
+	if err == nil {
+		t.Fatal("expected shrinking overwrite to be refused")
+	}
+	got, errRead := os.ReadFile(path)
+	if errRead != nil {
+		t.Fatal(errRead)
+	}
+	if string(got) != old.String() {
+		t.Fatalf("refused apply still mutated the file: %q", got)
+	}
+}
+
+func TestApplyRowPostconditionMismatchDoesNotWrite(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := applyRow(root, plan.Row{
+		Op:            plan.OpModify,
+		Target:        "README.md",
+		Payload:       "new\n",
+		Postcondition: "deadbeef",
+	})
+	if err == nil {
+		t.Fatal("expected postcondition mismatch")
+	}
+	if !strings.Contains(err.Error(), "postcondition") {
+		t.Fatalf("err %v", err)
+	}
+	got, errRead := os.ReadFile(path)
+	if errRead != nil {
+		t.Fatal(errRead)
+	}
+	if string(got) != "old\n" {
+		t.Fatalf("mismatch still wrote %q", got)
 	}
 }
 

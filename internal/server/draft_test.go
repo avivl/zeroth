@@ -9,12 +9,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/sandbox"
 	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/store"
+	"github.com/avivl/zeroth/internal/store/sqlite"
 	"go.uber.org/zap"
 )
 
@@ -25,7 +28,7 @@ func TestObserveWorkspaceHashesExistingFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), body, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := observeWorkspace(dir, []plan.Proposed{
+	got, _, err := observeWorkspace(dir, []plan.Proposed{
 		{Type: "modify", Path: "README.md", Diff: "+docs"},
 		{Type: "create", Path: "docs/new.md", Diff: "+new"},
 	})
@@ -45,7 +48,7 @@ func TestObserveWorkspaceHashesExistingFile(t *testing.T) {
 func TestObserveWorkspaceModifyMissingFileIsDiagnosable(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	_, err := observeWorkspace(dir, []plan.Proposed{
+	_, _, err := observeWorkspace(dir, []plan.Proposed{
 		{Type: "modify", Path: "README.md", Diff: "+docs"},
 	})
 	if err == nil {
@@ -65,7 +68,7 @@ func TestObserveWorkspaceModifyMissingFileIsDiagnosable(t *testing.T) {
 
 func TestObserveWorkspaceEmptyRootIsDiagnosable(t *testing.T) {
 	t.Parallel()
-	_, err := observeWorkspace("  ", []plan.Proposed{{Type: "modify", Path: "README.md", Diff: "x"}})
+	_, _, err := observeWorkspace("  ", []plan.Proposed{{Type: "modify", Path: "README.md", Diff: "x"}})
 	if err == nil {
 		t.Fatal("expected empty-root error")
 	}
@@ -222,6 +225,87 @@ func TestSeedOverlayCopiesHostCheckout(t *testing.T) {
 	}
 	if string(got) != "hi" {
 		t.Fatalf("README.md %q", got)
+	}
+}
+
+func TestAttachPlanSurvivesConcurrentSync(t *testing.T) {
+	t.Parallel()
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	s, err := New(Config{Store: st, Log: zap.NewNop()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.Close)
+
+	id, err := session.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := store.ParseSessionID(id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	aid, err := store.ParseAgentID(DefaultAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := st.CreateSession(t.Context(), store.Session{
+		ID:        sid,
+		AgentID:   aid,
+		Status:    "running",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.sup.StartWith(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := store.ParsePlanID("plan_race")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					_ = s.syncSession(ctx, id)
+				}
+			}
+		}()
+	}
+	if err := s.attachPlan(ctx, id, pid, now); err != nil {
+		close(stop)
+		wg.Wait()
+		t.Fatal(err)
+	}
+	close(stop)
+	wg.Wait()
+	for i := 0; i < 20; i++ {
+		if err := s.syncSession(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.GetSession(ctx, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PlanID != pid {
+		t.Fatalf("plan_id=%q, want %q (syncSession dropped the attach)", got.PlanID.String(), pid.String())
 	}
 }
 

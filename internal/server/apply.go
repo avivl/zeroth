@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -225,11 +223,19 @@ func applyRow(root string, row plan.Row) (string, error) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return "", fmt.Errorf("server apply destroy %s: %w", row.Target, err)
 		}
-		return emptyDigest(), nil
+		post := plan.EmptyDigest()
+		if err := matchPostcondition(row, post); err != nil {
+			return "", err
+		}
+		return post, nil
 	case plan.OpCreate, plan.OpModify:
 		body, err := materializePayload(path, row)
 		if err != nil {
 			return "", fmt.Errorf("server apply %s %s: %w", row.Op, row.Target, err)
+		}
+		post := plan.Digest(body)
+		if err := matchPostcondition(row, post); err != nil {
+			return "", err
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return "", fmt.Errorf("server apply %s %s: %w", row.Op, row.Target, err)
@@ -237,16 +243,13 @@ func applyRow(root string, row plan.Row) (string, error) {
 		if err := os.WriteFile(path, body, 0o644); err != nil {
 			return "", fmt.Errorf("server apply %s %s: %w", row.Op, row.Target, err)
 		}
-		return contentHash(body), nil
+		return post, nil
 	default:
 		return "", fmt.Errorf("server apply: unsupported op %s on %s", row.Op, row.Target)
 	}
 }
 
 func materializePayload(path string, row plan.Row) ([]byte, error) {
-	if !isUnifiedDiff(row.Payload) {
-		return []byte(row.Payload), nil
-	}
 	current, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, err
@@ -254,16 +257,22 @@ func materializePayload(path string, row plan.Row) ([]byte, error) {
 	if os.IsNotExist(err) {
 		current = nil
 	}
-	return applyUnifiedDiff(current, row.Payload)
+	return plan.Materialize(row.Op, current, row.Payload)
+}
+
+func matchPostcondition(row plan.Row, post string) error {
+	if row.Postcondition == "" || post == row.Postcondition {
+		return nil
+	}
+	return fmt.Errorf("%w on %s: got %s", plan.ErrPostcondition, row.Target, post)
 }
 
 func contentHash(body []byte) string {
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
+	return plan.Digest(body)
 }
 
 func emptyDigest() string {
-	return contentHash(nil)
+	return plan.EmptyDigest()
 }
 
 func safeJoin(root, target string) (string, error) {

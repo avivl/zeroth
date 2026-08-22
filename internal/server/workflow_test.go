@@ -17,6 +17,7 @@ import (
 
 	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/server"
+	"github.com/avivl/zeroth/internal/store"
 	"github.com/avivl/zeroth/internal/store/sqlite"
 	"github.com/avivl/zeroth/internal/tracker"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
@@ -109,14 +110,23 @@ func applySetup(t *testing.T) *applyEnv {
 	return e
 }
 
-func planFileHash(t *testing.T, root string) string {
-	t.Helper()
-	body, err := os.ReadFile(filepath.Join(root, "docs", "design", "plan.md"))
-	if err != nil {
-		t.Fatal(err)
+func (e *applyEnv) seedPatchedFilePlan(run gen.Run, effects []plan.Proposed) store.PlanID {
+	e.t.Helper()
+	observed := make(map[string]string)
+	bodies := make(map[string]string)
+	for _, fx := range effects {
+		if fx.Type != "modify" && fx.Type != "destroy" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(e.root, filepath.FromSlash(fx.Path)))
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		sum := sha256.Sum256(body)
+		observed[fx.Path] = hex.EncodeToString(sum[:])
+		bodies[fx.Path] = string(body)
 	}
-	sum := sha256.Sum256(body)
-	return hex.EncodeToString(sum[:])
+	return e.seedPlanWithBodies(run, effects, observed, bodies)
 }
 
 func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
@@ -124,9 +134,9 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 	e := applySetup(t)
 	e.patchReviewer(false)
 	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
-	pid := e.seedPlan(run, []plan.Proposed{
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
 		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
-	}, map[string]string{"docs/design/plan.md": planFileHash(t, e.root)})
+	})
 	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
 		t.Fatal(err)
 	}
@@ -180,8 +190,8 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 		t.Fatal("missing apply audit id")
 	}
 	e.pub.mu.Lock()
-	if e.pub.files["docs/design/plan.md"] != "-typo\n+fixed" {
-		t.Fatalf("applied payload not written: %+v", e.pub.files)
+	if e.pub.files["docs/design/plan.md"] != "fixed\n" {
+		t.Fatalf("applied patch not written: %+v", e.pub.files)
 	}
 	if e.pub.req.Branch == "" || strings.HasPrefix(e.pub.ref.PullRequest, "applied:") {
 		t.Fatalf("publisher stub still returned in-memory apply string: %+v", e.pub.ref)
@@ -249,9 +259,9 @@ func TestApplyPreconditionMismatchFailsClosed(t *testing.T) {
 	e := applySetup(t)
 	e.patchReviewer(false)
 	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
-	pid := e.seedPlan(run, []plan.Proposed{
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
 		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
-	}, map[string]string{"docs/design/plan.md": planFileHash(t, e.root)})
+	})
 	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
 		t.Fatal(err)
 	}
@@ -293,9 +303,9 @@ func TestApplyCompletionCommentIncludesPullRequest(t *testing.T) {
 	e.patchReviewer(false)
 	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
 	run := waitRunByTracker(t, e.hs.URL, "42-50")
-	pid := e.seedPlan(run, []plan.Proposed{
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
 		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
-	}, map[string]string{"docs/design/plan.md": planFileHash(t, e.root)})
+	})
 	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
 		t.Fatal(err)
 	}
@@ -326,6 +336,97 @@ func TestApplyCompletionCommentIncludesPullRequest(t *testing.T) {
 	}
 	if urls := e.tr.artifactURLs(); len(urls) == 0 || urls[0] != "https://github.com/avivl/zeroth/pull/99" {
 		t.Fatalf("artifacts %v", urls)
+	}
+}
+
+func TestApplyModifyPreservesExistingREADMEOverHTTP(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	original := "# Zeroth\n\n## Why Zeroth?\nAgents work at machine speed. Humans keep control.\n\n## Layout\ncmd/ zerothd and zeroth\n\n## Develop\nYou need Go 1.27.\n\n## License\nMIT\n"
+	if err := os.WriteFile(filepath.Join(e.root, "README.md"), []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := createRun(t, e.hs.URL, "Document Linear assignment in README.md")
+	payload := "--- a/README.md\n+++ b/README.md\n@@\n+## Connecting Linear (assign-to-Zeroth)\n+\n+Assign an issue to the agent identity.\n"
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
+		{Type: "modify", Path: "README.md", Diff: payload},
+	})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("approve %d", res.StatusCode)
+	}
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	defer applied.Body.Close()
+	if applied.StatusCode != http.StatusOK {
+		slurp, _ := io.ReadAll(applied.Body)
+		t.Fatalf("apply %d %s", applied.StatusCode, slurp)
+	}
+	e.pub.mu.Lock()
+	got := e.pub.files["README.md"]
+	e.pub.mu.Unlock()
+	for _, keep := range []string{"# Zeroth", "## Why Zeroth?", "Humans keep control.", "## Layout", "## Develop", "## License", "MIT"} {
+		if !strings.Contains(got, keep) {
+			t.Fatalf("lost %q; applied file:\n%s", keep, got)
+		}
+	}
+	if !strings.Contains(got, "## Connecting Linear (assign-to-Zeroth)") {
+		t.Fatalf("missing added section:\n%s", got)
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "--- a/README.md") {
+		t.Fatalf("wrote the diff as the file:\n%s", got)
+	}
+}
+
+func TestApplyPostconditionMismatchFailsLoudly(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	run := waitRunByTracker(t, e.hs.URL, "42-50")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	}, map[string]string{"docs/design/plan.md": func() string {
+		sum := sha256.Sum256([]byte("typo\n"))
+		return hex.EncodeToString(sum[:])
+	}()})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("approve %d", res.StatusCode)
+	}
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	defer applied.Body.Close()
+	if applied.StatusCode != http.StatusConflict && applied.StatusCode != http.StatusInternalServerError {
+		slurp, _ := io.ReadAll(applied.Body)
+		t.Fatalf("apply %d %s, want failure", applied.StatusCode, slurp)
+	}
+	slurp, _ := io.ReadAll(applied.Body)
+	if !strings.Contains(string(slurp), "postcondition") {
+		t.Fatalf("want postcondition mismatch, got %s", slurp)
+	}
+	e.pub.mu.Lock()
+	if e.pub.req.Workspace != "" {
+		t.Fatal("publisher ran after a postcondition mismatch")
+	}
+	e.pub.mu.Unlock()
+	found := false
+	for _, c := range e.tr.commentBodies() {
+		if strings.Contains(c, "### Zeroth failed") && strings.Contains(c, "postcondition") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing Zeroth failed comment: %v", e.tr.commentBodies())
 	}
 }
 

@@ -92,6 +92,10 @@ func (e *examEnv) patchReviewer(block bool) {
 }
 
 func (e *examEnv) seedPlan(run gen.Run, effects []plan.Proposed, observed map[string]string) store.PlanID {
+	return e.seedPlanWithBodies(run, effects, observed, nil)
+}
+
+func (e *examEnv) seedPlanWithBodies(run gen.Run, effects []plan.Proposed, observed, bodies map[string]string) store.PlanID {
 	e.t.Helper()
 	pid, err := plan.NewID()
 	if err != nil {
@@ -107,6 +111,7 @@ func (e *examEnv) seedPlan(run gen.Run, effects []plan.Proposed, observed map[st
 		Summary:   "draft for cross-exam",
 		Effects:   effects,
 		Observed:  observed,
+		Bodies:    bodies,
 		Lease:     "lease-1",
 		ExpiresAt: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC),
 		Scope:     "scope-a",

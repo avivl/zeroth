@@ -68,7 +68,8 @@ func FormatCancelComment(runID string) string {
 	return b.String()
 }
 
-// FormatFailedComment is posted when a run ends without a change plan.
+// FormatFailedComment is posted when a run ends without applying, or
+// when apply refuses (stale preconditions, postcondition mismatch).
 func FormatFailedComment(runID, reason string) string {
 	var b strings.Builder
 	b.WriteString("### Zeroth failed\n\n")

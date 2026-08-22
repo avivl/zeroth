@@ -126,10 +126,10 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 		zap.String("key", key),
 		zap.String("run", id.String()),
 	)
-	s.startWorker(id)
 	if err := s.syncSession(ctx, id); err != nil {
 		s.log.Debug("tracker assign sync", zap.Error(err))
 	}
+	s.startWorker(id)
 	if s.tracker != nil {
 		_, err := s.tracker.Comment(ctx, key, tracker.FormatStartedComment(id.String(), key))
 		if err != nil {

@@ -26,6 +26,8 @@ type Store interface {
 
 	CreateSession(ctx context.Context, s Session) error
 	GetSession(ctx context.Context, id SessionID) (Session, error)
+	// UpdateSession replaces mutable session fields. A zero PlanID in s
+	// does not clear a stored plan id: attaching a plan is monotonic.
 	UpdateSession(ctx context.Context, s Session) error
 	ListSessions(ctx context.Context, q SessionQuery) (Page[Session], error)
 

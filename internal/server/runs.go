@@ -143,10 +143,10 @@ func (s *Server) CreateRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	s.startWorker(id)
 	if err := s.syncSession(r.Context(), id); err != nil {
 		s.log.Warn("create run sync", zap.Error(err))
 	}
+	s.startWorker(id)
 	run, ok, err := s.loadRun(r.Context(), id.String())
 	if err != nil || !ok {
 		writeError(w, http.StatusInternalServerError, "internal", "run created but not readable")

@@ -39,6 +39,30 @@ func TestBuildRows(t *testing.T) {
 	}
 }
 
+func TestBuildModifyPostconditionIsPatchedFileHash(t *testing.T) {
+	t.Parallel()
+	original := "# demo\n## keep me\n"
+	diff := "@@ -1,2 +1,3 @@\n # demo\n+Version: 2\n ## keep me\n"
+	p := mustBuild(t, Draft{
+		Effects:  []Proposed{{Type: "modify", Path: "README.md", Diff: diff}},
+		Observed: map[string]string{"README.md": Digest([]byte(original))},
+		Bodies:   map[string]string{"README.md": original},
+	})
+	want, err := Materialize(OpModify, []byte(original), diff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Rows[0].Postcondition != Digest(want) {
+		t.Fatalf("post %q want %q", p.Rows[0].Postcondition, Digest(want))
+	}
+	if p.Rows[0].Postcondition == Digest([]byte(diff)) {
+		t.Fatal("postcondition hashed the payload instead of the patched file")
+	}
+	if !strings.Contains(string(want), "## keep me") || !strings.Contains(string(want), "Version: 2") {
+		t.Fatalf("patched %q", want)
+	}
+}
+
 func TestBuildDestroyAndMemory(t *testing.T) {
 	t.Parallel()
 	p := mustBuild(t, Draft{
@@ -207,6 +231,9 @@ func mustBuild(t *testing.T, extra Draft) Plan {
 	}
 	if extra.Observed != nil {
 		d.Observed = extra.Observed
+	}
+	if extra.Bodies != nil {
+		d.Bodies = extra.Bodies
 	}
 	if extra.Lease != "" {
 		d.Lease = extra.Lease

@@ -1,8 +1,6 @@
 package plan
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"path"
 	"strings"
@@ -28,12 +26,17 @@ type Proposed struct {
 // key means the path was absent. Lease is attached to every row unless
 // Leases names a per-target override.
 type Draft struct {
-	ID          ID
-	SessionID   session.ID
-	ParentID    ID
-	Summary     string
-	Effects     []Proposed
-	Observed    map[string]string
+	ID        ID
+	SessionID session.ID
+	ParentID  ID
+	Summary   string
+	Effects   []Proposed
+	Observed  map[string]string
+	// Bodies is the raw content of each target at draft time. Modify
+	// postconditions are the hash of the file after the payload is
+	// applied to this body, not a hash of the payload text. A missing
+	// key is treated as empty contents.
+	Bodies      map[string]string
 	Lease       policy.LeaseID
 	Leases      map[string]policy.LeaseID
 	ExpiresAt   time.Time
@@ -150,6 +153,21 @@ func rowFrom(d Draft, i int, e Proposed) (Row, error) {
 		return Row{}, unexpressible(i, e, err.Error())
 	}
 
+	var original []byte
+	if d.Bodies != nil {
+		if body, ok := d.Bodies[target]; ok {
+			original = []byte(body)
+		}
+	}
+	if observed != "" && len(original) > 0 && Digest(original) != observed {
+		return Row{}, unexpressible(i, e, "observed hash does not match supplied body")
+	}
+
+	post, err := postcondition(op, payload, original)
+	if err != nil {
+		return Row{}, unexpressible(i, e, err.Error())
+	}
+
 	return Row{
 		Op:             op,
 		Target:         target,
@@ -157,7 +175,7 @@ func rowFrom(d Draft, i int, e Proposed) (Row, error) {
 		Lease:          lease,
 		Precondition:   pre,
 		IdempotencyKey: idempotencyKey(op, target, payload),
-		Postcondition:  postcondition(op, payload),
+		Postcondition:  post,
 	}, nil
 }
 
@@ -180,19 +198,30 @@ func precondition(op Op, observed string) (string, error) {
 	}
 }
 
-func postcondition(op Op, payload string) string {
+func postcondition(op Op, payload string, original []byte) (string, error) {
 	if op == OpDestroy {
 		// Destroy's expected world is absence. The empty digest is that
 		// postcondition, not a hash of the delete payload.
-		return hex.EncodeToString(sha256.New().Sum(nil))
+		return EmptyDigest(), nil
 	}
-	sum := sha256.Sum256([]byte(payload))
-	return hex.EncodeToString(sum[:])
+	if op == OpMemoryProposal {
+		return Digest([]byte(payload)), nil
+	}
+	result, err := Materialize(op, original, payload)
+	if err != nil {
+		if len(original) == 0 {
+			// Tests that omit Bodies still need a stable post hash.
+			// Apply rechecks against the live file and will refuse if
+			// this digest is not the bytes that land.
+			return Digest([]byte(payload)), nil
+		}
+		return "", err
+	}
+	return Digest(result), nil
 }
 
 func idempotencyKey(op Op, target, payload string) string {
-	sum := sha256.Sum256([]byte(string(op) + "\n" + target + "\n" + payload))
-	return hex.EncodeToString(sum[:])
+	return Digest([]byte(string(op) + "\n" + target + "\n" + payload))
 }
 
 func normalizeTarget(p string) string {

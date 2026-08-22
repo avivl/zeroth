@@ -277,6 +277,26 @@ func testSessions(t *testing.T, open func(t *testing.T) store.Store) {
 		t.Fatalf("updated: %+v err=%v", got, err)
 	}
 
+	pid := mustPlanID(t, "plan-keep")
+	sess.PlanID = pid
+	sess.Status = "awaiting_approval"
+	sess.UpdatedAt = ts(2)
+	if err := s.UpdateSession(ctx, sess); err != nil {
+		t.Fatalf("attach plan: %v", err)
+	}
+	sess.PlanID = store.PlanID{}
+	sess.Status = "backgrounded"
+	if err := s.UpdateSession(ctx, sess); err != nil {
+		t.Fatalf("status sync: %v", err)
+	}
+	got, err = s.GetSession(ctx, sess.ID)
+	if err != nil || got.PlanID != pid {
+		t.Fatalf("zero PlanID clobbered attached plan: %+v err=%v", got, err)
+	}
+	if got.Status != "backgrounded" {
+		t.Fatalf("status after plan-preserving sync = %q", got.Status)
+	}
+
 	other := sess
 	other.ID = mustSessionID(t, "sess-2")
 	other.Status = "stopped"

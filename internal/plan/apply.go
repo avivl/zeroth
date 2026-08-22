@@ -322,9 +322,19 @@ func (a *Applier) executeRow(ctx context.Context, row Row) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		if row.Postcondition != "" && post != row.Postcondition {
+			return "", fmt.Errorf("%w on %s", ErrPostcondition, row.Target)
+		}
 		return post, nil
 	}
-	return a.World.Execute(ctx, row)
+	post, err := a.World.Execute(ctx, row)
+	if err != nil {
+		return "", err
+	}
+	if row.Postcondition != "" && post != row.Postcondition {
+		return "", fmt.Errorf("%w on %s", ErrPostcondition, row.Target)
+	}
+	return post, nil
 }
 
 func authorizeRow(k *policy.Kernel, now time.Time, principal policy.PrincipalID, p Plan, row Row, leases []policy.Lease) error {
