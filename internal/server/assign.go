@@ -56,9 +56,10 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 
 	iss := ev.Issue
 	if iss.Key == "" && s.tracker != nil {
+		s.log.Info("tracker get issue on assign", zap.String("key", key))
 		got, err := s.tracker.GetIssue(ctx, key)
 		if err != nil {
-			s.log.Debug("tracker get issue on assign", zap.String("key", key), zap.Error(err))
+			s.log.Warn("tracker get issue on assign", zap.String("key", key), zap.Error(err))
 		} else {
 			iss = got
 		}
@@ -121,6 +122,10 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	s.mu.Unlock()
 	s.rememberSandbox(id.String(), sbx)
 
+	s.log.Info("tracker assigned run started",
+		zap.String("key", key),
+		zap.String("run", id.String()),
+	)
 	s.startWorker(id)
 	if err := s.syncSession(ctx, id); err != nil {
 		s.log.Debug("tracker assign sync", zap.Error(err))

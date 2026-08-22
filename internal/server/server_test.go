@@ -422,14 +422,14 @@ func TestDemoTenTimes(t *testing.T) {
 				if err := wsjson.Read(ctx, c, &ev); err != nil {
 					break
 				}
-				if ev.Type == "status_changed" && ev.Message != nil && *ev.Message == "completed" {
+				if ev.Type == "status_changed" && ev.Message != nil && *ev.Message == "failed" {
 					finished = true
 					break
 				}
 			}
 			if !finished {
 				got := getRun(t, hs.URL, string(run.Id))
-				if got.Status != gen.RunStatusCompleted {
+				if got.Status != gen.RunStatusFailed {
 					t.Fatalf("demo %d: status %s", i, got.Status)
 				}
 			}

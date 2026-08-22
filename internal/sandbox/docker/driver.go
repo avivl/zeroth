@@ -97,6 +97,24 @@ func (d *Driver) lookup(id sandbox.ID) (*instance, error) {
 	return inst, nil
 }
 
+// HostWorkspace is the host directory bind-mounted at /workspace. The
+// harness runs against this tree (plan mode, no apply).
+func (d *Driver) HostWorkspace(id sandbox.ID) (string, error) {
+	inst, err := d.lookup(id)
+	if err != nil {
+		return "", fmt.Errorf("sandbox docker host workspace: %w", err)
+	}
+	inst.mu.Lock()
+	defer inst.mu.Unlock()
+	if inst.stopped {
+		return "", fmt.Errorf("sandbox docker host workspace: %w", sandbox.ErrStopped)
+	}
+	if inst.workspace == "" {
+		return "", fmt.Errorf("sandbox docker host workspace: %w", sandbox.ErrNotFound)
+	}
+	return inst.workspace, nil
+}
+
 func (d *Driver) docker(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()

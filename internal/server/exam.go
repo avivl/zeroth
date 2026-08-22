@@ -125,8 +125,18 @@ func reviewerConfig(a store.Agent) (plan.Config, error) {
 		}
 		models = append(models, second)
 	}
+	producer := strings.TrimSpace(a.Model)
+	if producer == "" {
+		producer = "claudecode"
+	}
+	if len(models) == 0 {
+		// Distinct from the producer so same-model second pass is
+		// rejected. The pass-through reviewer still runs; Approve
+		// remains the human gate.
+		models = []string{passNotesModel}
+	}
 	return plan.Config{
-		ProducerModel: a.Model,
+		ProducerModel: producer,
 		Models:        models,
 		BlockOnFail:   a.BlockOnFail,
 	}, nil

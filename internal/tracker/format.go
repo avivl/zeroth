@@ -68,6 +68,22 @@ func FormatCancelComment(runID string) string {
 	return b.String()
 }
 
+// FormatFailedComment is posted when a run ends without a change plan.
+func FormatFailedComment(runID, reason string) string {
+	var b strings.Builder
+	b.WriteString("### Zeroth failed\n\n")
+	if r := strings.TrimSpace(reason); r != "" {
+		b.WriteString(r)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("The run ended without a change plan.\n\n")
+	}
+	if runID != "" {
+		fmt.Fprintf(&b, "Run `%s` is failed. See local daemon logs.\n", runID)
+	}
+	return b.String()
+}
+
 func codeFence(body string) (open, close string) {
 	// Nested markdown fences break Linear's renderer. A longer tilde
 	// fence stays valid when the plan body already contains ``` diffs.
