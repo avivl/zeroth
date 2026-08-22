@@ -1,0 +1,360 @@
+package server_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/avivl/zeroth/internal/sandbox"
+	"github.com/avivl/zeroth/internal/server"
+	"github.com/avivl/zeroth/internal/store/sqlite"
+	"github.com/avivl/zeroth/internal/tracker"
+	gen "github.com/avivl/zeroth/pkg/api/gen/go"
+)
+
+type stubTracker struct {
+	mu        sync.Mutex
+	ch        chan tracker.AssignmentEvent
+	comments  []string
+	states    []tracker.StateKind
+	artifacts []tracker.Artifact
+	issue     tracker.Issue
+}
+
+func newStubTracker(iss tracker.Issue) *stubTracker {
+	return &stubTracker{
+		ch:    make(chan tracker.AssignmentEvent, 8),
+		issue: iss,
+	}
+}
+
+func (s *stubTracker) Name() string { return "stub" }
+func (s *stubTracker) Capabilities() tracker.Capabilities {
+	return tracker.Capabilities{}
+}
+func (s *stubTracker) GetIssue(_ context.Context, key string) (tracker.Issue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.issue.Key != key && s.issue.ID != key {
+		return tracker.Issue{}, tracker.ErrNotFound
+	}
+	return s.issue, nil
+}
+func (s *stubTracker) Comment(_ context.Context, _, body string) (tracker.CommentRef, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.comments = append(s.comments, body)
+	return tracker.CommentRef{ID: "c1"}, nil
+}
+func (s *stubTracker) SetState(_ context.Context, _ string, state tracker.State) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.states = append(s.states, state.Kind)
+	return nil
+}
+func (s *stubTracker) Assignments(context.Context) (<-chan tracker.AssignmentEvent, error) {
+	return s.ch, nil
+}
+func (s *stubTracker) LinkArtifact(_ context.Context, _ string, a tracker.Artifact) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.artifacts = append(s.artifacts, a)
+	return nil
+}
+func (s *stubTracker) commentBodies() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]string(nil), s.comments...)
+	return out
+}
+func (s *stubTracker) lastState() tracker.StateKind {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.states) == 0 {
+		return ""
+	}
+	return s.states[len(s.states)-1]
+}
+
+type fakeSandbox struct {
+	mu   sync.Mutex
+	n    int
+	inst map[string]*fakeInst
+}
+
+type fakeInst struct {
+	killed  bool
+	stopped bool
+}
+
+func newFakeSandbox() *fakeSandbox {
+	return &fakeSandbox{inst: make(map[string]*fakeInst)}
+}
+
+func (f *fakeSandbox) Name() string { return "fake" }
+
+func (f *fakeSandbox) Spawn(context.Context, sandbox.Spec) (sandbox.Sandbox, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.n++
+	id, err := sandbox.ParseID("sbx_test_" + strconv.Itoa(f.n))
+	if err != nil {
+		id, _ = sandbox.NewID()
+	}
+	f.inst[id.String()] = &fakeInst{}
+	return sandbox.Sandbox{ID: id}, nil
+}
+
+func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, _ sandbox.Cmd) (sandbox.ExecResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		return sandbox.ExecResult{}, sandbox.ErrNotFound
+	}
+	if inst.stopped {
+		return sandbox.ExecResult{}, sandbox.ErrStopped
+	}
+	if inst.killed {
+		return sandbox.ExecResult{}, sandbox.ErrKilled
+	}
+	return sandbox.ExecResult{ExitCode: 0, Stdout: "alive\n"}, nil
+}
+
+func (f *fakeSandbox) ExportTar(context.Context, sandbox.ID, io.Writer) error { return nil }
+func (f *fakeSandbox) ImportTar(context.Context, sandbox.ID, io.Reader) error { return nil }
+func (f *fakeSandbox) AllowEgress(context.Context, sandbox.ID, []sandbox.EgressRule) error {
+	return nil
+}
+
+func (f *fakeSandbox) Kill(_ context.Context, id sandbox.ID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		return sandbox.ErrNotFound
+	}
+	if inst.stopped {
+		return sandbox.ErrStopped
+	}
+	inst.killed = true
+	return nil
+}
+
+func (f *fakeSandbox) Stop(_ context.Context, id sandbox.ID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		return nil
+	}
+	inst.stopped = true
+	inst.killed = true
+	delete(f.inst, id.String())
+	return nil
+}
+
+func (f *fakeSandbox) liveCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.inst)
+}
+
+func (f *fakeSandbox) anyID() sandbox.ID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for k := range f.inst {
+		id, _ := sandbox.ParseID(k)
+		return id
+	}
+	return sandbox.ID{}
+}
+
+func TestAssignStartsHeadlessRun(t *testing.T) {
+	t.Parallel()
+	iss := tracker.Issue{
+		Key:         "42-1",
+		ID:          "iss_1",
+		Title:       "tracker.Provider",
+		Description: "Assign to Zeroth",
+		Project:     "Zeroth",
+	}
+	tr := newStubTracker(iss)
+	sbx := newFakeSandbox()
+	hs := assignServer(t, tr, sbx, 5*time.Millisecond, 4)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-1", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-1")
+	if run.Prompt == nil || *run.Prompt == "" {
+		t.Fatal("prompt empty")
+	}
+	if sbx.liveCount() != 1 {
+		t.Fatalf("sandbox live = %d, want 1", sbx.liveCount())
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		bodies := tr.commentBodies()
+		if len(bodies) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(tr.commentBodies()) == 0 {
+		t.Fatal("expected started comment")
+	}
+	if tr.lastState() != tracker.StateStarted && tr.lastState() != tracker.StateCompleted {
+		t.Fatalf("state = %q", tr.lastState())
+	}
+}
+
+func TestUnassignCancelsAndKillsSandbox(t *testing.T) {
+	t.Parallel()
+	iss := tracker.Issue{Key: "42-2", Title: "cancel me"}
+	tr := newStubTracker(iss)
+	sbx := newFakeSandbox()
+	hs := assignServer(t, tr, sbx, 50*time.Millisecond, 1000)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-2", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-2")
+	id := sbx.anyID()
+	if id.IsZero() {
+		t.Fatal("no sandbox")
+	}
+	if _, err := sbx.Exec(t.Context(), id, sandbox.Cmd{Argv: []string{"true"}}); err != nil {
+		t.Fatalf("sandbox should be alive: %v", err)
+	}
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Unassigned, Key: "42-2", Issue: iss, At: time.Now()}
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusFailed)
+
+	if sbx.liveCount() != 0 {
+		t.Fatalf("sandbox still live after unassign: %d", sbx.liveCount())
+	}
+	_, err := sbx.Exec(t.Context(), id, sandbox.Cmd{Argv: []string{"true"}})
+	if !errors.Is(err, sandbox.ErrNotFound) && !errors.Is(err, sandbox.ErrStopped) && !errors.Is(err, sandbox.ErrKilled) {
+		t.Fatalf("exec after unassign = %v, want sandbox dead", err)
+	}
+	foundCancel := false
+	for _, c := range tr.commentBodies() {
+		if containsAll(c, "cancelled", "sandbox") {
+			foundCancel = true
+		}
+	}
+	if !foundCancel {
+		t.Fatalf("missing cancel comment: %v", tr.commentBodies())
+	}
+}
+
+func TestAssignCompleteAttachesSummary(t *testing.T) {
+	t.Parallel()
+	iss := tracker.Issue{Key: "42-3", Title: "finish me"}
+	tr := newStubTracker(iss)
+	sbx := newFakeSandbox()
+	hs := assignServer(t, tr, sbx, 5*time.Millisecond, 2)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-3", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-3")
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusCompleted)
+
+	deadline := time.Now().Add(3 * time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		for _, c := range tr.commentBodies() {
+			if containsAll(c, "Zeroth completed", "Cost", "Transcript", "Audit") {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	if !found {
+		t.Fatalf("missing completion comment: %v", tr.commentBodies())
+	}
+	if tr.lastState() != tracker.StateCompleted {
+		t.Fatalf("state = %q, want completed", tr.lastState())
+	}
+}
+
+func assignServer(t *testing.T, tr tracker.Provider, sbx sandbox.Driver, interval time.Duration, tokens int) *httptest.Server {
+	t.Helper()
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv, err := server.New(server.Config{
+		Store:         st,
+		TokenInterval: interval,
+		TokenCount:    tokens,
+		Tracker:       tr,
+		Sandbox:       sbx,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+	return hs
+}
+
+func waitRunByTracker(t *testing.T, base, key string) gen.Run {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		res, err := http.Get(base + "/runs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var list gen.RunList
+		if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+			res.Body.Close()
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		for _, run := range list.Items {
+			if run.TrackerRef != nil && *run.TrackerRef == key {
+				return run
+			}
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for tracker_ref %s", key)
+	return gen.Run{}
+}
+
+func waitRunStatus(t *testing.T, base, id string, want gen.RunStatus) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	var last gen.RunStatus
+	for time.Now().Before(deadline) {
+		run := getRun(t, base, id)
+		last = run.Status
+		if run.Status == want {
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("run %s status = %s, want %s", id, last, want)
+}
+
+func containsAll(s string, parts ...string) bool {
+	low := strings.ToLower(s)
+	for _, p := range parts {
+		if !strings.Contains(low, strings.ToLower(p)) {
+			return false
+		}
+	}
+	return true
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -28,6 +29,14 @@ type Config struct {
 	LogEncoding  string
 	SigningKey   string
 	ConfigFile   string
+
+	LinearAPIKey        string
+	LinearEndpoint      string
+	LinearAgentUser     string
+	LinearTeamID        string
+	LinearProjectID     string
+	LinearPollInterval  time.Duration
+	LinearWebhookSecret string
 }
 
 func registerFlags(cmd *cobra.Command) {
@@ -39,6 +48,13 @@ func registerFlags(cmd *cobra.Command) {
 	f.String("log-level", defaultLogLevel, "zap log level: debug, info, warn, error (ZEROTH_LOG_LEVEL)")
 	f.String("log-encoding", defaultLogEncoding, "zap encoder: console or json (ZEROTH_LOG_ENCODING)")
 	f.String("signing-key", "", "path to secp256k1 signing key file (ZEROTH_SIGNING_KEY)")
+	f.String("linear-api-key", "", "Linear API key for assign-to-Zeroth (ZEROTH_LINEAR_API_KEY)")
+	f.String("linear-endpoint", "", "Linear GraphQL endpoint (ZEROTH_LINEAR_ENDPOINT)")
+	f.String("linear-agent-user", "", "Linear user id of the Zeroth agent identity (ZEROTH_LINEAR_AGENT_USER)")
+	f.String("linear-team-id", "", "optional Linear team id filter (ZEROTH_LINEAR_TEAM_ID)")
+	f.String("linear-project-id", "", "optional Linear project id filter (ZEROTH_LINEAR_PROJECT_ID)")
+	f.String("linear-poll-interval", "15s", "assignment poll interval (ZEROTH_LINEAR_POLL_INTERVAL)")
+	f.String("linear-webhook-secret", "", "opt-in Linear webhook HMAC secret (ZEROTH_LINEAR_WEBHOOK_SECRET)")
 }
 
 func setDefaults(v *viper.Viper) {
@@ -48,6 +64,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("log-level", defaultLogLevel)
 	v.SetDefault("log-encoding", defaultLogEncoding)
 	v.SetDefault("signing-key", "")
+	v.SetDefault("linear-api-key", "")
+	v.SetDefault("linear-endpoint", "")
+	v.SetDefault("linear-agent-user", "")
+	v.SetDefault("linear-team-id", "")
+	v.SetDefault("linear-project-id", "")
+	v.SetDefault("linear-poll-interval", "15s")
+	v.SetDefault("linear-webhook-secret", "")
 }
 
 func loadConfig(cmd *cobra.Command, v *viper.Viper) error {
@@ -77,7 +100,11 @@ func loadConfig(cmd *cobra.Command, v *viper.Viper) error {
 		}
 	}
 
-	for _, name := range []string{"addr", "db-path", "docker-socket", "log-level", "log-encoding", "signing-key"} {
+	for _, name := range []string{
+		"addr", "db-path", "docker-socket", "log-level", "log-encoding", "signing-key",
+		"linear-api-key", "linear-endpoint", "linear-agent-user", "linear-team-id",
+		"linear-project-id", "linear-poll-interval", "linear-webhook-secret",
+	} {
 		if !cmd.Flags().Changed(name) {
 			continue
 		}
@@ -99,13 +126,21 @@ func flagOrEmpty(cmd *cobra.Command, name string) string {
 }
 
 func configFrom(v *viper.Viper) Config {
+	poll := v.GetDuration("linear-poll-interval")
 	return Config{
-		Addr:         strings.TrimSpace(v.GetString("addr")),
-		DBPath:       strings.TrimSpace(v.GetString("db-path")),
-		DockerSocket: strings.TrimSpace(v.GetString("docker-socket")),
-		LogLevel:     strings.TrimSpace(v.GetString("log-level")),
-		LogEncoding:  strings.TrimSpace(v.GetString("log-encoding")),
-		SigningKey:   strings.TrimSpace(v.GetString("signing-key")),
-		ConfigFile:   v.ConfigFileUsed(),
+		Addr:                strings.TrimSpace(v.GetString("addr")),
+		DBPath:              strings.TrimSpace(v.GetString("db-path")),
+		DockerSocket:        strings.TrimSpace(v.GetString("docker-socket")),
+		LogLevel:            strings.TrimSpace(v.GetString("log-level")),
+		LogEncoding:         strings.TrimSpace(v.GetString("log-encoding")),
+		SigningKey:          strings.TrimSpace(v.GetString("signing-key")),
+		ConfigFile:          v.ConfigFileUsed(),
+		LinearAPIKey:        strings.TrimSpace(v.GetString("linear-api-key")),
+		LinearEndpoint:      strings.TrimSpace(v.GetString("linear-endpoint")),
+		LinearAgentUser:     strings.TrimSpace(v.GetString("linear-agent-user")),
+		LinearTeamID:        strings.TrimSpace(v.GetString("linear-team-id")),
+		LinearProjectID:     strings.TrimSpace(v.GetString("linear-project-id")),
+		LinearPollInterval:  poll,
+		LinearWebhookSecret: strings.TrimSpace(v.GetString("linear-webhook-secret")),
 	}
 }
