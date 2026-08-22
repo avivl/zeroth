@@ -23,6 +23,11 @@ const (
 	ActionRunCreate      = "run.create"
 	ActionPlanApply      = "plan.apply"
 	ActionPlanCrossExam  = "plan.cross_exam"
+	ActionMemoryWrite    = "memory.write"
+	ActionMemoryPropose  = "memory.propose"
+	ActionMemoryAccept   = "memory.propose.accept"
+	ActionMemoryReject   = "memory.propose.reject"
+	ActionMemoryDelete   = "memory.delete"
 
 	ApproverOperator = "operator"
 )

@@ -65,6 +65,12 @@ func TestExcludedFromExport(t *testing.T) {
 		{rel: "notes.txt", want: false},
 		{rel: ".config/app/settings.json", want: false},
 		{rel: "src/main.go", want: false},
+		{rel: "AGENTS.md", want: true},
+		{rel: "docs/AGENTS.md", want: true},
+		{rel: "CLAUDE.md", want: true},
+		{rel: ".cursor/rules/zeroth-memory.mdc", want: true},
+		{rel: ".cursor/rules/other.mdc", want: false},
+		{rel: ".zeroth/compiled-memory/README", want: true},
 		{rel: "", want: false},
 	}
 	for _, tc := range cases {
@@ -78,5 +84,15 @@ func TestExcludedFromExport(t *testing.T) {
 				t.Fatalf("ExcludedFromExport(%q) = %v, want %v", tc.rel, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExcludedFromImportAllowsCompiledMemory(t *testing.T) {
+	t.Parallel()
+	if sandbox.ExcludedFromImport("AGENTS.md") || sandbox.ExcludedFromImport("CLAUDE.md") {
+		t.Fatal("repo AGENTS.md/CLAUDE.md must still unpack; hydration overwrites them")
+	}
+	if !sandbox.ExcludedFromImport(".git-credentials") {
+		t.Fatal("credentials must stay out of import")
 	}
 }

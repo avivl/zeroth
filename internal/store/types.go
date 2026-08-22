@@ -127,12 +127,36 @@ type ApprovalQuery struct {
 }
 
 // MemoryEntry is store-backed session, agent, or operator memory.
+// Key, provenance, version history, and the deleted tombstone are the
+// notebook fields (Z1-022). Content is the current body.
 type MemoryEntry struct {
-	ID        MemoryID
-	Kind      string
-	RefID     string
-	Content   string
-	CreatedAt time.Time
+	ID         MemoryID
+	Kind       string
+	RefID      string
+	Key        string
+	Content    string
+	Author     string
+	AuthorKind string
+	Source     string
+	Action     string
+	Deleted    bool
+	Version    int
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	History    []MemoryRevision
+}
+
+// MemoryRevision is one version of a notebook fact.
+type MemoryRevision struct {
+	Version    int
+	Key        string
+	Body       string
+	Author     string
+	AuthorKind string
+	Action     string
+	Source     string
+	Deleted    bool
+	At         time.Time
 }
 
 // MemoryQuery filters ListMemory. Newest first.
@@ -140,6 +164,7 @@ type MemoryQuery struct {
 	PageQuery
 	Kind  string
 	RefID string
+	Key   string
 }
 
 // MemoryProposal is a harness-proposed memory row awaiting human review.
@@ -148,7 +173,11 @@ type MemoryProposal struct {
 	Kind       string
 	RefID      string
 	SessionID  SessionID
+	Key        string
 	Content    string
+	Author     string
+	AuthorKind string
+	Source     string
 	Status     string
 	MemoryID   MemoryID
 	CreatedAt  time.Time

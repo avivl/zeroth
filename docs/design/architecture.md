@@ -30,7 +30,13 @@ Zeroth is a local control plane. The daemon holds the kernel. Everything that ta
 - **lease** — runtime mint/renew/expire for policy leases.
 - **signer / audit**: attributable, append-only trail. Signatures are secp256k1 Schnorr, Nostr-compatible ([ADR-Z-0007](../adr/Z-0007-secp256k1-schnorr.md)). Each agent has a keypair at creation. Records chain through `prev_hash`. `zeroth verify <run-id>` checks the chain offline. Rotation appends a new pubkey; historical signatures stay verifiable.
 - **secretscan** — a gate on apply and on sandbox export, not a linter the operator can skip.
-- **memory** — session and agent memory, store-backed in stage 1.
+- **memory**: a notebook of atomic facts with dates, provenance, and
+  version history. Humans write directly. Agents only propose; a fact
+  enters the notebook on human accept, and that rule is not configurable
+  (Z1-022). At session hydration the live slice compiles into `AGENTS.md`
+  (and companion harness files) inside the sandbox. The compiled file is a
+  build artifact, excluded from checkpoints and commits, never the source
+  of truth (Z1-118).
 
 ## Ports
 
@@ -45,7 +51,9 @@ Each port is an interface in `internal/<name>` with one implementation in a subp
 
 The store port covers sessions, events, plans, approvals, memory entries and proposals, audit records, leases, the checkpoint index, and agents. SQLite is one file in WAL mode. The path is configurable (`zerothd --db-path` / `ZEROTH_DB_PATH`). Schema changes go through Up and Down migrations; a migration without a Down is not done. The event log is append-only and is the source of truth for a session. `internal/store/conformance_test.go` is the contract a later Postgres driver must pass unchanged except for adding its table row (ADR-Z-0004, NFR-4).
 
-The sandbox port is `Driver`: Spawn, Exec, ExportTar, ImportTar, AllowEgress, Kill, and Stop. Spawn starts with egress denied. A checkpoint is a workspace tar (content hash of paths, modes, and bytes, not tar mtimes), not a frozen process. Kill drops in-flight PIDs; the overlay remains until Stop. Credentials (Z1-113) are injected per Exec via env or a tmpfs (`/run/zeroth`), never into `/workspace`. ExportTar strips a hard exclusion list (CLI OAuth stores, `.git-credentials`, shell history, token caches) and secret-scans the remaining tree, failing closed on a finding. The same tar hydrates any number of independent sandboxes (branch). `internal/sandbox/conformance_test.go` is the contract a later backend must pass unchanged except for adding its table row (Z1-080, NFR-4). Docker is the stage-1 implementation ([ADR-Z-0005](../adr/Z-0005-docker-sandbox.md)).
+The sandbox port is `Driver`: Spawn, Exec, ExportTar, ImportTar, AllowEgress, Kill, and Stop. Spawn starts with egress denied. A checkpoint is a workspace tar (content hash of paths, modes, and bytes, not tar mtimes), not a frozen process. Kill drops in-flight PIDs; the overlay remains until Stop. Credentials (Z1-113) are injected per Exec via env or a tmpfs (`/run/zeroth`), never into `/workspace`. ExportTar strips a hard exclusion list (CLI OAuth stores, `.git-credentials`,
+shell history, token caches, and compiled memory artifacts regenerated at
+hydration) and secret-scans the remaining tree, failing closed on a finding. The same tar hydrates any number of independent sandboxes (branch). `internal/sandbox/conformance_test.go` is the contract a later backend must pass unchanged except for adding its table row (Z1-080, NFR-4). Docker is the stage-1 implementation ([ADR-Z-0005](../adr/Z-0005-docker-sandbox.md)).
 
 The harness port is `Driver`: Start, Stream, Steer, Checkpoint, and Stop. Start launches a supervised agent subprocess against a workspace directory (the sandbox overlay). Stream yields tokens, tool calls, and structured proposed effects. Steer injects operator guidance mid-run (and restarts the subprocess if it has already exited). Checkpoint captures vendor session state so a run can resume. Stop kills the subprocess; an unexpected death is an `exited` event, not a hang. The agent proposes effects; it does not apply them (G4 prompt, `--permission-mode plan`, `--tools ""`). Anthropic auth is API-key only and the key never lands in the workspace ([ADR-Z-0008](../adr/Z-0008-anthropic-api-key-auth.md)). `internal/harness/conformance_test.go` is the contract a later adapter must pass unchanged except for adding its table row (Z1-006, NFR-4). Claude Code is the stage-1 implementation ([ADR-Z-0003](../adr/Z-0003-harness-driver-protocol.md)). A real `claude` subprocess (not the fake CLI) streamed tokens into the session event log on 2026-08-21: [LIVE_VERIFICATION.md](../harness/LIVE_VERIFICATION.md) (Linear 42-36).
 
