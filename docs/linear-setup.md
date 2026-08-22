@@ -95,8 +95,13 @@ Now, in Linear:
    delegate it to Zeroth (Linear's native agent-delegation, the same
    pattern this repo uses for Cursor).
 3. Within one poll interval (15s by default), Zeroth reads the issue and
-   project memory, spawns a sandbox, and posts a comment on the issue
-   with its plan.
+   project memory, spawns a sandbox, copies this git checkout into the
+   overlay, and posts a comment on the issue with its plan. `zerothd`
+   uses the git toplevel of the directory it was started from as that
+   checkout (the `cd zeroth` above). A modify whose target is missing
+   from the overlay fails with a workspace-observe error in the daemon
+   logs and on the issue, not a generic "no precondition observed"
+   message.
 4. Open `http://localhost:5173` and go to **Approvals**. The pending plan
    appears there: a change-plan card with create/modify/destroy/memory
    rows, each expandable to a diff, with leases and expiries shown per

@@ -21,6 +21,10 @@ func (s *Server) spawnHydratedSandbox(ctx context.Context, sess store.Session) (
 	if err != nil {
 		return sandbox.ID{}, fmt.Errorf("server spawn sandbox: %w", err)
 	}
+	if err := s.seedOverlay(handle.ID, sess); err != nil {
+		_ = s.sandbox.Stop(context.Background(), handle.ID)
+		return sandbox.ID{}, err
+	}
 	if err := s.hydrateSandbox(ctx, handle.ID, sess); err != nil {
 		_ = s.sandbox.Stop(context.Background(), handle.ID)
 		return sandbox.ID{}, err

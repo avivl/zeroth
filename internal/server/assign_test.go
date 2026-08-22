@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -88,16 +89,22 @@ func (s *stubTracker) lastState() tracker.StateKind {
 type fakeSandbox struct {
 	mu   sync.Mutex
 	n    int
+	seed map[string]string
 	inst map[string]*fakeInst
 }
 
 type fakeInst struct {
-	killed  bool
-	stopped bool
+	workspace string
+	killed    bool
+	stopped   bool
 }
 
 func newFakeSandbox() *fakeSandbox {
 	return &fakeSandbox{inst: make(map[string]*fakeInst)}
+}
+
+func newSeededSandbox(files map[string]string) *fakeSandbox {
+	return &fakeSandbox{seed: files, inst: make(map[string]*fakeInst)}
 }
 
 func (f *fakeSandbox) Name() string { return "fake" }
@@ -110,8 +117,39 @@ func (f *fakeSandbox) Spawn(context.Context, sandbox.Spec) (sandbox.Sandbox, err
 	if err != nil {
 		id, _ = sandbox.NewID()
 	}
-	f.inst[id.String()] = &fakeInst{}
+	dir, err := os.MkdirTemp("", "zeroth-fake-sbx-")
+	if err != nil {
+		return sandbox.Sandbox{}, err
+	}
+	for rel, body := range f.seed {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			_ = os.RemoveAll(dir)
+			return sandbox.Sandbox{}, err
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			_ = os.RemoveAll(dir)
+			return sandbox.Sandbox{}, err
+		}
+	}
+	f.inst[id.String()] = &fakeInst{workspace: dir}
 	return sandbox.Sandbox{ID: id}, nil
+}
+
+func (f *fakeSandbox) HostWorkspace(id sandbox.ID) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		return "", sandbox.ErrNotFound
+	}
+	if inst.stopped {
+		return "", sandbox.ErrStopped
+	}
+	if inst.workspace == "" {
+		return "", sandbox.ErrNotFound
+	}
+	return inst.workspace, nil
 }
 
 func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, _ sandbox.Cmd) (sandbox.ExecResult, error) {
@@ -159,7 +197,11 @@ func (f *fakeSandbox) Stop(_ context.Context, id sandbox.ID) error {
 	}
 	inst.stopped = true
 	inst.killed = true
+	dir := inst.workspace
 	delete(f.inst, id.String())
+	if dir != "" {
+		_ = os.RemoveAll(dir)
+	}
 	return nil
 }
 

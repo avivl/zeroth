@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -87,6 +88,17 @@ func TestRootHelp(t *testing.T) {
 	got := cmd.UsageString()
 	if !strings.Contains(got, "--addr") || !strings.Contains(got, "--db-path") {
 		t.Fatalf("help missing flags: %s", got)
+	}
+}
+
+func TestDetectWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+	got := detectWorkspaceRoot()
+	if got == "" {
+		t.Fatal("empty workspace root")
+	}
+	if _, err := os.Stat(filepath.Join(got, "README.md")); err != nil {
+		t.Fatalf("expected repo README.md under %s: %v", got, err)
 	}
 }
 

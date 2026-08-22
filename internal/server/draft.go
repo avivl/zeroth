@@ -22,8 +22,10 @@ import (
 )
 
 // hostOverlay is implemented by sandbox drivers that can point the
-// harness at the overlay's host directory. Docker does this. Drivers
-// that do not implement it get a fresh temp dir.
+// harness at the overlay's host directory. Docker does this. When a
+// sandbox is in play, missing this method is a hard error: falling
+// back to an empty temp dir hides the real checkout and drops
+// preconditions at draft time.
 type hostOverlay interface {
 	HostWorkspace(id sandbox.ID) (string, error)
 }
@@ -35,22 +37,52 @@ func (s *Server) prepareWorkspace(ctx context.Context, id session.ID) (string, f
 	s.mu.Lock()
 	sbx := s.sandboxes[id.String()]
 	s.mu.Unlock()
-	if s.sandbox != nil && !sbx.IsZero() {
-		if hw, ok := s.sandbox.(hostOverlay); ok {
-			dir, err := hw.HostWorkspace(sbx)
-			if err == nil && strings.TrimSpace(dir) != "" {
-				return dir, func() {}, nil
-			}
-			if err != nil {
-				s.log.Debug("sandbox host workspace", zap.String("run", id.String()), zap.Error(err))
-			}
+	if s.sandbox != nil {
+		dir, err := s.hostWorkspace(id, sbx)
+		if err != nil {
+			return "", nil, err
 		}
+		s.log.Info("harness workspace is sandbox overlay",
+			zap.String("run", id.String()),
+			zap.String("dir", dir),
+			zap.String("sandbox", s.sandbox.Name()),
+		)
+		return dir, func() {}, nil
 	}
 	dir, err := os.MkdirTemp("", "zeroth-harness-")
 	if err != nil {
 		return "", nil, fmt.Errorf("server harness workspace: %w", err)
 	}
+	s.log.Warn("harness workspace using empty temp dir; no sandbox driver is configured",
+		zap.String("run", id.String()),
+		zap.String("dir", dir),
+	)
 	return dir, func() { _ = os.RemoveAll(dir) }, nil
+}
+
+func (s *Server) hostWorkspace(id session.ID, sbx sandbox.ID) (string, error) {
+	if sbx.IsZero() {
+		return "", fmt.Errorf("server harness workspace: run %s has no sandbox record", id.String())
+	}
+	hw, ok := s.sandbox.(hostOverlay)
+	if !ok {
+		return "", fmt.Errorf("server harness workspace: sandbox %s does not expose a host workspace", s.sandbox.Name())
+	}
+	dir, err := hw.HostWorkspace(sbx)
+	if err != nil {
+		return "", fmt.Errorf("server harness workspace: sandbox %s host workspace: %w", s.sandbox.Name(), err)
+	}
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("server harness workspace: sandbox %s returned an empty host workspace", s.sandbox.Name())
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("server harness workspace: %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("server harness workspace: %s is not a directory", dir)
+	}
+	return dir, nil
 }
 
 func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace string, effects []harness.Effect) error {
@@ -72,12 +104,16 @@ func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace 
 	now := time.Now().UTC()
 	prompt := s.promptOf(ctx, id)
 	key := s.trackerKey(id)
+	observed, err := observeWorkspace(workspace, proposed)
+	if err != nil {
+		return err
+	}
 	built, err := plan.Build(plan.Draft{
 		ID:        pid,
 		SessionID: id,
 		Summary:   planSummary(prompt, key),
 		Effects:   proposed,
-		Observed:  observeWorkspace(workspace, proposed),
+		Observed:  observed,
 		Lease:     policy.LeaseID(leaseRaw),
 		ExpiresAt: now.Add(24 * time.Hour),
 		Scope:     draftScope,
@@ -168,22 +204,47 @@ func planSummary(prompt, key string) string {
 	return line
 }
 
-func observeWorkspace(root string, effects []plan.Proposed) map[string]string {
-	out := make(map[string]string, len(effects))
+func observeWorkspace(root string, effects []plan.Proposed) (map[string]string, error) {
 	if strings.TrimSpace(root) == "" {
-		return out
+		return nil, fmt.Errorf("could not observe workspace at draft time: empty workspace root")
 	}
+	info, err := os.Stat(root)
+	if err != nil {
+		return nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", root, err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("could not observe workspace at draft time: %s is not a directory", root)
+	}
+	out := make(map[string]string, len(effects))
 	for _, e := range effects {
-		rel := filepath.FromSlash(e.Path)
+		key := observeKey(e.Path)
+		rel := filepath.FromSlash(key)
 		if rel == "" || filepath.IsAbs(rel) {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(root, rel))
+		path := filepath.Join(root, rel)
+		body, err := os.ReadFile(path)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				if needsPrecondition(e.Type) {
+					return nil, fmt.Errorf("could not observe workspace at draft time: %s: file not found under %s", key, root)
+				}
+				continue
+			}
+			return nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", key, err)
 		}
 		sum := sha256.Sum256(body)
-		out[e.Path] = hex.EncodeToString(sum[:])
+		out[key] = hex.EncodeToString(sum[:])
 	}
-	return out
+	return out, nil
+}
+
+func observeKey(p string) string {
+	p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+	return strings.TrimPrefix(p, "./")
+}
+
+func needsPrecondition(typ string) bool {
+	op, ok := plan.ParseOp(typ)
+	return ok && (op == plan.OpModify || op == plan.OpDestroy)
 }
