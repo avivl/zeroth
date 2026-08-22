@@ -31,8 +31,9 @@ func (d *Driver) ExportTar(ctx context.Context, id sandbox.ID, w io.Writer) erro
 		return fmt.Errorf("sandbox docker export: %w", sandbox.ErrStopped)
 	}
 	// Host-side tar of the workspace. Exec is docker exec, so this
-	// does not take a turn lock. Excluded credential paths are
-	// omitted; the packed tar is scanned before any bytes reach w.
+	// does not take a turn lock. Excluded credential and compiled
+	// memory paths are omitted; the packed tar is scanned before any
+	// bytes reach w.
 	if err := exportWorkspace(ctx, dir, w); err != nil {
 		return fmt.Errorf("sandbox docker export: %w", err)
 	}
@@ -180,7 +181,7 @@ func unpackTar(dir string, r io.Reader) error {
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
 		}
-		if sandbox.ExcludedFromExport(hdr.Name) {
+		if sandbox.ExcludedFromImport(hdr.Name) {
 			continue
 		}
 		target, err := safeJoin(dir, hdr.Name)

@@ -13,6 +13,7 @@
 //
 // Credentials (Z1-113) are injected per Exec via env or a tmpfs under
 // CredsDir. They are never written into /workspace. ExportTar strips a
-// hard exclusion list and secret-scans what remains, failing closed on a
-// finding. One checkpoint hydrates any number of independent sandboxes.
+// hard exclusion list (credentials plus compiled memory artifacts from
+// Z1-118) and secret-scans what remains, failing closed on a finding.
+// One checkpoint hydrates any number of independent sandboxes.
 package sandbox
