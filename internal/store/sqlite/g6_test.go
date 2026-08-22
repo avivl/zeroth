@@ -14,9 +14,10 @@ import (
 // G6 from the BA-6 spike: 5 concurrent sessions appending. A stall is one
 // Append (or one batched AppendEvents commit). The spike bar was 50 ms on a
 // quiet machine. Race-instrumented CI runs this package in parallel with
-// live Docker conformance, which has jittered to 52 ms; 100 ms still fails
-// a multi-hundred-ms stall and stays inside the job budget.
-const g6StallLimit = 100 * time.Millisecond
+// live Docker conformance and has jittered past 50 ms (52 ms) and 100 ms
+// (106 ms). 250 ms still fails a multi-hundred-ms stall and stays inside
+// the job budget.
+const g6StallLimit = 250 * time.Millisecond
 
 func TestG6WriteStall(t *testing.T) {
 	t.Parallel()

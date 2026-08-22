@@ -36,20 +36,24 @@ jobs:
       web: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.web }}
       spike: ${{ github.event_name != 'pull_request' && 'true' || steps.filter.outputs.spike }}
     steps:
+      # Go globs are positive only. A leading negation such as
+      # !zeroth-spike/** matches every non-spike path under the default
+      # predicate-quantifier (some), which ran the Go job on web-only PRs
+      # and flaked TestG6WriteStall. Spike Go stays on the spike job.
       - uses: dorny/paths-filter@v3
         if: github.event_name == 'pull_request'
         id: filter
         with:
           filters: |
             go:
-              - "**/*.go"
+              - "cmd/**"
+              - "internal/**"
+              - "pkg/**"
               - "go.mod"
               - "go.sum"
               - "Taskfile.yml"
-              - "pkg/api/**"
               - ".github/workflows/ci.yml"
               - ".octocov.yml"
-              - "!zeroth-spike/**"
             web:
               - "web/**"
               - "package.json"
