@@ -1,26 +1,132 @@
 package server_test
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/server"
+	"github.com/avivl/zeroth/internal/store/sqlite"
+	"github.com/avivl/zeroth/internal/tracker"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
 )
 
+type recordingPublisher struct {
+	mu    sync.Mutex
+	req   server.ApplyPublish
+	files map[string]string
+	ref   server.ApplyRef
+}
+
+func (p *recordingPublisher) Publish(_ context.Context, req server.ApplyPublish) (server.ApplyRef, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.req = req
+	p.files = make(map[string]string, len(req.Targets))
+	for _, target := range req.Targets {
+		body, err := os.ReadFile(filepath.Join(req.Workspace, filepath.FromSlash(target)))
+		if err != nil {
+			p.files[target] = ""
+			continue
+		}
+		p.files[target] = string(body)
+	}
+	ref := p.ref
+	if ref.PullRequest == "" {
+		ref = server.ApplyRef{
+			Branch:      req.Branch,
+			Commit:      "testsha",
+			PullRequest: "https://github.com/avivl/zeroth/pull/99",
+		}
+	}
+	if ref.Branch == "" {
+		ref.Branch = req.Branch
+	}
+	p.ref = ref
+	return ref, nil
+}
+
+type applyEnv struct {
+	examEnv
+	pub  *recordingPublisher
+	sbx  *fakeSandbox
+	root string
+	tr   *stubTracker
+}
+
+func applySetup(t *testing.T) *applyEnv {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "design"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "design", "plan.md"), []byte("typo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	rev := &capturingReviewer{}
+	pub := &recordingPublisher{}
+	sbx := newFakeSandbox()
+	tr := newStubTracker(tracker.Issue{Key: "42-50", Title: "Apply executor is a stub"})
+	srv, err := server.New(server.Config{
+		Store:         st,
+		Reviewer:      rev,
+		TokenInterval: time.Hour,
+		TokenCount:    1000,
+		Sandbox:       sbx,
+		WorkspaceRoot: root,
+		Publisher:     pub,
+		Tracker:       tr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+	e := &applyEnv{
+		examEnv: examEnv{t: t, st: st, srv: srv, hs: hs, rev: rev},
+		pub:     pub,
+		sbx:     sbx,
+		root:    root,
+		tr:      tr,
+	}
+	return e
+}
+
+func planFileHash(t *testing.T, root string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(root, "docs", "design", "plan.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 	t.Parallel()
-	e := examSetup(t)
+	e := applySetup(t)
 	e.patchReviewer(false)
 	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
 	pid := e.seedPlan(run, []plan.Proposed{
 		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
-	}, map[string]string{"docs/design/plan.md": "pre"})
+	}, map[string]string{"docs/design/plan.md": planFileHash(t, e.root)})
 	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
 		t.Fatal(err)
 	}
@@ -73,6 +179,20 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 	if out.AuditId == "" {
 		t.Fatal("missing apply audit id")
 	}
+	e.pub.mu.Lock()
+	if e.pub.files["docs/design/plan.md"] != "-typo\n+fixed" {
+		t.Fatalf("applied payload not written: %+v", e.pub.files)
+	}
+	if e.pub.req.Branch == "" || strings.HasPrefix(e.pub.ref.PullRequest, "applied:") {
+		t.Fatalf("publisher stub still returned in-memory apply string: %+v", e.pub.ref)
+	}
+	if e.pub.ref.PullRequest != "https://github.com/avivl/zeroth/pull/99" {
+		t.Fatalf("pr %q", e.pub.ref.PullRequest)
+	}
+	if !strings.Contains(e.pub.req.Branch, "zeroth/") {
+		t.Fatalf("branch %q", e.pub.req.Branch)
+	}
+	e.pub.mu.Unlock()
 
 	verify := postJSON(t, e.hs.URL+"/audit/"+string(out.AuditId)+"/verify", struct{}{})
 	defer verify.Body.Close()
@@ -121,6 +241,91 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 	}
 	if time.Now().After(list.Items[0].ExpiresAt.Add(time.Hour)) {
 		t.Fatalf("lease expiry %+v", list.Items[0].ExpiresAt)
+	}
+}
+
+func TestApplyPreconditionMismatchFailsClosed(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	}, map[string]string{"docs/design/plan.md": planFileHash(t, e.root)})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("approve %d", res.StatusCode)
+	}
+
+	overlay, err := e.sbx.HostWorkspace(e.sbx.anyID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlay, "docs", "design", "plan.md"), []byte("changed since draft\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	defer applied.Body.Close()
+	if applied.StatusCode != http.StatusConflict {
+		slurp, _ := io.ReadAll(applied.Body)
+		t.Fatalf("apply %d %s, want conflict", applied.StatusCode, slurp)
+	}
+	slurp, _ := io.ReadAll(applied.Body)
+	if !strings.Contains(string(slurp), "precondition drift") && !strings.Contains(string(slurp), "stale") {
+		t.Fatalf("want a clear stale/drift error, got %s", slurp)
+	}
+	e.pub.mu.Lock()
+	defer e.pub.mu.Unlock()
+	if e.pub.req.Workspace != "" {
+		t.Fatal("publisher ran after a precondition mismatch")
+	}
+}
+
+func TestApplyCompletionCommentIncludesPullRequest(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	run := waitRunByTracker(t, e.hs.URL, "42-50")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	}, map[string]string{"docs/design/plan.md": planFileHash(t, e.root)})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("approve %d", res.StatusCode)
+	}
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	defer applied.Body.Close()
+	if applied.StatusCode != http.StatusOK {
+		slurp, _ := io.ReadAll(applied.Body)
+		t.Fatalf("apply %d %s", applied.StatusCode, slurp)
+	}
+
+	found := false
+	for _, c := range e.tr.commentBodies() {
+		if strings.Contains(c, "### Zeroth completed") && strings.Contains(c, "https://github.com/avivl/zeroth/pull/99") {
+			found = true
+		}
+		if strings.Contains(c, "Pull request: none") || strings.Contains(c, "| Pull request | none |") {
+			t.Fatalf("completion still reports none: %s", c)
+		}
+	}
+	if !found {
+		t.Fatalf("missing PR link in completion: %v", e.tr.commentBodies())
+	}
+	if urls := e.tr.artifactURLs(); len(urls) == 0 || urls[0] != "https://github.com/avivl/zeroth/pull/99" {
+		t.Fatalf("artifacts %v", urls)
 	}
 }
 

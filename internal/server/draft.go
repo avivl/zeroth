@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -233,8 +231,7 @@ func observeWorkspace(root string, effects []plan.Proposed) (map[string]string, 
 			}
 			return nil, fmt.Errorf("could not observe workspace at draft time: %s: %w", key, err)
 		}
-		sum := sha256.Sum256(body)
-		out[key] = hex.EncodeToString(sum[:])
+		out[key] = contentHash(body)
 	}
 	return out, nil
 }

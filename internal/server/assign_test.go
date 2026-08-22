@@ -86,6 +86,16 @@ func (s *stubTracker) lastState() tracker.StateKind {
 	return s.states[len(s.states)-1]
 }
 
+func (s *stubTracker) artifactURLs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0, len(s.artifacts))
+	for _, a := range s.artifacts {
+		out = append(out, a.URL)
+	}
+	return out
+}
+
 type fakeSandbox struct {
 	mu   sync.Mutex
 	n    int

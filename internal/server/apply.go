@@ -2,27 +2,63 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/avivl/zeroth/internal/audit"
+	"github.com/avivl/zeroth/internal/memory"
 	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/policy"
 	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/store"
+	"go.uber.org/zap"
 )
 
 const applyPrincipal policy.PrincipalID = "operator"
 
+// ApplyPublisher turns applied workspace files into a git branch and pull
+// request. Tests inject a fake. The daemon default is git plus gh.
+type ApplyPublisher interface {
+	Publish(ctx context.Context, req ApplyPublish) (ApplyRef, error)
+}
+
+// ApplyPublish is one applied plan ready to land on git.
+type ApplyPublish struct {
+	Repo      string
+	Workspace string
+	Targets   []string
+	Branch    string
+	Title     string
+	Body      string
+	IssueKey  string
+	PlanHash  string
+}
+
+// ApplyRef is the git/PR result of a successful publish.
+type ApplyRef struct {
+	Branch      string
+	Commit      string
+	PullRequest string
+}
+
 func (s *Server) applyApproved(ctx context.Context, sess store.Session, p plan.Plan) (plan.Result, string, error) {
-	world := newApplyWorld(p)
-	aud := &applyAuditor{log: s.audit, agent: sess.AgentID, session: sess.ID, planID: p.ID.String(), hash: string(p.Hash)}
 	sid, err := session.ParseID(sess.ID.String())
 	if err != nil {
 		return plan.Result{}, "", fmt.Errorf("server apply: %w", err)
 	}
+	root, err := s.applyWorkspace(ctx, sid, sess)
+	if err != nil {
+		return plan.Result{}, "", err
+	}
+	world := newApplyWorld(root)
+	aud := &applyAuditor{log: s.audit, agent: sess.AgentID, session: sess.ID, planID: p.ID.String(), hash: string(p.Hash)}
 	applier := &plan.Applier{
 		Kernel:      policy.New(),
 		World:       world,
@@ -35,27 +71,112 @@ func (s *Server) applyApproved(ctx context.Context, sess store.Session, p plan.P
 	if err != nil {
 		return result, "", err
 	}
+	if result.Status == plan.StatusApplied {
+		if err := s.publishApplied(ctx, sess, sid, p, world, root); err != nil {
+			return result, "", err
+		}
+	}
 	return result, aud.lastID, nil
 }
 
-type applyWorld struct {
-	mu      sync.Mutex
-	hashes  map[string]string
-	applied map[string]string
+func (s *Server) applyWorkspace(ctx context.Context, id session.ID, sess store.Session) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if s.sandbox != nil {
+		s.mu.Lock()
+		sbx := s.sandboxes[id.String()]
+		s.mu.Unlock()
+		dir, err := s.hostWorkspace(id, sbx)
+		if err != nil {
+			return "", fmt.Errorf("server apply workspace: %w", err)
+		}
+		return dir, nil
+	}
+	src := s.overlaySource(sess)
+	if src == "" {
+		return "", fmt.Errorf("server apply workspace: no sandbox overlay and no host checkout")
+	}
+	return src, nil
 }
 
-func newApplyWorld(p plan.Plan) *applyWorld {
-	hashes := make(map[string]string, len(p.Rows))
-	for _, row := range p.Rows {
-		hashes[row.Target] = row.Precondition
+func (s *Server) publishApplied(ctx context.Context, sess store.Session, sid session.ID, p plan.Plan, world *applyWorld, root string) error {
+	targets := world.targets()
+	if len(targets) == 0 {
+		return nil
 	}
-	return &applyWorld{hashes: hashes, applied: make(map[string]string)}
+	issue := s.trackerKey(sid)
+	req := ApplyPublish{
+		Repo:      s.overlaySource(sess),
+		Workspace: root,
+		Targets:   targets,
+		Branch:    gitBranchName(issue, p.Summary),
+		Title:     strings.TrimSpace(p.Summary),
+		Body:      applyPRBody(p, issue),
+		IssueKey:  issue,
+		PlanHash:  string(p.Hash),
+	}
+	if req.Title == "" {
+		req.Title = "Apply approved plan"
+	}
+	ref, err := s.publisher.Publish(ctx, req)
+	if err != nil {
+		return fmt.Errorf("server apply publish: %w", err)
+	}
+	if u := strings.TrimSpace(ref.PullRequest); u != "" {
+		s.rememberPR(sess.ID.String(), u)
+	}
+	s.log.Info("apply opened pull request",
+		zap.String("run", sid.String()),
+		zap.String("branch", ref.Branch),
+		zap.String("commit", ref.Commit),
+		zap.String("pr", ref.PullRequest),
+	)
+	return nil
+}
+
+func (s *Server) rememberPR(sessionID, url string) {
+	url = strings.TrimSpace(url)
+	if sessionID == "" || url == "" {
+		return
+	}
+	s.mu.Lock()
+	s.prs[sessionID] = url
+	s.mu.Unlock()
+}
+
+func (s *Server) takePR(sessionID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	url := s.prs[sessionID]
+	delete(s.prs, sessionID)
+	return url
+}
+
+type applyWorld struct {
+	root    string
+	mu      sync.Mutex
+	applied map[string]string
+	wrote   []string
+}
+
+func newApplyWorld(root string) *applyWorld {
+	return &applyWorld{root: root, applied: make(map[string]string)}
 }
 
 func (w *applyWorld) Observe(_ context.Context, target string) (string, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.hashes[target], nil
+	path, err := safeJoin(w.root, target)
+	if err != nil {
+		return "", err
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("server apply observe %s: %w", target, err)
+	}
+	return contentHash(body), nil
 }
 
 func (w *applyWorld) Execute(_ context.Context, row plan.Row) (string, error) {
@@ -65,13 +186,16 @@ func (w *applyWorld) Execute(_ context.Context, row plan.Row) (string, error) {
 		return post, nil
 	}
 	w.mu.Unlock()
-	post := row.Postcondition
-	if post == "" {
-		post = "applied:" + row.IdempotencyKey
+
+	post, err := applyRow(w.root, row)
+	if err != nil {
+		return "", err
 	}
 	w.mu.Lock()
-	w.hashes[row.Target] = post
 	w.applied[row.IdempotencyKey] = post
+	if !skipGitTarget(row.Target) {
+		w.wrote = append(w.wrote, row.Target)
+	}
 	w.mu.Unlock()
 	return post, nil
 }
@@ -81,6 +205,105 @@ func (w *applyWorld) Seen(key string) (string, bool) {
 	defer w.mu.Unlock()
 	post, ok := w.applied[key]
 	return post, ok
+}
+
+func (w *applyWorld) targets() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]string, len(w.wrote))
+	copy(out, w.wrote)
+	return out
+}
+
+func applyRow(root string, row plan.Row) (string, error) {
+	path, err := safeJoin(root, row.Target)
+	if err != nil {
+		return "", err
+	}
+	switch row.Op {
+	case plan.OpDestroy:
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("server apply destroy %s: %w", row.Target, err)
+		}
+		return emptyDigest(), nil
+	case plan.OpCreate, plan.OpModify:
+		body, err := materializePayload(path, row)
+		if err != nil {
+			return "", fmt.Errorf("server apply %s %s: %w", row.Op, row.Target, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return "", fmt.Errorf("server apply %s %s: %w", row.Op, row.Target, err)
+		}
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			return "", fmt.Errorf("server apply %s %s: %w", row.Op, row.Target, err)
+		}
+		return contentHash(body), nil
+	default:
+		return "", fmt.Errorf("server apply: unsupported op %s on %s", row.Op, row.Target)
+	}
+}
+
+func materializePayload(path string, row plan.Row) ([]byte, error) {
+	if !isUnifiedDiff(row.Payload) {
+		return []byte(row.Payload), nil
+	}
+	current, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	if os.IsNotExist(err) {
+		current = nil
+	}
+	return applyUnifiedDiff(current, row.Payload)
+}
+
+func contentHash(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func emptyDigest() string {
+	return contentHash(nil)
+}
+
+func safeJoin(root, target string) (string, error) {
+	rel := observeKey(target)
+	rel = filepath.FromSlash(rel)
+	if rel == "" || filepath.IsAbs(rel) || !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("server apply: unsafe target %q", target)
+	}
+	full := filepath.Join(root, rel)
+	if !withinDir(root, full) {
+		return "", fmt.Errorf("server apply: unsafe target %q", target)
+	}
+	return full, nil
+}
+
+func skipGitTarget(target string) bool {
+	rel := observeKey(target)
+	for _, p := range memory.CompiledPaths() {
+		if rel == p {
+			return true
+		}
+	}
+	return false
+}
+
+func applyPRBody(p plan.Plan, issueKey string) string {
+	var b strings.Builder
+	b.WriteString("Approved Zeroth plan")
+	if p.Hash != "" {
+		fmt.Fprintf(&b, " `%s`", p.Hash)
+	}
+	b.WriteString(".\n")
+	if issueKey != "" {
+		fmt.Fprintf(&b, "\nSource issue: %s\n", issueKey)
+	}
+	if s := strings.TrimSpace(p.Summary); s != "" {
+		fmt.Fprintf(&b, "\n%s\n", s)
+	}
+	b.WriteString("\nThis PR contains exactly the effects from the approved plan.\n")
+	return b.String()
 }
 
 type applyLeaser struct {
