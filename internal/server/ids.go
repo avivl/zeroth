@@ -24,22 +24,6 @@ func newApprovalID() (store.ApprovalID, error) {
 	return store.ParseApprovalID(raw)
 }
 
-func newMemoryID() (store.MemoryID, error) {
-	raw, err := newPrefixedID("m_")
-	if err != nil {
-		return store.MemoryID{}, err
-	}
-	return store.ParseMemoryID(raw)
-}
-
-func newMemoryProposalID() (store.MemoryProposalID, error) {
-	raw, err := newPrefixedID("mp_")
-	if err != nil {
-		return store.MemoryProposalID{}, err
-	}
-	return store.ParseMemoryProposalID(raw)
-}
-
 func newCheckpointID() (store.CheckpointID, error) {
 	raw, err := newPrefixedID("ck_")
 	if err != nil {

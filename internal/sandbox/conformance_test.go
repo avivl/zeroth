@@ -74,6 +74,7 @@ func TestDriverConformance(t *testing.T) {
 			t.Run("export_alongside_exec", func(t *testing.T) { testExportAlongsideExec(t, tc.open) })
 			t.Run("cred_files_tmpfs", func(t *testing.T) { testCredFilesTmpfs(t, tc.open) })
 			t.Run("credential_excluded_from_export", func(t *testing.T) { testCredentialExcludedFromExport(t, tc.open) })
+			t.Run("compiled_memory_excluded_from_export", func(t *testing.T) { testCompiledMemoryExcludedFromExport(t, tc.open) })
 			t.Run("export_secret_fail_closed", func(t *testing.T) { testExportSecretFailClosed(t, tc.open) })
 			t.Run("branch_independent", func(t *testing.T) { testBranchIndependent(t, tc.open) })
 			t.Run("unknown_id", func(t *testing.T) { testUnknownID(t, tc.open) })
@@ -546,6 +547,41 @@ func testCredentialExcludedFromExport(t *testing.T, open func(t *testing.T) sand
 	}
 	if bytes.Contains(buf.Bytes(), []byte("oauth-store")) {
 		t.Fatal("excluded credential content appeared in export")
+	}
+}
+
+func testCompiledMemoryExcludedFromExport(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	t.Helper()
+	d := open(t)
+	ctx := t.Context()
+	sb := mustSpawn(t, d, helloTar())
+	script := strings.Join([]string{
+		"echo kept > /workspace/kept.txt",
+		"echo compiled > /workspace/AGENTS.md",
+		"echo compiled > /workspace/CLAUDE.md",
+		"mkdir -p /workspace/.cursor/rules /workspace/.zeroth/compiled-memory",
+		"echo rule > /workspace/.cursor/rules/zeroth-memory.mdc",
+		"echo other > /workspace/.cursor/rules/other.mdc",
+		"echo marker > /workspace/.zeroth/compiled-memory/README",
+	}, " && ")
+	mustExec(t, d, sb.ID, sandbox.Cmd{Argv: []string{"sh", "-c", script}})
+	var buf bytes.Buffer
+	if err := d.ExportTar(ctx, sb.ID, &buf); err != nil {
+		t.Fatalf("ExportTar: %v", err)
+	}
+	names := tarFileNames(t, buf.Bytes())
+	if !names["kept.txt"] || !names["hello.txt"] || !names[".cursor/rules/other.mdc"] {
+		t.Fatalf("export missing workspace files: %v", names)
+	}
+	for _, forbidden := range []string{
+		"AGENTS.md",
+		"CLAUDE.md",
+		".cursor/rules/zeroth-memory.mdc",
+		".zeroth/compiled-memory/README",
+	} {
+		if names[forbidden] {
+			t.Fatalf("export contains compiled memory %q", forbidden)
+		}
 	}
 }
 

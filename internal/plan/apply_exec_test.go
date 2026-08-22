@@ -466,6 +466,95 @@ func TestApplyMissingPorts(t *testing.T) {
 	}
 }
 
+type testMemory struct {
+	mu        sync.Mutex
+	proposals []Row
+	fail      error
+}
+
+func (m *testMemory) Propose(_ context.Context, row Row) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.fail != nil {
+		return "", m.fail
+	}
+	m.proposals = append(m.proposals, row)
+	if row.Postcondition != "" {
+		return row.Postcondition, nil
+	}
+	return "queued:" + row.Target, nil
+}
+
+func (m *testMemory) queued() []Row {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]Row, len(m.proposals))
+	copy(out, m.proposals)
+	return out
+}
+
+func memoryApproved(t *testing.T) Plan {
+	t.Helper()
+	p := mustBuild(t, Draft{
+		Effects: []Proposed{
+			{Type: "modify", Path: "a.txt", Diff: "A"},
+			{Type: "memory_proposal", Path: "session/style", Diff: "prefer table tests"},
+		},
+		Observed: map[string]string{"a.txt": "h1"},
+	})
+	approved, err := examined(p).Approve(time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return approved
+}
+
+func TestApplyMemoryProposalQueuesAndDoesNotWriteWorld(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	applier, world, _, _, _ := applyHarness(now)
+	mem := &testMemory{}
+	applier.Memory = mem
+	p := memoryApproved(t)
+
+	got, err := applier.Apply(t.Context(), applyActor, p, Approval{PlanHash: p.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusApplied || got.AppliedThrough != 2 {
+		t.Fatalf("status=%q through=%d", got.Status, got.AppliedThrough)
+	}
+	if len(world.writeKeys()) != 1 || world.writeKeys()[0] != p.Rows[0].IdempotencyKey {
+		t.Fatalf("world writes = %v", world.writeKeys())
+	}
+	queued := mem.queued()
+	if len(queued) != 1 || queued[0].Op != OpMemoryProposal || queued[0].Target != "session/style" {
+		t.Fatalf("queued %+v", queued)
+	}
+	if queued[0].Payload != "prefer table tests" {
+		t.Fatalf("payload %q", queued[0].Payload)
+	}
+}
+
+func TestApplyMemoryProposalWithoutQueueIsFailClosed(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	applier, world, leases, ck, _ := applyHarness(now)
+	p := memoryApproved(t)
+
+	got, err := applier.Apply(t.Context(), applyActor, p, Approval{PlanHash: p.Hash})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("err = %v, want ErrInvalid", err)
+	}
+	if got.AppliedThrough != 0 || len(world.writeKeys()) != 0 {
+		t.Fatalf("status=%q through=%d writes=%v", got.Status, got.AppliedThrough, world.writeKeys())
+	}
+	acq, rel := leases.counts()
+	if acq != 0 || rel != 0 || ck.count() != 0 {
+		t.Fatalf("side effects on refuse: leases %d/%d ck %d", acq, rel, ck.count())
+	}
+}
+
 func TestApplyFirstRowFailureIsFailClosed(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)

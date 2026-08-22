@@ -342,47 +342,6 @@ func approvalFrom(a store.Approval) gen.Approval {
 	return out
 }
 
-func memoryFrom(m store.MemoryEntry) gen.MemoryEntry {
-	out := gen.MemoryEntry{
-		Id:        gen.MemoryID(m.ID.String()),
-		Kind:      gen.MemoryKind(m.Kind),
-		Content:   m.Content,
-		CreatedAt: m.CreatedAt.UTC(),
-	}
-	if m.RefID != "" {
-		ref := m.RefID
-		out.RefId = &ref
-	}
-	return out
-}
-
-func memoryProposalFrom(p store.MemoryProposal) gen.MemoryProposal {
-	out := gen.MemoryProposal{
-		Id:        gen.MemoryProposalID(p.ID.String()),
-		Kind:      gen.MemoryKind(p.Kind),
-		Content:   p.Content,
-		Status:    gen.MemoryProposalStatus(p.Status),
-		CreatedAt: p.CreatedAt.UTC(),
-	}
-	if p.RefID != "" {
-		ref := p.RefID
-		out.RefId = &ref
-	}
-	if !p.SessionID.IsZero() {
-		id := gen.RunID(p.SessionID.String())
-		out.RunId = &id
-	}
-	if !p.MemoryID.IsZero() {
-		id := gen.MemoryID(p.MemoryID.String())
-		out.MemoryId = &id
-	}
-	if !p.ReviewedAt.IsZero() {
-		t := p.ReviewedAt.UTC()
-		out.ReviewedAt = &t
-	}
-	return out
-}
-
 func leaseFrom(l store.Lease) gen.Lease {
 	out := gen.Lease{
 		Id:        gen.LeaseID(l.ID.String()),

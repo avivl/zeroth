@@ -9,6 +9,8 @@ import (
 	"github.com/avivl/zeroth/internal/store"
 )
 
+const memorySelect = `id, kind, ref_id, content, fact_key, author, author_kind, source, action, deleted, version, created_at_unix_nano, updated_at_unix_nano, history_json`
+
 func (s *Store) CreateMemory(ctx context.Context, m store.MemoryEntry) error {
 	if err := s.guard(); err != nil {
 		return err
@@ -16,10 +18,27 @@ func (s *Store) CreateMemory(ctx context.Context, m store.MemoryEntry) error {
 	if m.ID.IsZero() || m.Kind == "" || m.Content == "" {
 		return wrap("create memory", store.ErrInvalid)
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO memory_entries (id, kind, ref_id, content, created_at_unix_nano)
-		VALUES (?, ?, ?, ?, ?)`,
-		m.ID.String(), m.Kind, m.RefID, m.Content, nano(m.CreatedAt),
+	hist, err := marshalHistory(m.History)
+	if err != nil {
+		return wrap("create memory", err)
+	}
+	updated := m.UpdatedAt
+	if updated.IsZero() {
+		updated = m.CreatedAt
+	}
+	deleted := 0
+	if m.Deleted {
+		deleted = 1
+	}
+	version := m.Version
+	if version == 0 {
+		version = 1
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO memory_entries (id, kind, ref_id, content, fact_key, author, author_kind, source, action, deleted, version, created_at_unix_nano, updated_at_unix_nano, history_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID.String(), m.Kind, m.RefID, m.Content, m.Key, m.Author, m.AuthorKind, m.Source, m.Action,
+		deleted, version, nano(m.CreatedAt), unixNano(updated), hist,
 	)
 	if err != nil {
 		return wrap("create memory", err)
@@ -34,22 +53,44 @@ func (s *Store) GetMemory(ctx context.Context, id store.MemoryID) (store.MemoryE
 	if id.IsZero() {
 		return store.MemoryEntry{}, wrap("get memory", store.ErrInvalid)
 	}
-	var rawID string
-	var created int64
-	var m store.MemoryEntry
-	err := s.db.QueryRowContext(ctx, `
-		SELECT id, kind, ref_id, content, created_at_unix_nano FROM memory_entries WHERE id = ?`, id.String(),
-	).Scan(&rawID, &m.Kind, &m.RefID, &m.Content, &created)
+	row := s.db.QueryRowContext(ctx, `SELECT `+memorySelect+` FROM memory_entries WHERE id = ?`, id.String())
+	m, err := scanMemory(row)
 	if err != nil {
 		return store.MemoryEntry{}, wrap("get memory", err)
 	}
-	mid, err := store.ParseMemoryID(rawID)
-	if err != nil {
-		return store.MemoryEntry{}, wrap("get memory", err)
-	}
-	m.ID = mid
-	m.CreatedAt = fromNano(created)
 	return m, nil
+}
+
+func (s *Store) UpdateMemory(ctx context.Context, m store.MemoryEntry) error {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if m.ID.IsZero() || m.Kind == "" || m.Content == "" {
+		return wrap("update memory", store.ErrInvalid)
+	}
+	hist, err := marshalHistory(m.History)
+	if err != nil {
+		return wrap("update memory", err)
+	}
+	deleted := 0
+	if m.Deleted {
+		deleted = 1
+	}
+	version := m.Version
+	if version == 0 {
+		version = 1
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE memory_entries SET kind = ?, ref_id = ?, content = ?, fact_key = ?, author = ?, author_kind = ?,
+			source = ?, action = ?, deleted = ?, version = ?, updated_at_unix_nano = ?, history_json = ?
+		WHERE id = ?`,
+		m.Kind, m.RefID, m.Content, m.Key, m.Author, m.AuthorKind, m.Source, m.Action,
+		deleted, version, unixNano(m.UpdatedAt), hist, m.ID.String(),
+	)
+	if err != nil {
+		return wrap("update memory", err)
+	}
+	return affectedOne(res, "update memory")
 }
 
 func (s *Store) ListMemory(ctx context.Context, q store.MemoryQuery) (store.Page[store.MemoryEntry], error) {
@@ -67,6 +108,10 @@ func (s *Store) ListMemory(ctx context.Context, q store.MemoryQuery) (store.Page
 		conds = append(conds, `ref_id = ?`)
 		args = append(args, q.RefID)
 	}
+	if q.Key != "" {
+		conds = append(conds, `fact_key = ?`)
+		args = append(args, q.Key)
+	}
 	cw, cargs, err := cursorWhere("created_at_unix_nano", listNewestFirst, q.Cursor)
 	if err != nil {
 		return store.Page[store.MemoryEntry]{}, wrap("list memory", err)
@@ -75,7 +120,7 @@ func (s *Store) ListMemory(ctx context.Context, q store.MemoryQuery) (store.Page
 		conds = append(conds, cw)
 		args = append(args, cargs...)
 	}
-	query := `SELECT id, kind, ref_id, content, created_at_unix_nano FROM memory_entries`
+	query := `SELECT ` + memorySelect + ` FROM memory_entries`
 	if len(conds) > 0 {
 		query += ` WHERE ` + strings.Join(conds, " AND ")
 	}
@@ -88,24 +133,46 @@ func (s *Store) ListMemory(ctx context.Context, q store.MemoryQuery) (store.Page
 	defer rows.Close()
 	var items []store.MemoryEntry
 	for rows.Next() {
-		var m store.MemoryEntry
-		var rawID string
-		var created int64
-		if err := rows.Scan(&rawID, &m.Kind, &m.RefID, &m.Content, &created); err != nil {
-			return store.Page[store.MemoryEntry]{}, wrap("list memory", err)
-		}
-		mid, err := store.ParseMemoryID(rawID)
+		m, err := scanMemory(rows)
 		if err != nil {
 			return store.Page[store.MemoryEntry]{}, wrap("list memory", err)
 		}
-		m.ID = mid
-		m.CreatedAt = fromNano(created)
 		items = append(items, m)
 	}
 	if err := rows.Err(); err != nil {
 		return store.Page[store.MemoryEntry]{}, wrap("list memory", err)
 	}
 	return pageOf(items, limit, func(m store.MemoryEntry) time.Time { return m.CreatedAt }, func(m store.MemoryEntry) string { return m.ID.String() }), nil
+}
+
+type memoryScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanMemory(row memoryScanner) (store.MemoryEntry, error) {
+	var rawID, hist string
+	var created, updated int64
+	var deleted, version int
+	var m store.MemoryEntry
+	err := row.Scan(&rawID, &m.Kind, &m.RefID, &m.Content, &m.Key, &m.Author, &m.AuthorKind, &m.Source, &m.Action,
+		&deleted, &version, &created, &updated, &hist)
+	if err != nil {
+		return store.MemoryEntry{}, err
+	}
+	mid, err := store.ParseMemoryID(rawID)
+	if err != nil {
+		return store.MemoryEntry{}, err
+	}
+	m.ID = mid
+	m.Deleted = deleted != 0
+	m.Version = version
+	m.CreatedAt = fromNano(created)
+	m.UpdatedAt = fromNano(updated)
+	m.History, err = unmarshalHistory(hist)
+	if err != nil {
+		return store.MemoryEntry{}, err
+	}
+	return m, nil
 }
 
 func (s *Store) CreateMemoryProposal(ctx context.Context, p store.MemoryProposal) error {
@@ -116,10 +183,10 @@ func (s *Store) CreateMemoryProposal(ctx context.Context, p store.MemoryProposal
 		return wrap("create memory proposal", store.ErrInvalid)
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO memory_proposals (id, kind, ref_id, session_id, content, status, memory_id, created_at_unix_nano, reviewed_at_unix_nano)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO memory_proposals (id, kind, ref_id, session_id, content, status, memory_id, created_at_unix_nano, reviewed_at_unix_nano, fact_key, author, author_kind, source)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		p.ID.String(), p.Kind, p.RefID, p.SessionID.String(), p.Content, p.Status, p.MemoryID.String(),
-		nano(p.CreatedAt), toNullNano(p.ReviewedAt),
+		nano(p.CreatedAt), toNullNano(p.ReviewedAt), p.Key, p.Author, p.AuthorKind, p.Source,
 	)
 	if err != nil {
 		return wrap("create memory proposal", err)
@@ -139,9 +206,9 @@ func (s *Store) GetMemoryProposal(ctx context.Context, id store.MemoryProposalID
 	var reviewed sql.NullInt64
 	var p store.MemoryProposal
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, kind, ref_id, session_id, content, status, memory_id, created_at_unix_nano, reviewed_at_unix_nano
+		SELECT id, kind, ref_id, session_id, content, status, memory_id, created_at_unix_nano, reviewed_at_unix_nano, fact_key, author, author_kind, source
 		FROM memory_proposals WHERE id = ?`, id.String(),
-	).Scan(&rawID, &p.Kind, &p.RefID, &sess, &p.Content, &p.Status, &mem, &created, &reviewed)
+	).Scan(&rawID, &p.Kind, &p.RefID, &sess, &p.Content, &p.Status, &mem, &created, &reviewed, &p.Key, &p.Author, &p.AuthorKind, &p.Source)
 	if err != nil {
 		return store.MemoryProposal{}, wrap("get memory proposal", err)
 	}
@@ -157,10 +224,10 @@ func (s *Store) UpdateMemoryProposal(ctx context.Context, p store.MemoryProposal
 	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE memory_proposals SET kind = ?, ref_id = ?, session_id = ?, content = ?, status = ?,
-			memory_id = ?, reviewed_at_unix_nano = ?
+			memory_id = ?, reviewed_at_unix_nano = ?, fact_key = ?, author = ?, author_kind = ?, source = ?
 		WHERE id = ?`,
 		p.Kind, p.RefID, p.SessionID.String(), p.Content, p.Status, p.MemoryID.String(),
-		toNullNano(p.ReviewedAt), p.ID.String(),
+		toNullNano(p.ReviewedAt), p.Key, p.Author, p.AuthorKind, p.Source, p.ID.String(),
 	)
 	if err != nil {
 		return wrap("update memory proposal", err)
@@ -187,7 +254,7 @@ func (s *Store) ListMemoryProposals(ctx context.Context, q store.MemoryProposalQ
 		conds = append(conds, cw)
 		args = append(args, cargs...)
 	}
-	query := `SELECT id, kind, ref_id, session_id, content, status, memory_id, created_at_unix_nano, reviewed_at_unix_nano FROM memory_proposals`
+	query := `SELECT id, kind, ref_id, session_id, content, status, memory_id, created_at_unix_nano, reviewed_at_unix_nano, fact_key, author, author_kind, source FROM memory_proposals`
 	if len(conds) > 0 {
 		query += ` WHERE ` + strings.Join(conds, " AND ")
 	}
@@ -204,7 +271,7 @@ func (s *Store) ListMemoryProposals(ctx context.Context, q store.MemoryProposalQ
 		var rawID, sess, mem string
 		var created int64
 		var reviewed sql.NullInt64
-		if err := rows.Scan(&rawID, &p.Kind, &p.RefID, &sess, &p.Content, &p.Status, &mem, &created, &reviewed); err != nil {
+		if err := rows.Scan(&rawID, &p.Kind, &p.RefID, &sess, &p.Content, &p.Status, &mem, &created, &reviewed, &p.Key, &p.Author, &p.AuthorKind, &p.Source); err != nil {
 			return store.Page[store.MemoryProposal]{}, wrap("list memory proposals", err)
 		}
 		p, err := finishProposal(p, rawID, sess, mem, created, reviewed, "list memory proposals")

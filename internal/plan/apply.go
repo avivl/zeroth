@@ -143,6 +143,14 @@ type systemClock struct{}
 
 func (systemClock) Now() time.Time { return time.Now().UTC() }
 
+// Memory is the propose-first queue apply uses for memory_proposal rows.
+// The implementation is a notebook. This port can only propose: it has
+// no Accept, so apply cannot write facts (Z1-022). Required when the
+// plan lists a memory_proposal row; otherwise unused.
+type Memory interface {
+	Propose(ctx context.Context, row Row) (postcondition string, err error)
+}
+
 // Applier is the only code path that produces external effects. Ports
 // are required; a missing port is fail-closed, not a skip.
 type Applier struct {
@@ -152,6 +160,7 @@ type Applier struct {
 	Leases      Leaser
 	Checkpoints Checkpointer
 	Audit       Auditor
+	Memory      Memory
 }
 
 // Apply runs the fail-closed sequence. It never mutates the input Plan;
@@ -214,7 +223,13 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 	}
 
 	for _, row := range rows {
+		if row.Op == OpMemoryProposal && a.Memory == nil {
+			return resultFrom(p, nil, 0, ""), fmt.Errorf("plan apply: memory_proposal %s: %w", row.Target, ErrInvalid)
+		}
 		if _, ok := a.World.Seen(row.IdempotencyKey); ok {
+			continue
+		}
+		if row.Op == OpMemoryProposal {
 			continue
 		}
 		got, obsErr := a.World.Observe(ctx, row.Target)
@@ -277,7 +292,7 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 		if authErr := authorizeRow(kernel, clock.Now(), principal, p, row, leases); authErr != nil {
 			return a.haltPartial(ctx, p, applied, ck, authErr)
 		}
-		post, execErr := a.World.Execute(ctx, row)
+		post, execErr := a.executeRow(ctx, row)
 		if execErr != nil {
 			return a.haltPartial(ctx, p, applied, ck, fmt.Errorf("row %d: %w", i+1, execErr))
 		}
@@ -296,6 +311,20 @@ func (a *Applier) Apply(ctx context.Context, principal policy.PrincipalID, in Pl
 		return resultFrom(p, applied, p.AppliedThrough, ck), fmt.Errorf("plan apply: sign plan: %w", signErr)
 	}
 	return resultFrom(p, applied, p.AppliedThrough, ck), nil
+}
+
+func (a *Applier) executeRow(ctx context.Context, row Row) (string, error) {
+	if row.Op == OpMemoryProposal {
+		if a.Memory == nil {
+			return "", fmt.Errorf("memory_proposal: %w", ErrInvalid)
+		}
+		post, err := a.Memory.Propose(ctx, row)
+		if err != nil {
+			return "", err
+		}
+		return post, nil
+	}
+	return a.World.Execute(ctx, row)
 }
 
 func authorizeRow(k *policy.Kernel, now time.Time, principal policy.PrincipalID, p Plan, row Row, leases []policy.Lease) error {

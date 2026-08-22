@@ -18,8 +18,6 @@ const applyPrincipal policy.PrincipalID = "operator"
 
 func (s *Server) applyApproved(ctx context.Context, sess store.Session, p plan.Plan) (plan.Result, string, error) {
 	world := newApplyWorld(p)
-	world.server = s
-	world.session = sess
 	aud := &applyAuditor{log: s.audit, agent: sess.AgentID, session: sess.ID, planID: p.ID.String(), hash: string(p.Hash)}
 	sid, err := session.ParseID(sess.ID.String())
 	if err != nil {
@@ -31,6 +29,7 @@ func (s *Server) applyApproved(ctx context.Context, sess store.Session, p plan.P
 		Leases:      &applyLeaser{store: s.store, agent: sess.AgentID},
 		Checkpoints: &applyCheckpointer{server: s, id: sid},
 		Audit:       aud,
+		Memory:      s.memoryQueue(sess),
 	}
 	result, err := applier.Apply(ctx, applyPrincipal, p, plan.Approval{PlanHash: p.Hash})
 	if err != nil {
@@ -43,8 +42,6 @@ type applyWorld struct {
 	mu      sync.Mutex
 	hashes  map[string]string
 	applied map[string]string
-	server  *Server
-	session store.Session
 }
 
 func newApplyWorld(p plan.Plan) *applyWorld {
@@ -61,31 +58,13 @@ func (w *applyWorld) Observe(_ context.Context, target string) (string, error) {
 	return w.hashes[target], nil
 }
 
-func (w *applyWorld) Execute(ctx context.Context, row plan.Row) (string, error) {
+func (w *applyWorld) Execute(_ context.Context, row plan.Row) (string, error) {
 	w.mu.Lock()
 	if post, ok := w.applied[row.IdempotencyKey]; ok {
 		w.mu.Unlock()
 		return post, nil
 	}
 	w.mu.Unlock()
-	if row.Op == plan.OpMemoryProposal && w.server != nil {
-		id, err := newMemoryProposalID()
-		if err != nil {
-			return "", fmt.Errorf("server apply memory: %w", err)
-		}
-		now := time.Now().UTC()
-		if err := w.server.store.CreateMemoryProposal(ctx, store.MemoryProposal{
-			ID:        id,
-			Kind:      storeKindForMemory(row),
-			RefID:     row.Target,
-			SessionID: w.session.ID,
-			Content:   row.Payload,
-			Status:    "pending",
-			CreatedAt: now,
-		}); err != nil {
-			return "", fmt.Errorf("server apply memory: %w", err)
-		}
-	}
 	post := row.Postcondition
 	if post == "" {
 		post = "applied:" + row.IdempotencyKey
@@ -102,10 +81,6 @@ func (w *applyWorld) Seen(key string) (string, bool) {
 	defer w.mu.Unlock()
 	post, ok := w.applied[key]
 	return post, ok
-}
-
-func storeKindForMemory(_ plan.Row) string {
-	return "session"
 }
 
 type applyLeaser struct {
