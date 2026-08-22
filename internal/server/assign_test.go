@@ -23,12 +23,13 @@ import (
 )
 
 type stubTracker struct {
-	mu        sync.Mutex
-	ch        chan tracker.AssignmentEvent
-	comments  []string
-	states    []tracker.StateKind
-	artifacts []tracker.Artifact
-	issue     tracker.Issue
+	mu         sync.Mutex
+	ch         chan tracker.AssignmentEvent
+	comments   []string
+	states     []tracker.StateKind
+	artifacts  []tracker.Artifact
+	unassigned []string
+	issue      tracker.Issue
 }
 
 func newStubTracker(iss tracker.Issue) *stubTracker {
@@ -71,6 +72,12 @@ func (s *stubTracker) LinkArtifact(_ context.Context, _ string, a tracker.Artifa
 	s.artifacts = append(s.artifacts, a)
 	return nil
 }
+func (s *stubTracker) Unassign(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unassigned = append(s.unassigned, key)
+	return nil
+}
 func (s *stubTracker) commentBodies() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,6 +101,12 @@ func (s *stubTracker) artifactURLs() []string {
 		out = append(out, a.URL)
 	}
 	return out
+}
+
+func (s *stubTracker) unassignKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.unassigned...)
 }
 
 type fakeSandbox struct {

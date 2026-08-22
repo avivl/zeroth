@@ -10,7 +10,7 @@ import (
 	"github.com/avivl/zeroth/internal/store"
 )
 
-const sessionCols = `id, agent_id, plan_id, status, prompt, tracker_ref, workspace_json, autonomy_tier, created_at_unix_nano, updated_at_unix_nano, finished_at_unix_nano`
+const sessionCols = `id, agent_id, plan_id, status, prompt, tracker_ref, workspace_json, autonomy_tier, pull_request, retract_reason, created_at_unix_nano, updated_at_unix_nano, finished_at_unix_nano, retracted_at_unix_nano`
 
 func (s *Store) CreateSession(ctx context.Context, sess store.Session) error {
 	if err := s.guard(); err != nil {
@@ -23,9 +23,10 @@ func (s *Store) CreateSession(ctx context.Context, sess store.Session) error {
 	if err != nil {
 		return wrap("create session", err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO sessions (`+sessionCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = s.db.ExecContext(ctx, `INSERT INTO sessions (`+sessionCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID.String(), sess.AgentID.String(), sess.PlanID.String(), sess.Status, sess.Prompt, sess.TrackerRef,
-		ws, sess.AutonomyTier, nano(sess.CreatedAt), nano(sess.UpdatedAt), toNullNano(sess.FinishedAt),
+		ws, sess.AutonomyTier, sess.PullRequest, sess.RetractReason, nano(sess.CreatedAt), nano(sess.UpdatedAt),
+		toNullNano(sess.FinishedAt), toNullNano(sess.RetractedAt),
 	)
 	if err != nil {
 		return wrap("create session", err)
@@ -61,10 +62,12 @@ func (s *Store) UpdateSession(ctx context.Context, sess store.Session) error {
 		UPDATE sessions SET agent_id = ?,
 			plan_id = CASE WHEN ? = '' THEN plan_id ELSE ? END,
 			status = ?, prompt = ?, tracker_ref = ?,
-			workspace_json = ?, autonomy_tier = ?, updated_at_unix_nano = ?, finished_at_unix_nano = ?
+			workspace_json = ?, autonomy_tier = ?, pull_request = ?, retract_reason = ?,
+			updated_at_unix_nano = ?, finished_at_unix_nano = ?, retracted_at_unix_nano = ?
 		WHERE id = ?`,
 		sess.AgentID.String(), planID, planID, sess.Status, sess.Prompt, sess.TrackerRef, ws,
-		sess.AutonomyTier, nano(sess.UpdatedAt), toNullNano(sess.FinishedAt), sess.ID.String(),
+		sess.AutonomyTier, sess.PullRequest, sess.RetractReason, nano(sess.UpdatedAt),
+		toNullNano(sess.FinishedAt), toNullNano(sess.RetractedAt), sess.ID.String(),
 	)
 	if err != nil {
 		return wrap("update session", err)
@@ -117,12 +120,13 @@ func scanSession(row *sql.Row, op string) (store.Session, error) {
 	var sess store.Session
 	var id, agent, plan, ws string
 	var created, updated int64
-	var finished sql.NullInt64
-	err := row.Scan(&id, &agent, &plan, &sess.Status, &sess.Prompt, &sess.TrackerRef, &ws, &sess.AutonomyTier, &created, &updated, &finished)
+	var finished, retracted sql.NullInt64
+	err := row.Scan(&id, &agent, &plan, &sess.Status, &sess.Prompt, &sess.TrackerRef, &ws, &sess.AutonomyTier,
+		&sess.PullRequest, &sess.RetractReason, &created, &updated, &finished, &retracted)
 	if err != nil {
 		return store.Session{}, wrap(op, err)
 	}
-	return finishSession(sess, id, agent, plan, ws, created, updated, finished, op)
+	return finishSession(sess, id, agent, plan, ws, created, updated, finished, retracted, op)
 }
 
 func scanSessions(rows *sql.Rows) ([]store.Session, error) {
@@ -131,11 +135,12 @@ func scanSessions(rows *sql.Rows) ([]store.Session, error) {
 		var sess store.Session
 		var id, agent, plan, ws string
 		var created, updated int64
-		var finished sql.NullInt64
-		if err := rows.Scan(&id, &agent, &plan, &sess.Status, &sess.Prompt, &sess.TrackerRef, &ws, &sess.AutonomyTier, &created, &updated, &finished); err != nil {
+		var finished, retracted sql.NullInt64
+		if err := rows.Scan(&id, &agent, &plan, &sess.Status, &sess.Prompt, &sess.TrackerRef, &ws, &sess.AutonomyTier,
+			&sess.PullRequest, &sess.RetractReason, &created, &updated, &finished, &retracted); err != nil {
 			return nil, wrap("list sessions", err)
 		}
-		sess, err := finishSession(sess, id, agent, plan, ws, created, updated, finished, "list sessions")
+		sess, err := finishSession(sess, id, agent, plan, ws, created, updated, finished, retracted, "list sessions")
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +155,7 @@ func scanSessions(rows *sql.Rows) ([]store.Session, error) {
 	return out, nil
 }
 
-func finishSession(sess store.Session, id, agent, plan, ws string, created, updated int64, finished sql.NullInt64, op string) (store.Session, error) {
+func finishSession(sess store.Session, id, agent, plan, ws string, created, updated int64, finished, retracted sql.NullInt64, op string) (store.Session, error) {
 	sid, err := store.ParseSessionID(id)
 	if err != nil {
 		return store.Session{}, wrap(op, err)
@@ -175,6 +180,7 @@ func finishSession(sess store.Session, id, agent, plan, ws string, created, upda
 	sess.CreatedAt = fromNano(created)
 	sess.UpdatedAt = fromNano(updated)
 	sess.FinishedAt = nullNano(finished)
+	sess.RetractedAt = nullNano(retracted)
 	return sess, nil
 }
 
