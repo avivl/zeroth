@@ -15,6 +15,7 @@ import (
 // Provider is a Linear tracker.
 type Provider struct {
 	apiKey        string
+	authStyle     AuthStyle
 	endpoint      string
 	teamID        string
 	projectID     string
@@ -36,6 +37,10 @@ func New(cfg Config) (*Provider, error) {
 	if key == "" {
 		return nil, fmt.Errorf("tracker linear: empty api key: %w", tracker.ErrInvalid)
 	}
+	style, err := parseAuthStyle(cfg.AuthStyle)
+	if err != nil {
+		return nil, err
+	}
 	endpoint := strings.TrimSpace(cfg.Endpoint)
 	if endpoint == "" {
 		endpoint = defaultEndpoint
@@ -50,6 +55,7 @@ func New(cfg Config) (*Provider, error) {
 	}
 	return &Provider{
 		apiKey:        key,
+		authStyle:     style,
 		endpoint:      endpoint,
 		teamID:        strings.TrimSpace(cfg.TeamID),
 		projectID:     strings.TrimSpace(cfg.ProjectID),

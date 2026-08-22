@@ -37,6 +37,9 @@ type Config struct {
 	LinearProjectID     string
 	LinearPollInterval  time.Duration
 	LinearWebhookSecret string
+	// LinearAuthStyle is "personal" (raw API key, default) or "oauth"
+	// (Bearer actor token). See linear.AuthStyle.
+	LinearAuthStyle string
 }
 
 func registerFlags(cmd *cobra.Command) {
@@ -55,6 +58,7 @@ func registerFlags(cmd *cobra.Command) {
 	f.String("linear-project-id", "", "optional Linear project id filter (ZEROTH_LINEAR_PROJECT_ID)")
 	f.String("linear-poll-interval", "15s", "assignment poll interval (ZEROTH_LINEAR_POLL_INTERVAL)")
 	f.String("linear-webhook-secret", "", "opt-in Linear webhook HMAC secret (ZEROTH_LINEAR_WEBHOOK_SECRET)")
+	f.String("linear-auth-style", "personal", "Linear auth: personal (API key) or oauth (Bearer actor token) (ZEROTH_LINEAR_AUTH_STYLE)")
 }
 
 func setDefaults(v *viper.Viper) {
@@ -71,6 +75,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("linear-project-id", "")
 	v.SetDefault("linear-poll-interval", "15s")
 	v.SetDefault("linear-webhook-secret", "")
+	v.SetDefault("linear-auth-style", "personal")
 }
 
 func loadConfig(cmd *cobra.Command, v *viper.Viper) error {
@@ -104,6 +109,7 @@ func loadConfig(cmd *cobra.Command, v *viper.Viper) error {
 		"addr", "db-path", "docker-socket", "log-level", "log-encoding", "signing-key",
 		"linear-api-key", "linear-endpoint", "linear-agent-user", "linear-team-id",
 		"linear-project-id", "linear-poll-interval", "linear-webhook-secret",
+		"linear-auth-style",
 	} {
 		if !cmd.Flags().Changed(name) {
 			continue
@@ -142,5 +148,6 @@ func configFrom(v *viper.Viper) Config {
 		LinearProjectID:     strings.TrimSpace(v.GetString("linear-project-id")),
 		LinearPollInterval:  poll,
 		LinearWebhookSecret: strings.TrimSpace(v.GetString("linear-webhook-secret")),
+		LinearAuthStyle:     strings.TrimSpace(v.GetString("linear-auth-style")),
 	}
 }

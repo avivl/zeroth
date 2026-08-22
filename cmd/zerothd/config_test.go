@@ -154,6 +154,25 @@ func TestConfigLinearEnv(t *testing.T) {
 	if got.LinearAPIKey != "" {
 		t.Fatal("api key should stay empty in tests")
 	}
+	if got.LinearAuthStyle != "personal" {
+		t.Fatalf("auth style default = %q, want personal", got.LinearAuthStyle)
+	}
+}
+
+func TestConfigLinearAuthStyleEnv(t *testing.T) {
+	got := loadFrom(t, nil, map[string]string{
+		"ZEROTH_LINEAR_AUTH_STYLE": "oauth",
+	})
+	if got.LinearAuthStyle != "oauth" {
+		t.Fatalf("auth style = %q, want oauth", got.LinearAuthStyle)
+	}
+
+	fromFlag := loadFrom(t, []string{"--linear-auth-style", "personal"}, map[string]string{
+		"ZEROTH_LINEAR_AUTH_STYLE": "oauth",
+	})
+	if fromFlag.LinearAuthStyle != "personal" {
+		t.Fatalf("flag auth style = %q, want personal over env oauth", fromFlag.LinearAuthStyle)
+	}
 }
 
 func TestConfigMissingExplicitFile(t *testing.T) {
@@ -173,7 +192,7 @@ func loadFrom(t *testing.T, args []string, env map[string]string) Config {
 		"ZEROTH_LOG_LEVEL", "ZEROTH_LOG_ENCODING", "ZEROTH_SIGNING_KEY", "ZEROTH_CONFIG",
 		"ZEROTH_LINEAR_API_KEY", "ZEROTH_LINEAR_ENDPOINT", "ZEROTH_LINEAR_AGENT_USER",
 		"ZEROTH_LINEAR_TEAM_ID", "ZEROTH_LINEAR_PROJECT_ID", "ZEROTH_LINEAR_POLL_INTERVAL",
-		"ZEROTH_LINEAR_WEBHOOK_SECRET",
+		"ZEROTH_LINEAR_WEBHOOK_SECRET", "ZEROTH_LINEAR_AUTH_STYLE",
 	} {
 		if val, ok := env[k]; ok {
 			t.Setenv(k, val)

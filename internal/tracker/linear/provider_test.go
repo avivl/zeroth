@@ -21,6 +21,52 @@ func TestNewEmptyAPIKey(t *testing.T) {
 	}
 }
 
+func TestNewUnknownAuthStyle(t *testing.T) {
+	t.Parallel()
+	_, err := New(Config{APIKey: "k", AuthStyle: "basic"})
+	if !errors.Is(err, tracker.ErrInvalid) {
+		t.Fatalf("New = %v, want ErrInvalid", err)
+	}
+}
+
+func TestAuthorizationHeaderStyles(t *testing.T) {
+	t.Parallel()
+	key := "test-linear-token"
+	cases := []struct {
+		name  string
+		style AuthStyle
+		want  string
+	}{
+		{name: "personal_default", style: "", want: key},
+		{name: "personal", style: AuthPersonal, want: key},
+		{name: "oauth", style: AuthOAuth, want: "Bearer " + key},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake := NewFake()
+			fake.APIKey = key
+			srv := httptest.NewServer(fake)
+			t.Cleanup(srv.Close)
+			p, err := New(Config{
+				APIKey:      key,
+				Endpoint:    srv.URL,
+				AgentUserID: fake.AgentUserID,
+				AuthStyle:   tc.style,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := p.GetIssue(t.Context(), "42-1"); err != nil {
+				t.Fatal(err)
+			}
+			if got := fake.LastAuthorization(); got != tc.want {
+				t.Fatalf("Authorization = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNameAndCapabilities(t *testing.T) {
 	t.Parallel()
 	p, _ := testProvider(t, NewFake())
