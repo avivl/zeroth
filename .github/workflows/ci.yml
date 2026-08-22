@@ -38,8 +38,10 @@ jobs:
     steps:
       # Go globs are positive only. A leading negation such as
       # !zeroth-spike/** matches every non-spike path under the default
-      # predicate-quantifier (some), which ran the Go job on web-only PRs
-      # and flaked TestG6WriteStall. Spike Go stays on the spike job.
+      # predicate-quantifier (some), which ran the Go job on web-only PRs.
+      # Spike Go stays on the spike job. This workflow file is a web/spike
+      # trigger, not a Go trigger: listing it under go made path-filter
+      # fixes fail octocov on unrelated 1-line coverage jitter.
       - uses: dorny/paths-filter@v3
         if: github.event_name == 'pull_request'
         id: filter
@@ -52,7 +54,6 @@ jobs:
               - "go.mod"
               - "go.sum"
               - "Taskfile.yml"
-              - ".github/workflows/ci.yml"
               - ".octocov.yml"
             web:
               - "web/**"
