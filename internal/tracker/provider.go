@@ -27,6 +27,12 @@ type Provider interface {
 	// diffs belong in collapsed details (FormatPlanComment).
 	Comment(ctx context.Context, key, body string) (CommentRef, error)
 
+	// ListComments returns the issue's comment thread, oldest first.
+	// Empty key is ErrInvalid. Unknown keys are ErrNotFound. A new run
+	// reads this thread so an operator rejection is part of the next
+	// plan-drafting prompt, not only a row on the previous plan.
+	ListComments(ctx context.Context, key string) ([]IssueComment, error)
+
 	// SetState moves the issue to state. Empty key or Kind is ErrInvalid.
 	SetState(ctx context.Context, key string, state State) error
 

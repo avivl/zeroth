@@ -90,3 +90,19 @@ func TestFormatFailedComment(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatRejectedComment(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatRejectedComment("s_9", "p_1", "that heading doesn't exist, use the real one")
+	for _, want := range []string{
+		"### Zeroth plan rejected",
+		"that heading doesn't exist, use the real one",
+		"`s_9`",
+		"`p_1`",
+		"Un-assign is not required",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+}

@@ -51,6 +51,15 @@ type CommentRef struct {
 	URL string
 }
 
+// IssueComment is one row of an issue's comment thread. Body is the
+// markdown operators and the next run both read.
+type IssueComment struct {
+	ID        string
+	Body      string
+	Author    string
+	CreatedAt time.Time
+}
+
 // ArtifactKind names what LinkArtifact is attaching. Cost and the audit
 // summary are usually comment text; PR and transcript are URLs.
 type ArtifactKind string

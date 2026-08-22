@@ -68,6 +68,30 @@ func FormatCancelComment(runID string) string {
 	return b.String()
 }
 
+// FormatRejectedComment is posted when the operator rejects a draft
+// with feedback. The next run reads this thread, so the correction is
+// in the plan-drafting prompt rather than only on the previous plan.
+func FormatRejectedComment(runID, planID, comment string) string {
+	var b strings.Builder
+	b.WriteString("### Zeroth plan rejected\n\n")
+	if c := strings.TrimSpace(comment); c != "" {
+		b.WriteString(c)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("The next plan must address this feedback. Un-assign is not required.\n")
+	if runID != "" || planID != "" {
+		b.WriteByte('\n')
+		if runID != "" {
+			fmt.Fprintf(&b, "Run `%s`. ", runID)
+		}
+		if planID != "" {
+			fmt.Fprintf(&b, "Plan `%s`.", planID)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // FormatFailedComment is posted when a run ends without applying, or
 // when apply refuses (stale preconditions, postcondition mismatch).
 func FormatFailedComment(runID, reason string) string {

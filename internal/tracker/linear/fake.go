@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // FakeGraphQL is an in-memory Linear GraphQL API. It is a test double for
@@ -29,7 +30,8 @@ type FakeGraphQL struct {
 
 // FakeComment is one posted comment.
 type FakeComment struct {
-	ID, IssueID, Body, URL string
+	ID, IssueID, Body, URL, Author string
+	CreatedAt                      time.Time
 }
 
 // FakeAttachment is one linked URL.
@@ -237,6 +239,8 @@ func (f *FakeGraphQL) dispatch(req gqlRequest) (any, string) {
 		return f.assigned(req.Variables)
 	case "CommentCreate":
 		return f.commentCreate(req.Variables)
+	case "IssueComments":
+		return f.issueComments(strVar(req.Variables, "id"))
 	case "IssueUpdate":
 		return f.issueUpdate(req.Variables)
 	case "AttachmentCreate":
@@ -250,6 +254,8 @@ func guessOp(q string) string {
 	switch {
 	case strings.Contains(q, "commentCreate"):
 		return "CommentCreate"
+	case strings.Contains(q, "comments(") || strings.Contains(q, "IssueComments"):
+		return "IssueComments"
 	case strings.Contains(q, "attachmentCreate"):
 		return "AttachmentCreate"
 	case strings.Contains(q, "issueUpdate"):
@@ -336,11 +342,49 @@ func (f *FakeGraphQL) commentCreate(vars map[string]any) (any, string) {
 	f.next++
 	id := fmt.Sprintf("cmt_%d", f.next)
 	url := "https://linear.app/comment/" + id
-	f.comments = append(f.comments, FakeComment{ID: id, IssueID: iss.ID, Body: body, URL: url})
+	f.comments = append(f.comments, FakeComment{
+		ID:        id,
+		IssueID:   iss.ID,
+		Body:      body,
+		URL:       url,
+		Author:    "operator",
+		CreatedAt: time.Unix(int64(f.next), 0).UTC(),
+	})
 	return map[string]any{
 		"commentCreate": map[string]any{
 			"success": true,
 			"comment": map[string]any{"id": id, "url": url},
+		},
+	}, ""
+}
+
+func (f *FakeGraphQL) issueComments(id string) (any, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	iss := f.issues[id]
+	if iss == nil {
+		return map[string]any{"issue": nil}, ""
+	}
+	nodes := make([]any, 0)
+	for _, c := range f.comments {
+		if c.IssueID != iss.ID {
+			continue
+		}
+		var user any
+		if c.Author != "" {
+			user = map[string]any{"name": c.Author}
+		}
+		nodes = append(nodes, map[string]any{
+			"id":        c.ID,
+			"body":      c.Body,
+			"createdAt": c.CreatedAt.Format(time.RFC3339Nano),
+			"user":      user,
+		})
+	}
+	return map[string]any{
+		"issue": map[string]any{
+			"id":       iss.ID,
+			"comments": map[string]any{"nodes": nodes},
 		},
 	}, ""
 }

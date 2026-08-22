@@ -61,6 +61,9 @@ func TestProviderConformance(t *testing.T) {
 			t.Run("get_issue_empty", func(t *testing.T) { testGetIssueEmpty(t, tc.open) })
 			t.Run("comment", func(t *testing.T) { testComment(t, tc.open) })
 			t.Run("comment_invalid", func(t *testing.T) { testCommentInvalid(t, tc.open) })
+			t.Run("list_comments", func(t *testing.T) { testListComments(t, tc.open) })
+			t.Run("list_comments_missing", func(t *testing.T) { testListCommentsMissing(t, tc.open) })
+			t.Run("list_comments_empty", func(t *testing.T) { testListCommentsEmpty(t, tc.open) })
 			t.Run("set_state", func(t *testing.T) { testSetState(t, tc.open) })
 			t.Run("link_artifact", func(t *testing.T) { testLinkArtifact(t, tc.open) })
 			t.Run("assignments_assign_unassign", func(t *testing.T) { testAssignments(t, tc.open) })
@@ -137,6 +140,51 @@ func testCommentInvalid(t *testing.T, open func(t *testing.T) (tracker.Provider,
 	}
 	if _, err := p.Comment(t.Context(), "", "hi"); !errors.Is(err, tracker.ErrInvalid) {
 		t.Fatalf("empty key = %v", err)
+	}
+}
+
+func testListComments(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, _ := open(t)
+	first := "that heading doesn't exist, use the real one"
+	if _, err := p.Comment(t.Context(), "42-1", "earlier note"); err != nil {
+		t.Fatalf("Comment earlier: %v", err)
+	}
+	if _, err := p.Comment(t.Context(), "42-1", first); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	got, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("comments = %d, want at least 2", len(got))
+	}
+	if !strings.Contains(got[len(got)-1].Body, first) {
+		t.Fatalf("last comment %q, want %q", got[len(got)-1].Body, first)
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].CreatedAt.Before(got[i-1].CreatedAt) {
+			t.Fatalf("comments not oldest-first: %v then %v", got[i-1].CreatedAt, got[i].CreatedAt)
+		}
+	}
+}
+
+func testListCommentsMissing(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, _ := open(t)
+	_, err := p.ListComments(t.Context(), "no-such-issue")
+	if !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("ListComments missing = %v, want ErrNotFound", err)
+	}
+}
+
+func testListCommentsEmpty(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, _ := open(t)
+	_, err := p.ListComments(t.Context(), "  ")
+	if !errors.Is(err, tracker.ErrInvalid) {
+		t.Fatalf("ListComments empty = %v, want ErrInvalid", err)
 	}
 }
 

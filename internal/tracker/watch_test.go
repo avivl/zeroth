@@ -24,6 +24,9 @@ func (s *stubProvider) GetIssue(context.Context, string) (tracker.Issue, error) 
 func (s *stubProvider) Comment(context.Context, string, string) (tracker.CommentRef, error) {
 	return tracker.CommentRef{}, tracker.ErrInvalid
 }
+func (s *stubProvider) ListComments(context.Context, string) ([]tracker.IssueComment, error) {
+	return nil, tracker.ErrNotFound
+}
 func (s *stubProvider) SetState(context.Context, string, tracker.State) error {
 	return tracker.ErrInvalid
 }
