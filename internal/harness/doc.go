@@ -8,5 +8,6 @@
 // conformance_test.go (Z1-006, NFR-4, ADR-Z-0003).
 //
 // The agent proposes effects. It does not apply them. Apply is the
-// plan lifecycle, not a harness shortcut.
+// plan lifecycle, not a harness shortcut. Stage 1's Claude Code adapter
+// is a host subprocess against the overlay (ADR-Z-0010), not sandbox.Exec.
 package harness

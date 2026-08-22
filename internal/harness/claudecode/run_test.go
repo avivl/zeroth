@@ -3,6 +3,7 @@ package claudecode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,73 @@ func TestExternalKillSurfacesExited(t *testing.T) {
 		case <-deadline:
 			t.Fatal("external kill was not surfaced as an exited event")
 		}
+	}
+}
+
+func TestSpawnIsHostSubprocess(t *testing.T) {
+	t.Parallel()
+	// ADR-Z-0010: claude is a host os/exec child, not sandbox.Exec.
+	// A later in-sandbox spawn must supersede that ADR and invert this
+	// test: the host canary would stay untouched, and /proc/<pid> would
+	// not be this process's pid namespace.
+	d := NewWithBin(buildFake(t))
+	ws := t.TempDir()
+	outside := t.TempDir()
+	canary := filepath.Join(outside, "host-canary")
+	h, err := d.Start(t.Context(), harness.Spec{
+		Workspace: ws,
+		Prompt:    "SLEEP please",
+		Env: []string{
+			apiKeyEnv + "=" + testKey,
+			"ZEROTH_FAKE_PID=1",
+			"ZEROTH_FAKE_HOST_WRITE=" + canary,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Stop(context.Background(), h.ID) })
+
+	ch, err := d.Stream(t.Context(), h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitToken(t, ch, "sleep-token", 10*time.Second)
+
+	pid := readPID(t, filepath.Join(ws, ".fake-pid"))
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("harness pid %d is not a live host process: %v", pid, err)
+	}
+	cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
+	if err != nil {
+		t.Fatalf("read cwd of pid %d: %v", pid, err)
+	}
+	want, err := filepath.EvalSymlinks(ws)
+	if err != nil {
+		want = ws
+	}
+	got, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		got = cwd
+	}
+	if got != want {
+		t.Fatalf("harness cwd %q, want overlay %q", got, want)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	var body []byte
+	for time.Now().Before(deadline) {
+		body, err = os.ReadFile(canary)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("host canary outside workspace was not written: %v", err)
+	}
+	if string(body) != "host-subprocess" {
+		t.Fatalf("host canary = %q, want host-subprocess", body)
 	}
 }
 
