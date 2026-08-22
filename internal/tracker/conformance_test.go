@@ -64,6 +64,7 @@ func TestProviderConformance(t *testing.T) {
 			t.Run("set_state", func(t *testing.T) { testSetState(t, tc.open) })
 			t.Run("link_artifact", func(t *testing.T) { testLinkArtifact(t, tc.open) })
 			t.Run("unassign", func(t *testing.T) { testUnassign(t, tc.open) })
+			t.Run("unassign_ready_for_reassign", func(t *testing.T) { testUnassignReadyForReassign(t, tc.open) })
 			t.Run("assignments_assign_unassign", func(t *testing.T) { testAssignments(t, tc.open) })
 		})
 	}
@@ -199,6 +200,30 @@ func testUnassign(t *testing.T, open func(t *testing.T) (tracker.Provider, *line
 	if iss.AssigneeID != "" || iss.DelegateID != "" {
 		t.Fatalf("still claimed: assignee=%q delegate=%q", iss.AssigneeID, iss.DelegateID)
 	}
+}
+
+func testUnassignReadyForReassign(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, fake := open(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ch, err := p.Assignments(ctx)
+	if err != nil {
+		t.Fatalf("Assignments: %v", err)
+	}
+	fake.SetAssignee("42-1", fake.AgentUserID)
+	fake.SetDelegate("42-1", fake.AgentUserID)
+	_ = waitAssignment(t, ch, tracker.Assigned, "42-1")
+	if err := p.Unassign(t.Context(), "42-1"); err != nil {
+		t.Fatalf("Unassign: %v", err)
+	}
+	select {
+	case ev := <-ch:
+		t.Fatalf("Unassign emitted %s %s (retract must not look like a mid-run cancel)", ev.Kind, ev.Key)
+	case <-time.After(150 * time.Millisecond):
+	}
+	fake.SetAssignee("42-1", fake.AgentUserID)
+	_ = waitAssignment(t, ch, tracker.Assigned, "42-1")
 }
 
 func testAssignments(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
