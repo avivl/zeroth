@@ -93,7 +93,12 @@ func (s *Server) runWorker(ctx context.Context, l *liveRun) {
 	if err := s.sup.Succeed(ctx, l.id); err != nil && ctx.Err() == nil {
 		s.log.Debug("worker succeed", zap.String("run", l.id.String()), zap.Error(err))
 	}
-	if err := s.syncSession(context.Background(), l.id); err != nil {
+	bg := context.Background()
+	st, err := s.sup.State(bg, l.id)
+	if err == nil && st.Status == session.StatusDone {
+		s.completeTracker(bg, l.id)
+	}
+	if err := s.syncSession(bg, l.id); err != nil {
 		s.log.Debug("worker sync", zap.String("run", l.id.String()), zap.Error(err))
 	}
 }

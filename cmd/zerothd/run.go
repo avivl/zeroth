@@ -14,9 +14,12 @@ import (
 
 	"github.com/avivl/zeroth/internal/logging"
 	"github.com/avivl/zeroth/internal/resilience"
+	"github.com/avivl/zeroth/internal/sandbox/docker"
 	"github.com/avivl/zeroth/internal/server"
 	"github.com/avivl/zeroth/internal/signer"
 	"github.com/avivl/zeroth/internal/store/sqlite"
+	"github.com/avivl/zeroth/internal/tracker"
+	"github.com/avivl/zeroth/internal/tracker/linear"
 	"go.uber.org/zap"
 )
 
@@ -71,7 +74,34 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		return fmt.Errorf("zerothd signer: %w", err)
 	}
 
-	srv, err := server.New(server.Config{Store: st, Signer: sg, Log: log})
+	var tr tracker.Provider
+	webhook := false
+	if cfg.LinearAPIKey != "" {
+		p, err := linear.New(linear.Config{
+			APIKey:        cfg.LinearAPIKey,
+			Endpoint:      cfg.LinearEndpoint,
+			AgentUserID:   cfg.LinearAgentUser,
+			TeamID:        cfg.LinearTeamID,
+			ProjectID:     cfg.LinearProjectID,
+			PollInterval:  cfg.LinearPollInterval,
+			WebhookSecret: cfg.LinearWebhookSecret,
+		})
+		if err != nil {
+			return fmt.Errorf("zerothd linear: %w", err)
+		}
+		tr = p
+		webhook = cfg.LinearWebhookSecret != ""
+		log.Info("linear tracker enabled")
+	}
+
+	srv, err := server.New(server.Config{
+		Store:          st,
+		Signer:         sg,
+		Log:            log,
+		Tracker:        tr,
+		Sandbox:        docker.New(),
+		TrackerWebhook: webhook,
+	})
 	if err != nil {
 		return fmt.Errorf("zerothd server: %w", err)
 	}

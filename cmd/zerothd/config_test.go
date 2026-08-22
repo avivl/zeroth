@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -130,6 +131,31 @@ func TestConfigFileThenEnvThenFlag(t *testing.T) {
 	}
 }
 
+func TestConfigLinearEnv(t *testing.T) {
+	got := loadFrom(t, nil, map[string]string{
+		"ZEROTH_LINEAR_AGENT_USER":    "user_agent",
+		"ZEROTH_LINEAR_TEAM_ID":       "team_1",
+		"ZEROTH_LINEAR_PROJECT_ID":    "proj_1",
+		"ZEROTH_LINEAR_POLL_INTERVAL": "2s",
+		"ZEROTH_LINEAR_ENDPOINT":      "http://127.0.0.1:9/graphql",
+	})
+	if got.LinearAgentUser != "user_agent" {
+		t.Fatalf("agent user = %q", got.LinearAgentUser)
+	}
+	if got.LinearTeamID != "team_1" || got.LinearProjectID != "proj_1" {
+		t.Fatalf("team/project = %q %q", got.LinearTeamID, got.LinearProjectID)
+	}
+	if got.LinearPollInterval != 2*time.Second {
+		t.Fatalf("poll = %s", got.LinearPollInterval)
+	}
+	if got.LinearEndpoint != "http://127.0.0.1:9/graphql" {
+		t.Fatalf("endpoint = %q", got.LinearEndpoint)
+	}
+	if got.LinearAPIKey != "" {
+		t.Fatal("api key should stay empty in tests")
+	}
+}
+
 func TestConfigMissingExplicitFile(t *testing.T) {
 	cmd, _ := newRoot(deps{})
 	cmd.SetArgs([]string{"--config", filepath.Join(t.TempDir(), "missing.yaml")})
@@ -145,6 +171,9 @@ func loadFrom(t *testing.T, args []string, env map[string]string) Config {
 	for _, k := range []string{
 		"ZEROTH_ADDR", "ZEROTH_DB_PATH", "ZEROTH_DOCKER_SOCKET",
 		"ZEROTH_LOG_LEVEL", "ZEROTH_LOG_ENCODING", "ZEROTH_SIGNING_KEY", "ZEROTH_CONFIG",
+		"ZEROTH_LINEAR_API_KEY", "ZEROTH_LINEAR_ENDPOINT", "ZEROTH_LINEAR_AGENT_USER",
+		"ZEROTH_LINEAR_TEAM_ID", "ZEROTH_LINEAR_PROJECT_ID", "ZEROTH_LINEAR_POLL_INTERVAL",
+		"ZEROTH_LINEAR_WEBHOOK_SECRET",
 	} {
 		if val, ok := env[k]; ok {
 			t.Setenv(k, val)
