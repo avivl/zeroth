@@ -243,11 +243,18 @@ func TestUnassignCancelsAndKillsSandbox(t *testing.T) {
 	if !errors.Is(err, sandbox.ErrNotFound) && !errors.Is(err, sandbox.ErrStopped) && !errors.Is(err, sandbox.ErrKilled) {
 		t.Fatalf("exec after unassign = %v, want sandbox dead", err)
 	}
+	deadline := time.Now().Add(3 * time.Second)
 	foundCancel := false
-	for _, c := range tr.commentBodies() {
-		if containsAll(c, "cancelled", "sandbox") {
-			foundCancel = true
+	for time.Now().Before(deadline) {
+		for _, c := range tr.commentBodies() {
+			if containsAll(c, "cancelled", "sandbox") {
+				foundCancel = true
+			}
 		}
+		if foundCancel {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
 	}
 	if !foundCancel {
 		t.Fatalf("missing cancel comment: %v", tr.commentBodies())
