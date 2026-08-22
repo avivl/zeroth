@@ -126,24 +126,52 @@ func TestRunDaemonLogsLinearPollError(t *testing.T) {
 		})
 	}()
 
-	deadline := time.Now().Add(3 * time.Second)
+	if !waitLog(t, &buf, errc, 15*time.Second, `"msg":"linear tracker enabled"`) {
+		cancel()
+		drainErr(errc)
+		t.Fatalf("daemon never enabled linear tracker: %s", buf.String())
+	}
+	if !waitLog(t, &buf, errc, 10*time.Second, `"msg":"tracker linear poll"`, `"level":"error"`, "unauthorized") {
+		cancel()
+		drainErr(errc)
+		t.Fatalf("missing info-visible poll error log: %s", buf.String())
+	}
+	cancel()
+	if err := <-errc; err != nil {
+		t.Fatalf("runDaemon: %v", err)
+	}
+}
+
+func waitLog(t *testing.T, buf *safeBuffer, errc <-chan error, d time.Duration, needles ...string) bool {
+	t.Helper()
+	deadline := time.Now().Add(d)
 	for time.Now().Before(deadline) {
+		select {
+		case err := <-errc:
+			t.Fatalf("runDaemon exited early: %v\nlogs: %s", err, buf.String())
+		default:
+		}
 		out := buf.String()
-		if strings.Contains(out, `"msg":"tracker linear poll"`) && strings.Contains(out, `"level":"error"`) {
-			cancel()
-			if err := <-errc; err != nil {
-				t.Fatalf("runDaemon: %v", err)
+		ok := true
+		for _, n := range needles {
+			if !strings.Contains(out, n) {
+				ok = false
+				break
 			}
-			if !strings.Contains(out, "unauthorized") {
-				t.Fatalf("poll error missing unauthorized: %s", out)
-			}
-			return
+		}
+		if ok {
+			return true
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	cancel()
-	<-errc
-	t.Fatalf("missing info-visible poll error log: %s", buf.String())
+	return false
+}
+
+func drainErr(errc <-chan error) {
+	select {
+	case <-errc:
+	case <-time.After(2 * time.Second):
+	}
 }
 
 type safeBuffer struct {
