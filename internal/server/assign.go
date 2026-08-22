@@ -166,10 +166,10 @@ func (s *Server) handleUnassigned(ctx context.Context, ev tracker.AssignmentEven
 			s.log.Debug("tracker unassign fail", zap.Error(err))
 		}
 	}
-	_ = s.syncSession(context.Background(), id)
 	if s.tracker != nil {
 		_, _ = s.tracker.Comment(context.Background(), key, tracker.FormatCancelComment(id.String()))
 	}
+	_ = s.syncSession(context.Background(), id)
 	s.forgetTracker(id, key)
 	return nil
 }
