@@ -22,6 +22,13 @@ type Provider interface {
 	// keys are ErrNotFound. Empty key is ErrInvalid.
 	GetIssue(ctx context.Context, key string) (Issue, error)
 
+	// ListComments returns the issue's comment thread, oldest first.
+	// Unknown keys are ErrNotFound. Empty key is ErrInvalid. An issue
+	// with no comments returns an empty slice, not an error. Stage-1
+	// assign-to-Zeroth reads this before drafting a plan so a settled
+	// operator decision on the thread is in the next run's context.
+	ListComments(ctx context.Context, key string) ([]Comment, error)
+
 	// Comment posts markdown body on the issue. Empty key or body is
 	// ErrInvalid. The body is what operators read in the tracker; plan
 	// diffs belong in collapsed details (FormatPlanComment).

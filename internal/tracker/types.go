@@ -45,6 +45,18 @@ type Issue struct {
 	Project     string
 }
 
+// Comment is one item on an issue thread as the port sees it.
+type Comment struct {
+	ID     string
+	Body   string
+	URL    string
+	Author string
+	At     time.Time
+	// Bot is true when the vendor marks the author as an app or agent
+	// identity rather than a human operator.
+	Bot bool
+}
+
 // CommentRef is the handle a successful Comment returns.
 type CommentRef struct {
 	ID  string

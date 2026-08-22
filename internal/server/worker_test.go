@@ -76,6 +76,12 @@ func (h *stubHarness) startCount() int {
 	return h.starts
 }
 
+func (h *stubHarness) lastPrompt() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastSpec.Prompt
+}
+
 func TestHarnessDraftsPlanOnceAndInboxShowsIt(t *testing.T) {
 	t.Parallel()
 	iss := tracker.Issue{

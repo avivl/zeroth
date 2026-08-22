@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // FakeGraphQL is an in-memory Linear GraphQL API. It is a test double for
@@ -27,9 +28,10 @@ type FakeGraphQL struct {
 	failAssigned string
 }
 
-// FakeComment is one posted comment.
+// FakeComment is one posted or seeded comment.
 type FakeComment struct {
-	ID, IssueID, Body, URL string
+	ID, IssueID, Body, URL, UserID, UserName, CreatedAt string
+	Bot                                                 bool
 }
 
 // FakeAttachment is one linked URL.
@@ -150,6 +152,29 @@ func (f *FakeGraphQL) Comments() []FakeComment {
 	return out
 }
 
+// PutComment inserts a comment on an issue. Identifier or vendor id both
+// resolve. Empty ID and URL are filled in.
+func (f *FakeGraphQL) PutComment(in FakeComment) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	iss := f.issues[in.IssueID]
+	if iss == nil {
+		return
+	}
+	f.next++
+	if in.ID == "" {
+		in.ID = fmt.Sprintf("cmt_%d", f.next)
+	}
+	if in.URL == "" {
+		in.URL = "https://linear.app/comment/" + in.ID
+	}
+	if in.CreatedAt == "" {
+		in.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	in.IssueID = iss.ID
+	f.comments = append(f.comments, in)
+}
+
 // Attachments returns a copy of linked artifacts.
 func (f *FakeGraphQL) Attachments() []FakeAttachment {
 	f.mu.Lock()
@@ -227,6 +252,8 @@ func (f *FakeGraphQL) dispatch(req gqlRequest) (any, string) {
 		return f.issueData(strVar(req.Variables, "id"))
 	case "IssueStates":
 		return f.issueStates(strVar(req.Variables, "id"))
+	case "IssueComments":
+		return f.issueComments(strVar(req.Variables, "id"))
 	case "AssignedIssues":
 		f.mu.Lock()
 		fail := f.failAssigned
@@ -250,6 +277,8 @@ func guessOp(q string) string {
 	switch {
 	case strings.Contains(q, "commentCreate"):
 		return "CommentCreate"
+	case strings.Contains(q, "comments(") || strings.Contains(q, "IssueComments"):
+		return "IssueComments"
 	case strings.Contains(q, "attachmentCreate"):
 		return "AttachmentCreate"
 	case strings.Contains(q, "issueUpdate"):
@@ -296,6 +325,51 @@ func (f *FakeGraphQL) issueStates(id string) (any, string) {
 	}, ""
 }
 
+func (f *FakeGraphQL) issueComments(id string) (any, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	iss := f.issues[id]
+	if iss == nil {
+		return map[string]any{"issue": nil}, ""
+	}
+	nodes := make([]any, 0, len(f.comments))
+	for _, c := range f.comments {
+		if c.IssueID != iss.ID && c.IssueID != iss.Identifier {
+			continue
+		}
+		node := map[string]any{
+			"id":        c.ID,
+			"body":      c.Body,
+			"url":       c.URL,
+			"createdAt": c.CreatedAt,
+		}
+		if c.Bot {
+			node["user"] = nil
+			name := c.UserName
+			if name == "" {
+				name = "bot"
+			}
+			node["botActor"] = map[string]any{"name": name}
+		} else if c.UserName != "" || c.UserID != "" {
+			node["user"] = map[string]any{"id": c.UserID, "name": c.UserName}
+			node["botActor"] = nil
+		} else {
+			node["user"] = nil
+			node["botActor"] = nil
+		}
+		nodes = append(nodes, node)
+	}
+	return map[string]any{
+		"issue": map[string]any{
+			"id": iss.ID,
+			"comments": map[string]any{
+				"pageInfo": map[string]any{"hasNextPage": false, "endCursor": ""},
+				"nodes":    nodes,
+			},
+		},
+	}, ""
+}
+
 func (f *FakeGraphQL) assigned(vars map[string]any) (any, string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -336,7 +410,13 @@ func (f *FakeGraphQL) commentCreate(vars map[string]any) (any, string) {
 	f.next++
 	id := fmt.Sprintf("cmt_%d", f.next)
 	url := "https://linear.app/comment/" + id
-	f.comments = append(f.comments, FakeComment{ID: id, IssueID: iss.ID, Body: body, URL: url})
+	f.comments = append(f.comments, FakeComment{
+		ID:        id,
+		IssueID:   iss.ID,
+		Body:      body,
+		URL:       url,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
 	return map[string]any{
 		"commentCreate": map[string]any{
 			"success": true,

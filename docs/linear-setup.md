@@ -94,8 +94,9 @@ Now, in Linear:
 2. Assign it to the Zeroth actor, or keep yourself as assignee and
    delegate it to Zeroth (Linear's native agent-delegation, the same
    pattern this repo uses for Cursor).
-3. Within one poll interval (15s by default), Zeroth reads the issue and
-   project memory, spawns a sandbox, copies this git checkout into the
+3. Within one poll interval (15s by default), Zeroth reads the issue
+   title, description, and comment thread, plus accumulated project
+   memory, spawns a sandbox, copies this git checkout into the
    overlay, and posts a comment on the issue with its plan. `zerothd`
    uses the git toplevel of the directory it was started from as that
    checkout (the `cd zeroth` above). A modify whose target is missing
