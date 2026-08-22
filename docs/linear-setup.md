@@ -145,6 +145,16 @@ that same id via Linear's native delegate field, not just labeled or
 commented on. A mention without assignee or delegate does not start a
 run.
 
+To re-check the live GraphQL schema (no workspace key required):
+
+```bash
+ZEROTH_LIVE_LINEAR=1 go test ./internal/tracker/linear -run TestLiveIssueFilterSchema -v
+```
+
+A recorded run is in [docs/tracker/LIVE_VERIFICATION.md](tracker/LIVE_VERIFICATION.md).
+To poll a real workspace, also set `ZEROTH_LINEAR_API_KEY` (and the usual
+auth-style / agent-user vars) and run `TestLiveListAssigned`.
+
 **The sandbox never seems to stop after un-assigning.** Confirm
 `--docker-socket` points at a reachable Docker daemon; if `zerothd` can't
 reach Docker at all, cancellation can't actually kill anything, only mark
