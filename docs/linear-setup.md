@@ -139,6 +139,13 @@ assigned to the id in `--linear-agent-user`, or delegated to that same
 id via Linear's native delegate field, not just labeled or commented
 on. A mention without assignee or delegate does not start a run.
 
+**The run flips to completed with no plan.** That was a stand-in
+worker dumping the issue description as live-output tokens, then
+succeeding. The daemon now starts the Claude Code harness once per run.
+A missing `ANTHROPIC_API_KEY`, a missing `claude` binary, or a turn that
+emits no proposed effects fails the run and comments the reason on the
+issue. Look in `zerothd` logs for `run failed without a change plan`.
+
 **The sandbox never seems to stop after un-assigning.** Confirm
 `--docker-socket` points at a reachable Docker daemon; if `zerothd` can't
 reach Docker at all, cancellation can't actually kill anything, only mark

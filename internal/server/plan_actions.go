@@ -206,6 +206,7 @@ func (s *Server) ApplyPlan(w http.ResponseWriter, r *http.Request, id gen.PlanID
 	}
 	if result.Status == plan.StatusApplied {
 		_ = s.sup.Succeed(r.Context(), sid)
+		s.completeTracker(r.Context(), sid)
 	}
 	_ = s.syncSession(r.Context(), sid)
 	writeJSON(w, http.StatusOK, gen.ApplyPlanResponse{

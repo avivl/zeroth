@@ -261,22 +261,22 @@ func TestUnassignCancelsAndKillsSandbox(t *testing.T) {
 	}
 }
 
-func TestAssignCompleteAttachesSummary(t *testing.T) {
+func TestAssignStandinFailsWithoutPlan(t *testing.T) {
 	t.Parallel()
-	iss := tracker.Issue{Key: "42-3", Title: "finish me"}
+	iss := tracker.Issue{Key: "42-3", Title: "finish me", Description: "do not dump this"}
 	tr := newStubTracker(iss)
 	sbx := newFakeSandbox()
 	hs := assignServer(t, tr, sbx, 5*time.Millisecond, 2)
 
 	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-3", Issue: iss, At: time.Now()}
 	run := waitRunByTracker(t, hs.URL, "42-3")
-	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusCompleted)
+	waitRunStatus(t, hs.URL, string(run.Id), gen.RunStatusFailed)
 
 	deadline := time.Now().Add(3 * time.Second)
 	found := false
 	for time.Now().Before(deadline) {
 		for _, c := range tr.commentBodies() {
-			if containsAll(c, "Zeroth completed", "Cost", "Transcript", "Audit") {
+			if containsAll(c, "Zeroth failed", "no plan") {
 				found = true
 			}
 		}
@@ -286,10 +286,7 @@ func TestAssignCompleteAttachesSummary(t *testing.T) {
 		time.Sleep(15 * time.Millisecond)
 	}
 	if !found {
-		t.Fatalf("missing completion comment: %v", tr.commentBodies())
-	}
-	if tr.lastState() != tracker.StateCompleted {
-		t.Fatalf("state = %q, want completed", tr.lastState())
+		t.Fatalf("missing fail comment: %v", tr.commentBodies())
 	}
 }
 
