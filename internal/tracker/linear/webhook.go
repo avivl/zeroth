@@ -1,6 +1,7 @@
 package linear
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -42,7 +43,7 @@ func (p *Provider) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "json", http.StatusBadRequest)
 		return
 	}
-	p.handleWebhook(payload)
+	p.handleWebhook(r.Context(), payload)
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -56,13 +57,26 @@ type webhookPayload struct {
 		Description string `json:"description"`
 		URL         string `json:"url"`
 		AssigneeID  string `json:"assigneeId"`
+		DelegateID  string `json:"delegateId"`
 	} `json:"data"`
 }
 
-func (p *Provider) handleWebhook(payload webhookPayload) {
-	if !strings.EqualFold(payload.Type, "Issue") {
-		return
+func (p *Provider) handleWebhook(ctx context.Context, payload webhookPayload) {
+	switch {
+	case strings.EqualFold(payload.Type, "Issue"):
+		p.handleIssueWebhook(payload)
+	case strings.EqualFold(payload.Type, "AgentSessionEvent"):
+		// Native agent apps often subscribe only to AgentSessionEvent.
+		// created fires for mention and for delegation; the poll snapshot
+		// is the source of truth for whether this agent is assignee or
+		// delegate, so a mention without either claim does not start a run.
+		if strings.EqualFold(payload.Action, "created") {
+			p.tick(ctx)
+		}
 	}
+}
+
+func (p *Provider) handleIssueWebhook(payload webhookPayload) {
 	key := payload.Data.Identifier
 	if key == "" {
 		key = payload.Data.ID
@@ -82,8 +96,16 @@ func (p *Provider) handleWebhook(payload webhookPayload) {
 		URL:         payload.Data.URL,
 		AssigneeID:  payload.Data.AssigneeID,
 	}
-	wantAgent := payload.Action != "remove" && payload.Data.AssigneeID == agent
-	p.applyAssignee(iss, wantAgent)
+	p.applyAgent(iss, agentClaimed(payload.Action, payload.Data.AssigneeID, payload.Data.DelegateID, agent))
+}
+
+// agentClaimed is true when an Issue webhook says this agent now owns the
+// work: classic assignee, or Linear's native delegate field.
+func agentClaimed(action, assigneeID, delegateID, agent string) bool {
+	if agent == "" || strings.EqualFold(action, "remove") {
+		return false
+	}
+	return assigneeID == agent || delegateID == agent
 }
 
 func validWebhook(secret string, body []byte, sig string) bool {

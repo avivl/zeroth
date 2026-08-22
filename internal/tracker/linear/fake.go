@@ -37,8 +37,8 @@ type FakeAttachment struct {
 }
 
 type fakeIssue struct {
-	ID, Identifier, Title, Description, URL, AssigneeID, Project, TeamID string
-	State                                                                workflowState
+	ID, Identifier, Title, Description, URL, AssigneeID, DelegateID, Project, TeamID string
+	State                                                                            workflowState
 }
 
 // NewFake returns a GraphQL double with one team workflow and a seeded issue.
@@ -71,7 +71,7 @@ func NewFake() *FakeGraphQL {
 
 // FakeIssue is the input to PutIssue.
 type FakeIssue struct {
-	ID, Identifier, Title, Description, URL, AssigneeID, Project, TeamID, StateID string
+	ID, Identifier, Title, Description, URL, AssigneeID, DelegateID, Project, TeamID, StateID string
 }
 
 // PutIssue inserts or replaces an issue. Identifier and ID both index it.
@@ -92,6 +92,7 @@ func (f *FakeGraphQL) PutIssue(in FakeIssue) {
 		Description: in.Description,
 		URL:         in.URL,
 		AssigneeID:  in.AssigneeID,
+		DelegateID:  in.DelegateID,
 		Project:     in.Project,
 		TeamID:      in.TeamID,
 		State:       st,
@@ -120,6 +121,15 @@ func (f *FakeGraphQL) SetAssignee(key, userID string) {
 	defer f.mu.Unlock()
 	if iss := f.issues[key]; iss != nil {
 		iss.AssigneeID = userID
+	}
+}
+
+// SetDelegate changes Linear's native agent delegate. Empty userID clears it.
+func (f *FakeGraphQL) SetDelegate(key, userID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if iss := f.issues[key]; iss != nil {
+		iss.DelegateID = userID
 	}
 }
 
@@ -275,13 +285,9 @@ func (f *FakeGraphQL) issueStates(id string) (any, string) {
 func (f *FakeGraphQL) assigned(vars map[string]any) (any, string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	assignee := ""
-	if filter, ok := vars["filter"].(map[string]any); ok {
-		if a, ok := filter["assignee"].(map[string]any); ok {
-			if id, ok := a["id"].(map[string]any); ok {
-				assignee, _ = id["eq"].(string)
-			}
-		}
+	var filter map[string]any
+	if vars != nil {
+		filter, _ = vars["filter"].(map[string]any)
 	}
 	seen := map[*fakeIssue]struct{}{}
 	nodes := []any{}
@@ -290,7 +296,7 @@ func (f *FakeGraphQL) assigned(vars map[string]any) (any, string) {
 			continue
 		}
 		seen[iss] = struct{}{}
-		if assignee != "" && iss.AssigneeID != assignee {
+		if !issueMatchesFilter(iss, filter) {
 			continue
 		}
 		nodes = append(nodes, f.issueJSON(iss))
@@ -376,6 +382,10 @@ func (f *FakeGraphQL) issueJSON(iss *fakeIssue) map[string]any {
 	if iss.AssigneeID != "" {
 		assignee = map[string]any{"id": iss.AssigneeID}
 	}
+	var delegate any
+	if iss.DelegateID != "" {
+		delegate = map[string]any{"id": iss.DelegateID}
+	}
 	var project any
 	if iss.Project != "" {
 		project = map[string]any{"name": iss.Project}
@@ -387,9 +397,74 @@ func (f *FakeGraphQL) issueJSON(iss *fakeIssue) map[string]any {
 		"description": iss.Description,
 		"url":         iss.URL,
 		"assignee":    assignee,
+		"delegate":    delegate,
 		"state":       map[string]any{"id": iss.State.ID, "name": iss.State.Name, "type": iss.State.Type},
 		"project":     project,
 		"team":        map[string]any{"id": iss.TeamID},
+	}
+}
+
+func issueMatchesFilter(iss *fakeIssue, filter map[string]any) bool {
+	if filter == nil {
+		return true
+	}
+	if or := asMapSlice(filter["or"]); or != nil {
+		ok := false
+		for _, sub := range or {
+			if issueMatchesFilter(iss, sub) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return false
+		}
+	}
+	if and := asMapSlice(filter["and"]); and != nil {
+		for _, sub := range and {
+			if !issueMatchesFilter(iss, sub) {
+				return false
+			}
+		}
+	}
+	if id := nestedIDEq(filter["assignee"]); id != "" && iss.AssigneeID != id {
+		return false
+	}
+	if id := nestedIDEq(filter["delegate"]); id != "" && iss.DelegateID != id {
+		return false
+	}
+	return true
+}
+
+func nestedIDEq(v any) string {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	idm, ok := m["id"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	s, _ := idm["eq"].(string)
+	return s
+}
+
+func asMapSlice(v any) []map[string]any {
+	switch t := v.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(t))
+		for _, item := range t {
+			m, ok := item.(map[string]any)
+			if !ok {
+				return nil
+			}
+			out = append(out, m)
+		}
+		return out
+	case []map[string]any:
+		return t
+	default:
+		return nil
 	}
 }
 

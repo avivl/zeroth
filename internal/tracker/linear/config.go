@@ -26,8 +26,9 @@ const (
 )
 
 // Config is how zerothd constructs the Linear provider. APIKey is required.
-// AgentUserID is the Linear user the operator assigns issues to. Empty
-// means the API key's viewer, which is the usual agent-identity setup.
+// AgentUserID is the Linear user the operator assigns or delegates
+// issues to. Empty means the API key's viewer, which is the usual
+// agent-identity setup.
 type Config struct {
 	APIKey       string
 	Endpoint     string
