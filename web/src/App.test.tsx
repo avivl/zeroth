@@ -76,6 +76,8 @@ test("change plan card exposes approve, apply, request changes, and branch", () 
   expect(html).toContain("README.md");
   expect(html).toContain("lease-1");
   expect(html).toContain("Cross-exam");
+  expect(html).not.toContain("Plan gate");
+  expect(html).not.toContain("data-plan-gate");
 });
 
 const completedRun: Run = {

@@ -12,6 +12,18 @@ import type { RunEvent } from "@zeroth/api";
  */
 export type StreamStatus = "open" | "reconnecting" | "closed";
 
+/** Operator-facing live-tail copy. Never used for plan-gate REST outcomes. */
+export function liveTailLabel(status: StreamStatus): string {
+  switch (status) {
+    case "open":
+      return "connected (output stream)";
+    case "reconnecting":
+      return "reconnecting after drop (output stream only)";
+    case "closed":
+      return "disconnected (output stream)";
+  }
+}
+
 export type RunEventsHandlers = {
   onEvent: (event: RunEvent) => void;
   onError?: (error: unknown) => void;

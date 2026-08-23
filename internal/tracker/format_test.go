@@ -100,12 +100,23 @@ func TestFormatRetractComment(t *testing.T) {
 
 func TestFormatRetractCommentWithoutPR(t *testing.T) {
 	t.Parallel()
-	body := tracker.FormatRetractComment(tracker.Retract{Reason: "  "})
-	if !strings.Contains(body, "Prior run output has been retracted") {
-		t.Fatalf("missing fallback: %s", body)
+	body := tracker.FormatRetractComment(tracker.Retract{Reason: "unsafe apply"})
+	for _, want := range []string{
+		"### Zeroth retracted",
+		"Prior run output has been retracted.",
+		"unsafe apply",
+		"none opened",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
 	}
-	if !strings.Contains(body, "none opened") {
-		t.Fatalf("missing none: %s", body)
+	fallback := tracker.FormatRetractComment(tracker.Retract{Reason: "  "})
+	if !strings.Contains(fallback, "Prior run output has been retracted") {
+		t.Fatalf("missing fallback: %s", fallback)
+	}
+	if !strings.Contains(fallback, "none opened") {
+		t.Fatalf("missing none: %s", fallback)
 	}
 	open := tracker.FormatRetractComment(tracker.Retract{
 		PullRequest: "https://github.com/avivl/zeroth/pull/1",
