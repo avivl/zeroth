@@ -231,6 +231,50 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 		t.Fatalf("signature invalid: %v", vr.Reason)
 	}
 
+	trail, err := http.Get(e.hs.URL + "/audit?resource_type=plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer trail.Body.Close()
+	if trail.StatusCode != http.StatusOK {
+		t.Fatalf("list plan audit %d", trail.StatusCode)
+	}
+	var planAudit gen.AuditList
+	if err := json.NewDecoder(trail.Body).Decode(&planAudit); err != nil {
+		t.Fatal(err)
+	}
+	var rowRec *gen.AuditRecord
+	for i := range planAudit.Items {
+		if planAudit.Items[i].Action == "plan.apply.row" {
+			rowRec = &planAudit.Items[i]
+			break
+		}
+	}
+	if rowRec == nil {
+		t.Fatal("apply did not sign a plan.apply.row record")
+	}
+	if rowRec.Signature == "" {
+		t.Fatal("row signature is empty")
+	}
+	if rowRec.Id == out.AuditId {
+		t.Fatal("row signature is the plan-level apply record")
+	}
+	if rowRec.Target == nil || *rowRec.Target != "docs/design/plan.md" {
+		t.Fatalf("row target %+v", rowRec.Target)
+	}
+	rowVerify := postJSON(t, e.hs.URL+"/audit/"+string(rowRec.Id)+"/verify", struct{}{})
+	defer rowVerify.Body.Close()
+	if rowVerify.StatusCode != http.StatusOK {
+		t.Fatalf("row verify %d", rowVerify.StatusCode)
+	}
+	var rowVR gen.AuditVerification
+	if err := json.NewDecoder(rowVerify.Body).Decode(&rowVR); err != nil {
+		t.Fatal(err)
+	}
+	if !rowVR.Valid {
+		t.Fatalf("row signature invalid: %v", rowVR.Reason)
+	}
+
 	mem := postJSON(t, e.hs.URL+"/memory", gen.CreateMemoryRequest{
 		Kind:    gen.MemoryKindOperator,
 		Content: "prefer docs/ edits",

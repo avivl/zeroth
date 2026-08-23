@@ -24,6 +24,7 @@ const (
 	ActionRunRetract     = "run.retract"
 	ActionPlanApprove    = "plan.approve"
 	ActionPlanApply      = "plan.apply"
+	ActionPlanApplyRow   = "plan.apply.row"
 	ActionPlanCrossExam  = "plan.cross_exam"
 	ActionPlanBranch     = "plan.branch"
 	ActionPlanReject     = "plan.reject"
