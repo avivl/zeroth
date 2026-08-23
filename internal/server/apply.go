@@ -425,7 +425,42 @@ type applyAuditor struct {
 	lastID  string
 }
 
-func (a *applyAuditor) SignRow(context.Context, plan.Row, string) error { return nil }
+// SignRow appends a Schnorr-signed audit record for one executed row.
+// A nil return means the row is on the chain and independently
+// verifiable; it is not a skip.
+func (a *applyAuditor) SignRow(ctx context.Context, row plan.Row, postcondition string) error {
+	if a.log == nil {
+		return fmt.Errorf("server apply sign row: nil audit log")
+	}
+	if strings.TrimSpace(row.Target) == "" {
+		return fmt.Errorf("server apply sign row: empty target")
+	}
+	lease, err := store.ParseLeaseID(string(row.Lease))
+	if err != nil {
+		return fmt.Errorf("server apply sign row: %w", err)
+	}
+	resourceID := a.planID
+	if resourceID == "" {
+		resourceID = row.Target
+	}
+	_, err = a.log.Append(ctx, audit.Entry{
+		Action:        audit.ActionPlanApplyRow,
+		Target:        row.Target,
+		PlanHash:      a.hash,
+		Precondition:  row.Precondition,
+		Postcondition: postcondition,
+		LeaseID:       lease,
+		Approver:      audit.ApproverOperator,
+		AgentID:       a.agent,
+		SessionID:     a.session,
+		ResourceType:  "plan",
+		ResourceID:    resourceID,
+	})
+	if err != nil {
+		return fmt.Errorf("server apply sign row: %w", err)
+	}
+	return nil
+}
 
 func (a *applyAuditor) SignPlan(ctx context.Context, p plan.Plan) error {
 	rec, err := a.log.Append(ctx, audit.Entry{
