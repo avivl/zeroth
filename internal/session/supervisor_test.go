@@ -313,7 +313,7 @@ func TestPropertyReplayDeterministic(t *testing.T) {
 			func() error { return m.EmitToolCall(ctx, "tool") },
 			func() error { return m.ProposePlan(ctx, "p") },
 			func() error { return m.RequestApproval(ctx, "p") },
-			func() error { return m.RequestChanges(ctx) },
+			func() error { return m.RequestChanges(ctx, "narrow the diff") },
 			func() error { return m.BeginApply(ctx) },
 			func() error { return m.TakeCheckpoint(ctx, "c") },
 			func() error { return m.ReportError(ctx, "e") },

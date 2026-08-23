@@ -43,6 +43,42 @@ test("golden workflow: approve is POST /plans/{id}/approve via the generated cli
   expect(calls[0]?.body).toEqual({ comment: "approved in UI" });
 });
 
+test("reject with comment is POST /plans/{id}/request-changes via the generated client", async () => {
+  const calls: Array<{ method: string; url: string; body: unknown }> = [];
+  const customFetch: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ method, url, body });
+    if (method === "POST" && url.endsWith("/plans/p_1/request-changes")) {
+      return json({
+        id: "p_1",
+        run_id: "s_1",
+        status: PlanStatus.ChangesRequested,
+        summary: "edit README",
+        effects: [],
+        review_comment: body?.comment,
+        created_at: "2026-08-22T00:00:00Z",
+        updated_at: "2026-08-22T00:00:00Z",
+      });
+    }
+    throw new Error(`unexpected ${method} ${url}`);
+  };
+  const api = new Api<unknown>({ baseUrl: "http://127.0.0.1:8420", customFetch });
+  const rejected = await api.plans.requestPlanChanges("p_1", {
+    comment: "that heading doesn't exist, use the real one",
+  });
+  expect(rejected.data.status).toBe(PlanStatus.ChangesRequested);
+  expect(rejected.data.review_comment).toBe("that heading doesn't exist, use the real one");
+  expect(calls).toEqual([
+    {
+      method: "POST",
+      url: "http://127.0.0.1:8420/plans/p_1/request-changes",
+      body: { comment: "that heading doesn't exist, use the real one" },
+    },
+  ]);
+});
+
 function json(data: unknown): Response {
   return new Response(JSON.stringify(data), {
     status: 200,

@@ -45,15 +45,30 @@ func (s *Server) notifySteer(id session.ID, msg string) {
 
 func (s *Server) dropWorker(id session.ID) {
 	s.mu.Lock()
-	if l, ok := s.lives[id.String()]; ok {
-		l.stop()
-		delete(s.lives, id.String())
-	}
+	l := s.lives[id.String()]
 	s.mu.Unlock()
+	if l != nil {
+		s.dropLive(l)
+	}
+}
+
+// dropLive removes l only if it is still the current worker for the run.
+// A restarted turn must not let the previous goroutine's defer cancel it.
+func (s *Server) dropLive(l *liveRun) {
+	if l == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lives[l.id.String()] != l {
+		return
+	}
+	l.stop()
+	delete(s.lives, l.id.String())
 }
 
 func (s *Server) runWorker(ctx context.Context, l *liveRun) {
-	defer s.dropWorker(l.id)
+	defer s.dropLive(l)
 	if s.harness != nil {
 		s.runHarnessTurn(ctx, l)
 		return

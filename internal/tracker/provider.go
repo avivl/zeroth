@@ -26,7 +26,8 @@ type Provider interface {
 	// Unknown keys are ErrNotFound. Empty key is ErrInvalid. An issue
 	// with no comments returns an empty slice, not an error. Stage-1
 	// assign-to-Zeroth reads this before drafting a plan so a settled
-	// operator decision on the thread is in the next run's context.
+	// operator decision, including a reject-with-comment, is in the
+	// next run's context rather than only on the previous plan row.
 	ListComments(ctx context.Context, key string) ([]Comment, error)
 
 	// Comment posts markdown body on the issue. Empty key or body is

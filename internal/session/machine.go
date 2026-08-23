@@ -138,8 +138,8 @@ func (m *Machine) RequestApproval(ctx context.Context, ref string) error {
 }
 
 // RequestChanges moves awaiting-approval -> running.
-func (m *Machine) RequestChanges(ctx context.Context) error {
-	if err := m.record(ctx, EventChangesRequested, ""); err != nil {
+func (m *Machine) RequestChanges(ctx context.Context, comment string) error {
+	if err := m.record(ctx, EventChangesRequested, comment); err != nil {
 		return fmt.Errorf("session changes: %w", err)
 	}
 	return nil

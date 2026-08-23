@@ -179,6 +179,22 @@ func TestFormatFailedComment(t *testing.T) {
 	}
 }
 
+func TestFormatRejectedComment(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatRejectedComment("s_9", "p_1", "that heading doesn't exist, use the real one")
+	for _, want := range []string{
+		"### Zeroth plan rejected",
+		"that heading doesn't exist, use the real one",
+		"`s_9`",
+		"`p_1`",
+		"Un-assign is not required",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+}
+
 func TestIsSystemComment(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -190,6 +206,8 @@ func TestIsSystemComment(t *testing.T) {
 		{tracker.FormatCompletion(tracker.Completion{RunID: "s_1"}), true},
 		{tracker.FormatCancelComment("s_1"), true},
 		{tracker.FormatFailedComment("s_1", "no plan"), true},
+		{tracker.FormatRetractComment(tracker.Retract{RunID: "s_1", Reason: "bad pr"}), true},
+		{tracker.FormatRejectedComment("s_1", "p_1", "that heading doesn't exist, use the real one"), false},
 		{"The new doc should live at docs/linear-setup.md, not docs/operator/.", false},
 		{"### not zeroth", false},
 		{"", false},
@@ -216,5 +234,22 @@ func TestHumanCommentsDropsSystemAndBots(t *testing.T) {
 	}
 	if got[0].ID != "1" || got[1].ID != "5" {
 		t.Fatalf("order %+v", got)
+	}
+}
+
+func TestHumanCommentsKeepsPlanRejection(t *testing.T) {
+	t.Parallel()
+	correction := "that heading doesn't exist, use the real one"
+	in := []tracker.Comment{
+		{ID: "1", Body: tracker.FormatStartedComment("s_1", "42-54"), Author: "zeroth", Bot: true},
+		{ID: "2", Body: tracker.FormatRejectedComment("s_1", "p_1", correction), Author: "zeroth", Bot: true},
+		{ID: "3", Body: tracker.FormatPlanComment(tracker.PlanComment{Summary: "docs"}), Author: "zeroth"},
+	}
+	got := tracker.HumanComments(in)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].ID != "2" || !strings.Contains(got[0].Body, correction) {
+		t.Fatalf("rejection dropped: %+v", got)
 	}
 }

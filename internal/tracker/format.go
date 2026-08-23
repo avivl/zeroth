@@ -120,6 +120,30 @@ func FormatCancelComment(runID string) string {
 	return b.String()
 }
 
+// FormatRejectedComment is posted when the operator rejects a draft
+// with feedback. The next run reads this thread, so the correction is
+// in the plan-drafting prompt rather than only on the previous plan.
+func FormatRejectedComment(runID, planID, comment string) string {
+	var b strings.Builder
+	b.WriteString("### Zeroth plan rejected\n\n")
+	if c := strings.TrimSpace(comment); c != "" {
+		b.WriteString(c)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("The next plan must address this feedback. Un-assign is not required.\n")
+	if runID != "" || planID != "" {
+		b.WriteByte('\n')
+		if runID != "" {
+			fmt.Fprintf(&b, "Run `%s`. ", runID)
+		}
+		if planID != "" {
+			fmt.Fprintf(&b, "Plan `%s`.", planID)
+		}
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // FormatFailedComment is posted when a run ends without applying, or
 // when apply refuses (stale preconditions, postcondition mismatch).
 func FormatFailedComment(runID, reason string) string {
@@ -188,23 +212,36 @@ func display(v, fallback string) string {
 }
 
 // IsSystemComment reports whether body is a Zeroth-authored tracker
-// comment (started, plan, completed, cancelled, failed). Those rows
-// are the agent's own residue and must not be ingested as operator
-// memory or treated as a settled human decision.
+// comment (started, plan, completed, cancelled, failed, retracted).
+// Those rows are the agent's own residue and must not be ingested as
+// operator memory or treated as a settled human decision.
+//
+// Plan-rejected comments are the exception: they carry the operator's
+// correction, so the next run must read them as human feedback.
 func IsSystemComment(body string) bool {
-	return strings.HasPrefix(strings.TrimSpace(body), "### Zeroth ")
+	body = strings.TrimSpace(body)
+	if strings.HasPrefix(body, "### Zeroth plan rejected") {
+		return false
+	}
+	return strings.HasPrefix(body, "### Zeroth ")
 }
 
 // HumanComments returns the operator-authored subset of a thread,
 // oldest first. System comments, bot comments, and empty bodies
-// are dropped.
+// are dropped. A reject-with-comment is kept even when the vendor
+// marks the poster as a bot, because the body is the operator's
+// correction rather than agent residue.
 func HumanComments(comments []Comment) []Comment {
 	out := make([]Comment, 0, len(comments))
 	for _, c := range comments {
-		if c.Bot || IsSystemComment(c.Body) {
+		if strings.TrimSpace(c.Body) == "" {
 			continue
 		}
-		if strings.TrimSpace(c.Body) == "" {
+		if strings.HasPrefix(strings.TrimSpace(c.Body), "### Zeroth plan rejected") {
+			out = append(out, c)
+			continue
+		}
+		if c.Bot || IsSystemComment(c.Body) {
 			continue
 		}
 		out = append(out, c)

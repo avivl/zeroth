@@ -138,3 +138,20 @@ func issuePrompt(key string, iss tracker.Issue, comments []tracker.Comment, fact
 	}
 	return b.String()
 }
+
+const operatorRejectionHeading = "## Operator rejection"
+
+func appendOperatorRejection(prompt, comment string) string {
+	comment = strings.TrimSpace(comment)
+	if comment == "" {
+		return prompt
+	}
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(prompt, "\n"))
+	b.WriteString("\n\n")
+	b.WriteString(operatorRejectionHeading)
+	b.WriteString("\n\n")
+	b.WriteString(comment)
+	b.WriteByte('\n')
+	return b.String()
+}

@@ -435,7 +435,7 @@ func (f *FakeGraphQL) commentCreate(vars map[string]any) (any, string) {
 		IssueID:   iss.ID,
 		Body:      body,
 		URL:       url,
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		CreatedAt: time.Unix(int64(f.next), 0).UTC().Format(time.RFC3339),
 	})
 	return map[string]any{
 		"commentCreate": map[string]any{

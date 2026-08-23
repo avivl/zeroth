@@ -122,6 +122,22 @@ func TestIssuePromptFallbacksAndDroppedFacts(t *testing.T) {
 	}
 }
 
+func TestIssuePromptIncludesOperatorRejection(t *testing.T) {
+	t.Parallel()
+	correction := "that heading doesn't exist, use the real one"
+	got := issuePrompt("42-54", tracker.Issue{Title: "fix the docs heading"}, []tracker.Comment{
+		{Body: tracker.FormatStartedComment("s_1", "42-54"), Author: "zeroth", Bot: true},
+		{Body: tracker.FormatRejectedComment("s_1", "p_1", correction), Author: "zeroth", Bot: true},
+		{Body: tracker.FormatPlanComment(tracker.PlanComment{Summary: "wrong heading"}), Author: "zeroth"},
+	}, nil)
+	if !strings.Contains(got, correction) || !strings.Contains(got, "## Comment thread") {
+		t.Fatalf("rejection missing from next prompt:\n%s", got)
+	}
+	if strings.Contains(got, "### Zeroth started") || strings.Contains(got, "wrong heading") {
+		t.Fatalf("system residue leaked:\n%s", got)
+	}
+}
+
 func TestLoadIssueThreadFetchesAndSurvivesListError(t *testing.T) {
 	t.Parallel()
 	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))

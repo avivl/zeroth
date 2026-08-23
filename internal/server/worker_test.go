@@ -27,6 +27,7 @@ type stubHarness struct {
 	mu       sync.Mutex
 	starts   int
 	lastSpec harness.Spec
+	specs    []harness.Spec
 	startErr error
 	events   []harness.Event
 }
@@ -38,6 +39,7 @@ func (h *stubHarness) Start(_ context.Context, spec harness.Spec) (harness.Handl
 	defer h.mu.Unlock()
 	h.starts++
 	h.lastSpec = spec
+	h.specs = append(h.specs, spec)
 	if h.startErr != nil {
 		return harness.Handle{}, h.startErr
 	}
@@ -76,10 +78,32 @@ func (h *stubHarness) startCount() int {
 	return h.starts
 }
 
+func (h *stubHarness) prompts() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, 0, len(h.specs))
+	for _, spec := range h.specs {
+		out = append(out, spec.Prompt)
+	}
+	return out
+}
+
 func (h *stubHarness) lastPrompt() string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.lastSpec.Prompt
+}
+
+func waitHarnessStarts(t *testing.T, h *stubHarness, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if h.startCount() >= n {
+			return
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	t.Fatalf("harness starts = %d, want >= %d", h.startCount(), n)
 }
 
 func (h *stubHarness) startedSpec() harness.Spec {

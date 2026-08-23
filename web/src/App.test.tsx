@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { expect, test } from "vitest";
 import { App, CrossExamNotes } from "./App";
-import { ChangePlanCard, RetractCard } from "./views";
+import { ChangePlanCard, RejectCommentBox, RetractCard } from "./views";
 import { PlanStatus, PlanEffectType, RunStatus, type Plan, type Run } from "@zeroth/api";
 import { contrastRatio, darkTheme, lightTheme, themePairs, AA_NORMAL } from "./contrast";
 import { parseHash, hrefFor } from "./routes";
@@ -60,7 +60,7 @@ const pendingPlan: Plan = {
   updated_at: "2026-08-22T00:00:00Z",
 };
 
-test("change plan card exposes approve, apply, request changes, and branch", () => {
+test("change plan card exposes approve, apply, reject with comment, and branch", () => {
   const html = renderToString(
     createElement(ChangePlanCard, {
       plan: pendingPlan,
@@ -73,7 +73,7 @@ test("change plan card exposes approve, apply, request changes, and branch", () 
   );
   expect(html).toContain("Approve");
   expect(html).toContain("Apply");
-  expect(html).toContain("Request changes");
+  expect(html).toContain("Reject with comment");
   expect(html).toContain("Branch");
   expect(html).toContain("README.md");
   expect(html).toContain("lease-1");
@@ -115,6 +115,17 @@ test("retract card requires a reason and names the pull request", () => {
     }),
   );
   expect(ready).toContain("Apply overwrote README.md instead of patching it.");
+});
+
+test("reject comment box requires typed feedback", () => {
+  const html = renderToString(
+    createElement(RejectCommentBox, {
+      disabled: false,
+      onReject: () => undefined,
+    }),
+  );
+  expect(html).toContain("Reject with comment");
+  expect(html).toContain("textarea");
 });
 
 test("hash routes cover the seven views", () => {

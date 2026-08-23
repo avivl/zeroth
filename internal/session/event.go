@@ -62,6 +62,7 @@ const (
 	// EventApprovalRequested moves running -> awaiting-approval.
 	EventApprovalRequested EventType = "approval_requested"
 	// EventChangesRequested moves awaiting-approval -> running.
+	// Payload is the operator comment the next draft must address.
 	EventChangesRequested EventType = "changes_requested"
 	// EventApplying moves awaiting-approval -> applying.
 	EventApplying EventType = "applying"

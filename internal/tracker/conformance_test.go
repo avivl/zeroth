@@ -149,6 +149,17 @@ func testListComments(t *testing.T, open func(t *testing.T) (tracker.Provider, *
 	if !posted {
 		t.Fatalf("posted comment missing: %+v", again)
 	}
+	correction := "that heading doesn't exist, use the real one"
+	if _, err := p.Comment(t.Context(), "42-1", tracker.FormatRejectedComment("s_1", "p_1", correction)); err != nil {
+		t.Fatalf("Comment rejection: %v", err)
+	}
+	thread, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatalf("ListComments after reject: %v", err)
+	}
+	if len(thread) < 3 || !strings.Contains(thread[len(thread)-1].Body, correction) {
+		t.Fatalf("last comment missing correction: %+v", thread)
+	}
 }
 
 func testListCommentsEmpty(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {

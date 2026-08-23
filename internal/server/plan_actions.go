@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -10,7 +11,9 @@ import (
 	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/store"
+	"github.com/avivl/zeroth/internal/tracker"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
+	"go.uber.org/zap"
 )
 
 func (s *Server) ApprovePlan(w http.ResponseWriter, r *http.Request, id gen.PlanID) {
@@ -87,9 +90,12 @@ func (s *Server) RequestPlanChanges(w http.ResponseWriter, r *http.Request, id g
 		writeStoreError(w, err)
 		return
 	}
-	sid, err := session.ParseID(rec.SessionID.String())
-	if err == nil {
-		if err := s.sup.RequestChanges(r.Context(), sid); err != nil && !errors.Is(err, session.ErrIllegalTransition) {
+	sid, sidErr := session.ParseID(rec.SessionID.String())
+	if sidErr == nil {
+		if err := s.appendRejectionPrompt(r.Context(), sid, req.Comment); err != nil {
+			s.log.Debug("reject prompt", zap.Error(err))
+		}
+		if err := s.sup.RequestChanges(r.Context(), sid, req.Comment); err != nil && !errors.Is(err, session.ErrIllegalTransition) {
 			status, code, msg := statusForSessionError(err)
 			writeError(w, status, code, msg)
 			return
@@ -97,7 +103,65 @@ func (s *Server) RequestPlanChanges(w http.ResponseWriter, r *http.Request, id g
 		_ = s.syncSession(r.Context(), sid)
 	}
 	s.markApprovals(r.Context(), rec.ID, rec.SessionID, string(gen.ApprovalStatusChangesRequested))
+	sess, err := s.store.GetSession(r.Context(), rec.SessionID)
+	if err == nil {
+		_, _ = s.audit.Append(r.Context(), audit.Entry{
+			Action:       audit.ActionPlanReject,
+			Target:       rec.ID.String(),
+			PlanHash:     rec.Hash,
+			Approver:     audit.ApproverOperator,
+			AgentID:      sess.AgentID,
+			SessionID:    rec.SessionID,
+			ResourceType: "plan",
+			ResourceID:   rec.ID.String(),
+		})
+	}
+	s.commentPlanRejected(r.Context(), rec, req.Comment)
+	if sidErr == nil && s.harness != nil {
+		s.dropWorker(sid)
+		s.startWorker(sid)
+	}
 	writeJSON(w, http.StatusOK, planFrom(rec))
+}
+
+func (s *Server) appendRejectionPrompt(ctx context.Context, id session.ID, comment string) error {
+	sid, err := store.ParseSessionID(id.String())
+	if err != nil {
+		return fmt.Errorf("server reject prompt: %w", err)
+	}
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	sess, err := s.store.GetSession(ctx, sid)
+	if err != nil {
+		return fmt.Errorf("server reject prompt: %w", err)
+	}
+	sess.Prompt = appendOperatorRejection(sess.Prompt, comment)
+	sess.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		return fmt.Errorf("server reject prompt: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) commentPlanRejected(ctx context.Context, rec store.Plan, comment string) {
+	key := ""
+	if sid, err := session.ParseID(rec.SessionID.String()); err == nil {
+		key = s.trackerKey(sid)
+	}
+	if key == "" {
+		sess, err := s.store.GetSession(ctx, rec.SessionID)
+		if err == nil {
+			key = sess.TrackerRef
+		}
+	}
+	if s.tracker == nil || key == "" {
+		return
+	}
+	runID := rec.SessionID.String()
+	body := tracker.FormatRejectedComment(runID, rec.ID.String(), comment)
+	if _, err := s.tracker.Comment(ctx, key, body); err != nil {
+		s.log.Warn("tracker reject comment", zap.String("key", key), zap.Error(err))
+	}
 }
 
 func (s *Server) BranchPlan(w http.ResponseWriter, r *http.Request, id gen.PlanID) {

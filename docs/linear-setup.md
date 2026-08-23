@@ -117,16 +117,24 @@ Now, in Linear:
    resource, and the cross-exam verdict inline. A fail or pass_with_notes
    is an alert above Approve, not a collapsed footnote. The Linear plan
    comment shows the same verdict outside the collapsed plan body.
-5. Click **Approve**, then **Apply**. Each click shows a Plan gate banner
-   on the change-plan card with that REST call's real outcome (`POST
-   /plans/{id}/approve`, then `POST /plans/{id}/apply`). A live-output
-   reconnect is labeled "Live tail" on the output card and is not an
-   approve or apply result. The signature chip next to the applied plan
-   should read valid: click **Verify** to confirm.
-6. Zeroth opens a PR, links it back on the Linear issue, and moves the
+5. If the plan is wrong, do not un-assign. Type the correction into
+   **Reject with comment** (or run `zeroth reject <plan-id> --comment
+   "..."`). Zeroth posts that text on the issue, appends it to the run
+   prompt, and drafts again. The next plan's generation context includes
+   your words (for example "that heading doesn't exist, use the real
+   one"), not a blank restart. A later un-assign/re-assign also rereads
+   the issue comment thread, so the same correction survives a new run.
+6. When the plan is right, click **Approve**, then **Apply**. Each
+   click shows a Plan gate banner on the change-plan card with that
+   REST call's real outcome (`POST /plans/{id}/approve`, then `POST
+   /plans/{id}/apply`). A live-output reconnect is labeled "Live tail"
+   on the output card and is not an approve or apply result. The
+   signature chip next to the applied plan should read valid: click
+   **Verify** to confirm.
+7. Zeroth opens a PR, links it back on the Linear issue, and moves the
    issue's status. The issue comment also carries cost, a transcript
    link, and an audit summary.
-7. If that PR is wrong (a bad apply, a botched patch), do not close it
+8. If that PR is wrong (a bad apply, a botched patch), do not close it
    on GitHub and do not un-assign/re-assign to retry. From the run
    detail view, or:
 
@@ -138,7 +146,7 @@ Now, in Linear:
    the agent, and moves the issue back to Todo. Re-assign when you want
    a fresh run. The thread stays a complete record, including why the
    prior output was retracted.
-8. To confirm the run is genuinely auditable, stop `zerothd` entirely and
+9. To confirm the run is genuinely auditable, stop `zerothd` entirely and
    run, offline:
 
    ```bash
@@ -154,7 +162,9 @@ To cancel a run instead of approving it, un-assign the issue in Linear
 sandbox. A subsequent `Exec` against the sandbox fails, confirming the
 container actually died rather than just being marked stopped in a
 database row. Killing the sandbox container alone does **not** stop
-`claude`: that process is a child of `zerothd` (ADR-Z-0010).
+`claude`: that process is a child of `zerothd` (ADR-Z-0010). Un-assign
+is blunt: it does not carry a correction into the next attempt. Prefer
+reject-with-comment when you want the agent to retry with your reasoning.
 
 ## Confirming harness vs sandbox (stage 1)
 
@@ -210,6 +220,8 @@ ZEROTH_LIVE_LINEAR=1 go test ./internal/tracker/linear -run TestLiveIssueFilterS
 ```
 
 A recorded run is in [docs/tracker/LIVE_VERIFICATION.md](tracker/LIVE_VERIFICATION.md).
+Reject-with-comment feeding the next plan is recorded in
+[REJECT_FEEDBACK.md](tracker/REJECT_FEEDBACK.md).
 To poll a real workspace, also set `ZEROTH_LINEAR_API_KEY` (and the usual
 auth-style / agent-user vars) and run `TestLiveListAssigned`.
 

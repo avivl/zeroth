@@ -164,12 +164,15 @@ Once `zerothd` is running with the configuration above:
    anything on its own initiative — the plan comment is a request for approval.
    The cross-exam verdict sits above the collapsed plan body. A fail or
    `pass_with_notes` is a concern to read before you approve.
-6. **You approve (or reject)** in either of two places:
-   * the CLI, or
+6. **You approve or reject with a comment** in either of two places:
+   * the CLI (`zeroth reject <plan-id> --comment "..."`), or
    * the **Approvals inbox** in the web UI, which collects every waiting run in
-     one list. Opening the run and clicking Approve or Apply shows a Plan gate
-     banner with that REST call's real outcome. A live-output reconnect is not
-     an approve or apply result.
+     one list. **Reject with comment** posts your correction on the issue,
+     appends it to the run prompt, and drafts again. Un-assign/re-assign
+     also rereads the comment thread, so the same correction survives a
+     new run. Opening the run and clicking Approve or Apply shows a Plan
+     gate banner with that REST call's real outcome. A live-output
+     reconnect is not an approve or apply result.
 7. **On completion, Zeroth comments back on the issue** with:
    * the run's **cost**,
    * a link to the full **transcript**,

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -91,14 +92,24 @@ func (s *stubTracker) ListComments(_ context.Context, key string) ([]tracker.Com
 	}
 	return append([]tracker.Comment(nil), s.threads[key]...), nil
 }
-func (s *stubTracker) Comment(_ context.Context, _, body string) (tracker.CommentRef, error) {
+func (s *stubTracker) Comment(_ context.Context, key, body string) (tracker.CommentRef, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.commentErr != nil {
 		return tracker.CommentRef{}, s.commentErr
 	}
 	s.comments = append(s.comments, body)
-	return tracker.CommentRef{ID: "c1"}, nil
+	id := fmt.Sprintf("c%d", len(s.comments))
+	posted := tracker.Comment{
+		ID:     id,
+		Body:   body,
+		Author: "operator",
+		At:     time.Unix(int64(len(s.comments)), 0).UTC(),
+	}
+	if k := strings.TrimSpace(key); k != "" {
+		s.threads[k] = append(s.threads[k], posted)
+	}
+	return tracker.CommentRef{ID: id}, nil
 }
 func (s *stubTracker) SetState(_ context.Context, _ string, state tracker.State) error {
 	s.mu.Lock()
