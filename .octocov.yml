@@ -4,7 +4,7 @@
 #
 # Two gates, and they do different jobs (42-69). diff catches erosion by a
 # single PR; the floor catches drift accumulated across many. The floor sits
-# just under where we actually are (68.21% at the time of writing) so that one
+# just under where we actually are (77.0% at the time of writing) so that one
 # tolerated dip cannot trip it, and it only ever moves up, as each package's
 # tests land.
 #
@@ -33,7 +33,7 @@ coverage:
     - 'pkg/api/gen/go/**/*.go'
   badge:
     path: docs/coverage.svg
-  acceptable: current >= 67.5% && diff >= -0.3%
+  acceptable: current >= 76.5% && diff >= -0.3%
 codeToTestRatio:
   code:
     - '**/*.go'
