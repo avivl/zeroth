@@ -154,6 +154,14 @@ type testAuditor struct{}
 func (testAuditor) SignRow(context.Context, Row, string) error { return nil }
 func (testAuditor) SignPlan(context.Context, Plan) error       { return nil }
 
+// signPlanFails is a signer that cannot record the plan. SignRow still works,
+// so rows apply and the halt path is what trips over the failure.
+type signPlanFails struct{ testAuditor }
+
+func (signPlanFails) SignPlan(context.Context, Plan) error {
+	return errors.New("signer offline")
+}
+
 func threeApproved(t *testing.T) Plan {
 	t.Helper()
 	p := mustBuild(t, Draft{
@@ -765,5 +773,32 @@ func TestPropertyExpiredLeaseNeverAppliesPastWindow(t *testing.T) {
 		if got.AppliedThrough != landBeforeExpire || len(world.writeKeys()) != landBeforeExpire {
 			t.Fatalf("iteration %d: through=%d writes=%v want %d", i, got.AppliedThrough, world.writeKeys(), landBeforeExpire)
 		}
+	}
+}
+
+func TestHaltPartialSurfacesSignFailure(t *testing.T) {
+	t.Parallel()
+	// 42-65: a partial apply that the signed chain never recorded is worse
+	// than the failure that caused the halt. Discarding the SignPlan error
+	// left the caller seeing only the original cause.
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	applier, world, _, _, clock := applyHarness(now)
+	applier.Audit = signPlanFails{}
+	p := threeApproved(t)
+	world.after = func(row Row) {
+		if row.Target == "a.txt" {
+			clock.Set(now.Add(2 * time.Hour))
+		}
+	}
+
+	got, err := applier.Apply(t.Context(), applyActor, p, Approval{PlanHash: p.Hash})
+	if !errors.Is(err, ErrPartial) {
+		t.Fatalf("err = %v, want ErrPartial", err)
+	}
+	if !strings.Contains(err.Error(), "signer offline") {
+		t.Fatalf("err = %v, want it to report the unrecorded halt", err)
+	}
+	if got.Status != StatusPartiallyApplied || got.AppliedThrough != 1 {
+		t.Fatalf("status=%q through=%d", got.Status, got.AppliedThrough)
 	}
 }

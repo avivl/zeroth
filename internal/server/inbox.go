@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -227,6 +228,14 @@ func writeStoreError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 	}
+}
+
+// writeAuditError fails an action closed when its signed-chain record did not
+// land. The action is named so an operator reading the response knows which
+// entry is missing, not just that something broke (42-65).
+func writeAuditError(w http.ResponseWriter, action string, err error) {
+	writeError(w, http.StatusInternalServerError, "internal",
+		fmt.Sprintf("audit %s: %v", action, err))
 }
 
 func strOr(p *string, fallback string) string {
