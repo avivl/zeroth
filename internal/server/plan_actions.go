@@ -46,7 +46,10 @@ func (s *Server) ApprovePlan(w http.ResponseWriter, r *http.Request, id gen.Plan
 		writeStoreError(w, err)
 		return
 	}
-	s.markApprovals(r.Context(), rec.ID, rec.SessionID, string(gen.ApprovalStatusApproved))
+	if err := s.markApprovals(r.Context(), rec.ID, rec.SessionID, string(gen.ApprovalStatusApproved)); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	sess, err := s.store.GetSession(r.Context(), rec.SessionID)
 	if err == nil {
 		_, _ = s.audit.Append(r.Context(), audit.Entry{
@@ -102,7 +105,10 @@ func (s *Server) RequestPlanChanges(w http.ResponseWriter, r *http.Request, id g
 		}
 		_ = s.syncSession(r.Context(), sid)
 	}
-	s.markApprovals(r.Context(), rec.ID, rec.SessionID, string(gen.ApprovalStatusChangesRequested))
+	if err := s.markApprovals(r.Context(), rec.ID, rec.SessionID, string(gen.ApprovalStatusChangesRequested)); err != nil {
+		writeStoreError(w, err)
+		return
+	}
 	sess, err := s.store.GetSession(r.Context(), rec.SessionID)
 	if err == nil {
 		_, _ = s.audit.Append(r.Context(), audit.Entry{
@@ -271,10 +277,19 @@ func (s *Server) ApplyPlan(w http.ResponseWriter, r *http.Request, id gen.PlanID
 		return
 	}
 	if result.Status == plan.StatusApplied {
-		_ = s.sup.Succeed(r.Context(), sid)
+		if err := s.sup.Succeed(r.Context(), sid); err != nil {
+			s.log.Error("apply succeed", zap.String("run", sid.String()), zap.Error(err))
+			status, code, msg := statusForSessionError(err)
+			writeError(w, status, code, msg)
+			return
+		}
 		s.completeTracker(r.Context(), sid)
 	}
-	_ = s.syncSession(r.Context(), sid)
+	if err := s.syncSession(r.Context(), sid); err != nil {
+		s.log.Error("apply sync session", zap.String("run", sid.String()), zap.Error(err))
+		writeStoreError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, gen.ApplyPlanResponse{
 		Plan:    planFrom(stored),
 		AuditId: gen.AuditID(auditID),
@@ -297,21 +312,37 @@ func (s *Server) loadPlan(ctx context.Context, raw string) (store.Plan, plan.Pla
 	return rec, p, nil
 }
 
-func (s *Server) markApprovals(ctx context.Context, planID store.PlanID, _ store.SessionID, status string) {
+func (s *Server) markApprovals(ctx context.Context, planID store.PlanID, sessionID store.SessionID, status string) error {
 	page, err := s.store.ListApprovals(ctx, store.ApprovalQuery{
 		Status:    string(gen.ApprovalStatusPending),
 		PageQuery: store.PageQuery{Limit: 200},
 	})
 	if err != nil {
-		return
+		s.log.Error("mark approvals list",
+			zap.String("plan", planID.String()),
+			zap.String("session", sessionID.String()),
+			zap.String("status", status),
+			zap.Error(err),
+		)
+		return fmt.Errorf("mark approvals list: %w", err)
 	}
 	for _, a := range page.Items {
 		if a.PlanID != planID {
 			continue
 		}
 		a.Status = status
-		_ = s.store.UpdateApproval(ctx, a)
+		if err := s.store.UpdateApproval(ctx, a); err != nil {
+			s.log.Error("mark approvals update",
+				zap.String("plan", planID.String()),
+				zap.String("session", sessionID.String()),
+				zap.String("approval", a.ID.String()),
+				zap.String("status", status),
+				zap.Error(err),
+			)
+			return fmt.Errorf("mark approvals update: %w", err)
+		}
 	}
+	return nil
 }
 
 func writePlanError(w http.ResponseWriter, err error) {
