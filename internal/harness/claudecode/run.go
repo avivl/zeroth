@@ -218,11 +218,24 @@ func (i *instance) read(stdout io.Reader, stderr *bytes.Buffer) {
 			i.emit(ev)
 		}
 	}
-	_ = sc.Err()
+	scanErr := sc.Err()
 
 	i.mu.Lock()
 	cmd := i.cmd
+	// Read the stop flag here, before the drain and Wait below. A Stop that
+	// lands later must not retroactively explain away an error the scan had
+	// already hit, or a real truncation disappears into "stopped".
+	stoppedEarly := i.stopping
 	i.mu.Unlock()
+
+	if scanErr != nil {
+		// The scan stopped short of EOF. Drain the rest so the child is not
+		// left blocking on a full pipe, which would wedge the Wait below.
+		_, _ = io.Copy(io.Discard, stdout)
+		if stoppedEarly {
+			scanErr = nil
+		}
+	}
 	waitErr := error(nil)
 	if cmd != nil {
 		waitErr = cmd.Wait()
@@ -239,13 +252,22 @@ func (i *instance) read(stdout io.Reader, stderr *bytes.Buffer) {
 	i.stdin = nil
 	i.mu.Unlock()
 
-	if !i.hasKind(harness.EventEffects) {
+	// A transcript we know was cut short must not be mined for a plan the
+	// agent never finished proposing.
+	if scanErr == nil && !i.hasKind(harness.EventEffects) {
 		if effects, err := harness.ParseEffects(full); err == nil {
 			i.emit(harness.Event{Kind: harness.EventEffects, Effects: effects})
 		}
 	}
 
-	payload := exitPayload(waitErr, stopping, stderr, i.key)
+	if scanErr != nil {
+		i.emit(harness.Event{
+			Kind:    harness.EventError,
+			Payload: redact(fmt.Sprintf("harness claudecode stdout: %v", scanErr), i.key),
+		})
+	}
+
+	payload := exitPayload(waitErr, scanErr, stopping, stderr, i.key)
 	i.emit(harness.Event{Kind: harness.EventExited, Payload: payload})
 }
 
@@ -260,10 +282,21 @@ func (i *instance) hasKind(k harness.EventKind) bool {
 	return false
 }
 
-func exitPayload(waitErr error, stopping bool, stderr *bytes.Buffer, key string) string {
-	if stopping {
-		return "stopped"
+// exitPayload names how the run ended. scanErr is the stdout scan error,
+// which is not the same as a bad exit status: a child can truncate its
+// stream and still exit 0, and that must not read as a clean exit (42-67).
+func exitPayload(waitErr, scanErr error, stopping bool, stderr *bytes.Buffer, key string) string {
+	base := "stopped"
+	if !stopping {
+		base = waitPayload(waitErr, stderr)
 	}
+	if scanErr != nil {
+		base = "stream error: " + scanErr.Error() + "; " + base
+	}
+	return redact(base, key)
+}
+
+func waitPayload(waitErr error, stderr *bytes.Buffer) string {
 	if waitErr == nil {
 		return "exit 0"
 	}
@@ -279,7 +312,7 @@ func exitPayload(waitErr error, stopping bool, stderr *bytes.Buffer, key string)
 			msg = msg + ": " + extra
 		}
 	}
-	return redact(msg, key)
+	return msg
 }
 
 // Stream implements [harness.Driver].

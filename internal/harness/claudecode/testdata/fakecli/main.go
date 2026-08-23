@@ -38,6 +38,15 @@ func main() {
 		os.Exit(0)
 	}()
 
+	if strings.Contains(prompt, "TRUNCATEFIRST") {
+		_ = readUserText()
+		// Truncate before any line the parent could scan, so this turn adds
+		// nothing to its transcript. Whatever the parent then finds to parse
+		// came from a resumed transcript, not from this run.
+		writeOverlong()
+		os.Exit(0)
+	}
+
 	writeLine(sysInit{Type: "system", Subtype: "init", SessionID: "fake-session-1"})
 
 	switch {
@@ -55,6 +64,12 @@ func main() {
 		}
 		emitTool()
 		emitResult()
+	case strings.Contains(prompt, "TRUNCATE"):
+		_ = readUserText()
+		emitDelta("hello-token")
+		// Then exit 0: a clean child exit is exactly what must not read as a
+		// clean stream upstream.
+		writeOverlong()
 	case strings.Contains(prompt, "STDINPROMPT"):
 		if text := readUserText(); text != "" {
 			emitDelta("from-stdin")
@@ -205,6 +220,15 @@ func emitResult() {
 		IsError:   false,
 		SessionID: "fake-session-1",
 	})
+}
+
+// writeOverlong emits a single line past the parent's 1 MiB scanner cap and
+// past any pipe buffer, so the parent's scan fails and the write only
+// completes once the parent drains the remainder.
+func writeOverlong() {
+	if _, err := os.Stdout.WriteString(strings.Repeat("x", 4<<20) + "\n"); err != nil {
+		os.Exit(1)
+	}
 }
 
 func writeLine[T any](v T) {
