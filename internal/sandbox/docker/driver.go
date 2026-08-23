@@ -30,6 +30,10 @@ type Driver struct {
 
 	mu   sync.Mutex
 	inst map[string]*instance
+
+	// runDocker, if set, replaces the docker CLI. Tests use it to
+	// simulate network setup failures without a daemon.
+	runDocker func(ctx context.Context, args []string) ([]byte, error)
 }
 
 type instance struct {
@@ -117,6 +121,9 @@ func (d *Driver) HostWorkspace(id sandbox.ID) (string, error) {
 }
 
 func (d *Driver) docker(ctx context.Context, args ...string) ([]byte, error) {
+	if d.runDocker != nil {
+		return d.runDocker(ctx, args)
+	}
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -42,16 +42,7 @@ func (d *Driver) AllowEgress(ctx context.Context, id sandbox.ID, rules []sandbox
 	}
 
 	if len(rules) == 0 {
-		if inst.proxy != nil {
-			_ = inst.proxy.Close()
-			inst.proxy = nil
-		}
-		if inst.bridged && inst.container != "" {
-			_ = exec.CommandContext(ctx, "docker", "network", "disconnect", "bridge", inst.container).Run()
-			_ = exec.CommandContext(ctx, "docker", "network", "connect", "none", inst.container).Run()
-			inst.bridged = false
-		}
-		return nil
+		return d.applyDenyAllLocked(ctx, inst)
 	}
 
 	if inst.proxy == nil {
@@ -73,12 +64,42 @@ func (d *Driver) AllowEgress(ctx context.Context, id sandbox.ID, rules []sandbox
 	return nil
 }
 
+// applyDenyAllLocked detaches bridge egress and tears down the proxy.
+// inst.mu must be held. Network isolation is established before the
+// proxy is closed so a failed teardown cannot leave the container on
+// the default bridge without an allowlist. Any docker or proxy error
+// is returned: deny-all is never reported while isolation is in doubt.
+func (d *Driver) applyDenyAllLocked(ctx context.Context, inst *instance) error {
+	if inst.bridged && inst.container != "" {
+		if _, err := d.docker(ctx, "network", "disconnect", "bridge", inst.container); err != nil {
+			return fmt.Errorf("sandbox docker egress: deny-all: disconnect bridge: %w", err)
+		}
+		// Off the bridge. Record that before connect none so a later
+		// allow path re-attaches rather than assuming we are still bridged.
+		inst.bridged = false
+		if _, err := d.docker(ctx, "network", "connect", "none", inst.container); err != nil {
+			return fmt.Errorf("sandbox docker egress: deny-all: connect none: %w", err)
+		}
+	}
+	if inst.proxy != nil {
+		if err := inst.proxy.Close(); err != nil {
+			return fmt.Errorf("sandbox docker egress: deny-all: close proxy: %w", err)
+		}
+		inst.proxy = nil
+	}
+	return nil
+}
+
 type egressProxy struct {
 	ln  net.Listener
 	srv *http.Server
 
 	mu    sync.Mutex
 	rules []sandbox.EgressRule
+
+	// closeErr, if set, is returned from Close without touching the
+	// server. Tests use it to simulate a proxy teardown failure.
+	closeErr error
 }
 
 func listenProxy(rules []sandbox.EgressRule) (*egressProxy, error) {
@@ -113,7 +134,13 @@ func (p *egressProxy) URL() string {
 }
 
 func (p *egressProxy) Close() error {
-	if p == nil || p.srv == nil {
+	if p == nil {
+		return nil
+	}
+	if p.closeErr != nil {
+		return p.closeErr
+	}
+	if p.srv == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

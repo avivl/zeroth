@@ -68,6 +68,7 @@ func TestDriverConformance(t *testing.T) {
 			t.Run("import_rejects_escape", func(t *testing.T) { testImportRejectsEscape(t, tc.open) })
 			t.Run("egress_deny_default", func(t *testing.T) { testEgressDenyDefault(t, tc.open) })
 			t.Run("egress_allow_listed", func(t *testing.T) { testEgressAllowListed(t, tc.open) })
+			t.Run("egress_restore_deny", func(t *testing.T) { testEgressRestoreDeny(t, tc.open) })
 			t.Run("kill_inflight", func(t *testing.T) { testKillInflight(t, tc.open) })
 			t.Run("kill_lost_work", func(t *testing.T) { testKillLostWork(t, tc.open) })
 			t.Run("kill_daemon_not_restored", func(t *testing.T) { testKillDaemonNotRestored(t, tc.open) })
@@ -331,6 +332,42 @@ func testEgressAllowListed(t *testing.T, open func(t *testing.T) sandbox.Driver)
 	}
 	if res.ExitCode == 0 {
 		t.Fatalf("unlisted dest succeeded: stdout=%q", res.Stdout)
+	}
+}
+
+func testEgressRestoreDeny(t *testing.T, open func(t *testing.T) sandbox.Driver) {
+	t.Helper()
+	d := open(t)
+	sb := mustSpawn(t, d, nil)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "leaked")
+	}))
+	t.Cleanup(srv.Close)
+	host, port := mustHostPort(t, srv.URL)
+	if err := d.AllowEgress(t.Context(), sb.ID, []sandbox.EgressRule{{Host: host, Port: port}}); err != nil {
+		t.Fatalf("AllowEgress allow: %v", err)
+	}
+	if err := d.AllowEgress(t.Context(), sb.ID, nil); err != nil {
+		t.Fatalf("AllowEgress deny-all: %v", err)
+	}
+
+	res := mustExec(t, d, sb.ID, sandbox.Cmd{Argv: []string{"sh", "-c", "printf %s \"$HTTP_PROXY\""}})
+	if strings.TrimSpace(res.Stdout) != "" {
+		t.Fatalf("HTTP_PROXY set after deny-all: %q", res.Stdout)
+	}
+	res = mustExec(t, d, sb.ID, sandbox.Cmd{Argv: []string{"ls", "/sys/class/net"}})
+	for _, iface := range strings.Fields(res.Stdout) {
+		if iface != "lo" {
+			t.Fatalf("deny-all has extra iface %q (%q)", iface, res.Stdout)
+		}
+	}
+	res, err := d.Exec(t.Context(), sb.ID, sandbox.Cmd{Argv: []string{"wget", "-T", "2", "-qO-", srv.URL}})
+	if err != nil {
+		t.Fatalf("wget deny-all driver error: %v", err)
+	}
+	if res.ExitCode == 0 {
+		t.Fatalf("deny-all after allow reached host listener: stdout=%q", res.Stdout)
 	}
 }
 
