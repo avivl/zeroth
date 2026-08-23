@@ -367,8 +367,14 @@ func (a *Applier) haltPartial(ctx context.Context, p Plan, applied []Applied, ck
 	p.AppliedThrough = len(applied)
 	p.Checkpoint = ck
 	p.ReviewComment = cause.Error()
-	_ = a.Audit.SignPlan(ctx, p)
-	return resultFrom(p, applied, p.AppliedThrough, ck), fmt.Errorf("plan apply: %w: %w", ErrPartial, cause)
+	res := resultFrom(p, applied, p.AppliedThrough, ck)
+	if signErr := a.Audit.SignPlan(ctx, p); signErr != nil {
+		// Rows landed but the chain does not know about them. That is worse
+		// than the cause of the halt, so it travels with it rather than
+		// waiting for a later zeroth verify to find the gap.
+		return res, fmt.Errorf("plan apply: %w: %w: sign plan: %w", ErrPartial, cause, signErr)
+	}
+	return res, fmt.Errorf("plan apply: %w: %w", ErrPartial, cause)
 }
 
 func (a *Applier) ready() error {

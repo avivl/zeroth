@@ -51,17 +51,22 @@ func (s *Server) ApprovePlan(w http.ResponseWriter, r *http.Request, id gen.Plan
 		return
 	}
 	sess, err := s.store.GetSession(r.Context(), rec.SessionID)
-	if err == nil {
-		_, _ = s.audit.Append(r.Context(), audit.Entry{
-			Action:       audit.ActionPlanApprove,
-			Target:       rec.ID.String(),
-			PlanHash:     stored.Hash,
-			Approver:     audit.ApproverOperator,
-			AgentID:      sess.AgentID,
-			SessionID:    rec.SessionID,
-			ResourceType: "plan",
-			ResourceID:   rec.ID.String(),
-		})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if _, err := s.audit.Append(r.Context(), audit.Entry{
+		Action:       audit.ActionPlanApprove,
+		Target:       rec.ID.String(),
+		PlanHash:     stored.Hash,
+		Approver:     audit.ApproverOperator,
+		AgentID:      sess.AgentID,
+		SessionID:    rec.SessionID,
+		ResourceType: "plan",
+		ResourceID:   rec.ID.String(),
+	}); err != nil {
+		writeAuditError(w, audit.ActionPlanApprove, err)
+		return
 	}
 	writeJSON(w, http.StatusOK, planFrom(stored))
 }
@@ -110,17 +115,22 @@ func (s *Server) RequestPlanChanges(w http.ResponseWriter, r *http.Request, id g
 		return
 	}
 	sess, err := s.store.GetSession(r.Context(), rec.SessionID)
-	if err == nil {
-		_, _ = s.audit.Append(r.Context(), audit.Entry{
-			Action:       audit.ActionPlanReject,
-			Target:       rec.ID.String(),
-			PlanHash:     rec.Hash,
-			Approver:     audit.ApproverOperator,
-			AgentID:      sess.AgentID,
-			SessionID:    rec.SessionID,
-			ResourceType: "plan",
-			ResourceID:   rec.ID.String(),
-		})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if _, err := s.audit.Append(r.Context(), audit.Entry{
+		Action:       audit.ActionPlanReject,
+		Target:       rec.ID.String(),
+		PlanHash:     rec.Hash,
+		Approver:     audit.ApproverOperator,
+		AgentID:      sess.AgentID,
+		SessionID:    rec.SessionID,
+		ResourceType: "plan",
+		ResourceID:   rec.ID.String(),
+	}); err != nil {
+		writeAuditError(w, audit.ActionPlanReject, err)
+		return
 	}
 	s.commentPlanRejected(r.Context(), rec, req.Comment)
 	if sidErr == nil && s.harness != nil {
@@ -210,17 +220,22 @@ func (s *Server) BranchPlan(w http.ResponseWriter, r *http.Request, id gen.PlanI
 		return
 	}
 	sess, err := s.store.GetSession(r.Context(), src.SessionID)
-	if err == nil {
-		_, _ = s.audit.Append(r.Context(), audit.Entry{
-			Action:       audit.ActionPlanBranch,
-			Target:       pid.String(),
-			PlanHash:     branch.Hash,
-			Approver:     audit.ApproverOperator,
-			AgentID:      sess.AgentID,
-			SessionID:    src.SessionID,
-			ResourceType: "plan",
-			ResourceID:   pid.String(),
-		})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if _, err := s.audit.Append(r.Context(), audit.Entry{
+		Action:       audit.ActionPlanBranch,
+		Target:       pid.String(),
+		PlanHash:     branch.Hash,
+		Approver:     audit.ApproverOperator,
+		AgentID:      sess.AgentID,
+		SessionID:    src.SessionID,
+		ResourceType: "plan",
+		ResourceID:   pid.String(),
+	}); err != nil {
+		writeAuditError(w, audit.ActionPlanBranch, err)
+		return
 	}
 	if s.reviewer != nil {
 		// A branch whose cross-exam did not run must not read as a clean

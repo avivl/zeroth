@@ -54,16 +54,19 @@ func (s *Server) snapshotRun(ctx context.Context, id session.ID, label string) (
 		return store.Checkpoint{}, fmt.Errorf("checkpoint event: %w", err)
 	}
 	sess, err := s.store.GetSession(ctx, sid)
-	if err == nil {
-		_, _ = s.audit.Append(ctx, audit.Entry{
-			Action:       audit.ActionCheckpoint,
-			Target:       cid.String(),
-			Approver:     audit.ApproverOperator,
-			AgentID:      sess.AgentID,
-			SessionID:    sid,
-			ResourceType: "checkpoint",
-			ResourceID:   cid.String(),
-		})
+	if err != nil {
+		return store.Checkpoint{}, fmt.Errorf("checkpoint session: %w", err)
+	}
+	if _, err := s.audit.Append(ctx, audit.Entry{
+		Action:       audit.ActionCheckpoint,
+		Target:       cid.String(),
+		Approver:     audit.ApproverOperator,
+		AgentID:      sess.AgentID,
+		SessionID:    sid,
+		ResourceType: "checkpoint",
+		ResourceID:   cid.String(),
+	}); err != nil {
+		return store.Checkpoint{}, fmt.Errorf("checkpoint %s: %w", audit.ActionCheckpoint, err)
 	}
 	return ck, nil
 }
