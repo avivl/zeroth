@@ -170,7 +170,7 @@ func TestIsSystemComment(t *testing.T) {
 		want bool
 	}{
 		{tracker.FormatStartedComment("s_1", "42-43"), true},
-		{tracker.FormatPlanComment("h", "touch README", "diff"), true},
+		{tracker.FormatPlanComment(tracker.PlanComment{Hash: "h", Summary: "touch README", Body: "diff"}), true},
 		{tracker.FormatCompletion(tracker.Completion{RunID: "s_1"}), true},
 		{tracker.FormatCancelComment("s_1"), true},
 		{tracker.FormatFailedComment("s_1", "no plan"), true},
