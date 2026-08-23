@@ -59,7 +59,9 @@ type Driver interface {
 	// (stage 1: HTTP/HTTPS CONNECT proxy via HTTP_PROXY). A destination
 	// that is not listed is denied. Clients that ignore the proxy are
 	// out of scope for stage 1. AllowEgress does not read policy; the
-	// caller passes facts in.
+	// caller passes facts in. If deny-all cannot be established, the
+	// call returns an error rather than reporting success while
+	// unrestricted egress may still be possible.
 	AllowEgress(ctx context.Context, id ID, rules []EgressRule) error
 
 	// Kill SIGKILLs in-flight work. Processes are not checkpointed.

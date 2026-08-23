@@ -4,7 +4,9 @@
 // and /run/zeroth, and a host directory bind-mounted at /workspace.
 // Spawn uses --network none. AllowEgress attaches a bridge and an
 // HTTP/HTTPS CONNECT proxy whose allowlist is the rules the caller
-// passed in.
+// passed in. Empty rules re-establish deny-all. A failure to detach
+// the bridge or close the proxy is returned; the driver never reports
+// success while the container may still have unrestricted egress.
 //
 // Credentials are injected per Exec as env or files on the /run/zeroth
 // tmpfs, never into /workspace (Z1-113). ExportTar omits the hard

@@ -7,6 +7,8 @@
 //
 // Deny by default: Spawn starts with no egress. AllowEgress is the only
 // way to open destinations, and empty rules put the sandbox back on deny.
+// A driver that cannot actually establish deny-all must return an error;
+// silent fallback to an unrestricted network is a defect.
 // A checkpoint is a workspace tar (ExportTar / ImportTar), not a frozen
 // process. Kill drops in-flight PIDs; the overlay remains until Stop so a
 // last ExportTar can still run.
