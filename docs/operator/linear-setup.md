@@ -161,7 +161,9 @@ Once `zerothd` is running with the configuration above:
 6. **You approve (or reject)** in either of two places:
    * the CLI, or
    * the **Approvals inbox** in the web UI, which collects every waiting run in
-     one list.
+     one list. Opening the run and clicking Approve or Apply shows a Plan gate
+     banner with that REST call's real outcome. A live-output reconnect is not
+     an approve or apply result.
 7. **On completion, Zeroth comments back on the issue** with:
    * the run's **cost**,
    * a link to the full **transcript**,
