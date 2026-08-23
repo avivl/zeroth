@@ -21,6 +21,10 @@ func main() {
 	if path := os.Getenv("ZEROTH_FAKE_HOST_WRITE"); path != "" {
 		_ = os.WriteFile(path, []byte("host-subprocess"), 0o644)
 	}
+	if os.Getenv("ZEROTH_FAKE_EXIT_BEFORE_STDIN") != "" {
+		_ = os.Stdin.Close()
+		os.Exit(0)
+	}
 
 	prompt := ""
 	if n := len(os.Args); n > 0 {
@@ -38,6 +42,9 @@ func main() {
 
 	switch {
 	case strings.Contains(prompt, "SLEEP"):
+		// spawn() always writes the first user message to stdin. Read it
+		// before sleeping so that write cannot hit EPIPE.
+		_ = readUserText()
 		emitDelta("sleep-token")
 		time.Sleep(60 * time.Second)
 		emitResult()

@@ -177,7 +177,11 @@ func testListCommentsInvalid(t *testing.T, open func(t *testing.T) (tracker.Prov
 func testComment(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
 	t.Helper()
 	p, fake := open(t)
-	plan := tracker.FormatPlanComment("hash1", "touch README", "```diff\n-a\n+b\n```")
+	plan := tracker.FormatPlanComment(tracker.PlanComment{
+		Hash:    "hash1",
+		Summary: "touch README",
+		Body:    "```diff\n-a\n+b\n```",
+	})
 	ref, err := p.Comment(t.Context(), "42-1", plan)
 	if err != nil {
 		t.Fatalf("Comment: %v", err)

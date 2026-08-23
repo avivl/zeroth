@@ -41,6 +41,15 @@ func TestConfigDefaults(t *testing.T) {
 	if got.LogEncoding != defaultLogEncoding {
 		t.Fatalf("log-encoding = %q, want %s", got.LogEncoding, defaultLogEncoding)
 	}
+	if got.ReviewerModel != defaultReviewerModel {
+		t.Fatalf("reviewer model default = %q, want %s", got.ReviewerModel, defaultReviewerModel)
+	}
+	if got.ReviewerBaseURL != defaultReviewerBaseURL {
+		t.Fatalf("reviewer base url default = %q", got.ReviewerBaseURL)
+	}
+	if got.ReviewerAPIKey != "" {
+		t.Fatal("reviewer api key should stay empty in tests")
+	}
 }
 
 func TestConfigEnvOverridesDefault(t *testing.T) {
@@ -175,6 +184,30 @@ func TestConfigLinearAuthStyleEnv(t *testing.T) {
 	}
 }
 
+func TestConfigReviewerEnvAndFlag(t *testing.T) {
+	got := loadFrom(t, nil, map[string]string{
+		"ZEROTH_REVIEWER_MODEL":    "gpt-4.1",
+		"ZEROTH_REVIEWER_BASE_URL": "http://127.0.0.1:9/v1",
+		"ZEROTH_REVIEWER_API_KEY":  "test-reviewer-key",
+	})
+	if got.ReviewerModel != "gpt-4.1" {
+		t.Fatalf("reviewer model = %q", got.ReviewerModel)
+	}
+	if got.ReviewerBaseURL != "http://127.0.0.1:9/v1" {
+		t.Fatalf("reviewer base url = %q", got.ReviewerBaseURL)
+	}
+	if got.ReviewerAPIKey != "test-reviewer-key" {
+		t.Fatalf("reviewer api key = %q", got.ReviewerAPIKey)
+	}
+
+	fromFlag := loadFrom(t, []string{"--reviewer-model", "o4-mini"}, map[string]string{
+		"ZEROTH_REVIEWER_MODEL": "gpt-4.1",
+	})
+	if fromFlag.ReviewerModel != "o4-mini" {
+		t.Fatalf("flag reviewer model = %q, want o4-mini over env", fromFlag.ReviewerModel)
+	}
+}
+
 func TestConfigMissingExplicitFile(t *testing.T) {
 	cmd, _ := newRoot(deps{})
 	cmd.SetArgs([]string{"--config", filepath.Join(t.TempDir(), "missing.yaml")})
@@ -193,6 +226,8 @@ func loadFrom(t *testing.T, args []string, env map[string]string) Config {
 		"ZEROTH_LINEAR_API_KEY", "ZEROTH_LINEAR_ENDPOINT", "ZEROTH_LINEAR_AGENT_USER",
 		"ZEROTH_LINEAR_TEAM_ID", "ZEROTH_LINEAR_PROJECT_ID", "ZEROTH_LINEAR_POLL_INTERVAL",
 		"ZEROTH_LINEAR_WEBHOOK_SECRET", "ZEROTH_LINEAR_AUTH_STYLE",
+		"ZEROTH_REVIEWER_MODEL", "ZEROTH_REVIEWER_BASE_URL", "ZEROTH_REVIEWER_API_KEY",
+		"OPENAI_API_KEY",
 	} {
 		if val, ok := env[k]; ok {
 			t.Setenv(k, val)

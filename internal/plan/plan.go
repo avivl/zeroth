@@ -57,6 +57,18 @@ type CrossExam struct {
 	At            time.Time
 }
 
+// FlagsConcern reports whether the verdict should be called out to a
+// human before they approve. Fail and pass_with_notes are concerns.
+// A silent pass is not.
+func (e CrossExam) FlagsConcern() bool {
+	switch e.Verdict {
+	case VerdictFail, VerdictPassWithNotes:
+		return true
+	default:
+		return false
+	}
+}
+
 // Nontrivial reports whether p is large enough that a silent pass (a
 // verdict with no notes) is worth tracking. One tiny row is not.
 func (p Plan) Nontrivial() bool {

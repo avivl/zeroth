@@ -9,7 +9,11 @@ import (
 
 func TestFormatPlanCommentCollapsesDiff(t *testing.T) {
 	t.Parallel()
-	body := tracker.FormatPlanComment("abc123", "touch README", "```diff\n-a\n+b\n```")
+	body := tracker.FormatPlanComment(tracker.PlanComment{
+		Hash:    "abc123",
+		Summary: "touch README",
+		Body:    "```diff\n-a\n+b\n```",
+	})
 	if !strings.Contains(body, "### Zeroth plan") {
 		t.Fatalf("missing heading: %s", body)
 	}
@@ -27,6 +31,37 @@ func TestFormatPlanCommentCollapsesDiff(t *testing.T) {
 	}
 	if strings.Contains(body, "```\n```diff") {
 		t.Fatalf("backtick fence around a diff breaks Linear: %s", body)
+	}
+}
+
+func TestFormatPlanCommentShowsExamOutsideDetails(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatPlanComment(tracker.PlanComment{
+		Hash:    "abc123",
+		Summary: "touch README",
+		Body:    "```diff\n-a\n+b\n```",
+		Exam: tracker.PlanExam{
+			Verdict: "fail",
+			Model:   "gpt-4o",
+			Notes:   "scope violation: .ssh/authorized_keys",
+		},
+	})
+	visible, _, ok := strings.Cut(body, "<details>")
+	if !ok {
+		t.Fatalf("missing details: %s", body)
+	}
+	for _, want := range []string{
+		"**Cross-exam: fail**",
+		"`gpt-4o`",
+		"Reviewer flagged a concern",
+		"scope violation: .ssh/authorized_keys",
+	} {
+		if !strings.Contains(visible, want) {
+			t.Fatalf("visible prefix missing %q:\n%s", want, visible)
+		}
+	}
+	if strings.Contains(visible, "```diff") {
+		t.Fatalf("diff leaked outside details: %s", visible)
 	}
 }
 
@@ -151,7 +186,7 @@ func TestIsSystemComment(t *testing.T) {
 		want bool
 	}{
 		{tracker.FormatStartedComment("s_1", "42-43"), true},
-		{tracker.FormatPlanComment("h", "touch README", "diff"), true},
+		{tracker.FormatPlanComment(tracker.PlanComment{Hash: "h", Summary: "touch README", Body: "diff"}), true},
 		{tracker.FormatCompletion(tracker.Completion{RunID: "s_1"}), true},
 		{tracker.FormatCancelComment("s_1"), true},
 		{tracker.FormatFailedComment("s_1", "no plan"), true},

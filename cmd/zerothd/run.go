@@ -15,6 +15,7 @@ import (
 
 	"github.com/avivl/zeroth/internal/harness/claudecode"
 	"github.com/avivl/zeroth/internal/logging"
+	"github.com/avivl/zeroth/internal/plan"
 	"github.com/avivl/zeroth/internal/resilience"
 	"github.com/avivl/zeroth/internal/sandbox/docker"
 	"github.com/avivl/zeroth/internal/server"
@@ -110,15 +111,22 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		log.Info("workspace root", zap.String("dir", workspaceRoot))
 	}
 
+	reviewer, reviewerModel, err := openReviewer(cfg, log)
+	if err != nil {
+		return fmt.Errorf("zerothd reviewer: %w", err)
+	}
+
 	srv, err := server.New(server.Config{
-		Store:          st,
-		Signer:         sg,
-		Log:            log,
-		Tracker:        tr,
-		Sandbox:        docker.New(),
-		Harness:        h,
-		TrackerWebhook: webhook,
-		WorkspaceRoot:  workspaceRoot,
+		Store:                st,
+		Signer:               sg,
+		Log:                  log,
+		Tracker:              tr,
+		Sandbox:              docker.New(),
+		Harness:              h,
+		TrackerWebhook:       webhook,
+		WorkspaceRoot:        workspaceRoot,
+		Reviewer:             reviewer,
+		DefaultReviewerModel: reviewerModel,
 	})
 	if err != nil {
 		return fmt.Errorf("zerothd server: %w", err)
@@ -163,6 +171,30 @@ func listenAndServe(ctx context.Context, addr string, h http.Handler) error {
 		}
 		return err
 	}
+}
+
+func openReviewer(cfg Config, log *zap.Logger) (plan.Reviewer, string, error) {
+	key := strings.TrimSpace(cfg.ReviewerAPIKey)
+	if key == "" {
+		key = strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	}
+	if key == "" {
+		log.Warn("cross-exam using pass-through reviewer; set ZEROTH_REVIEWER_API_KEY or OPENAI_API_KEY for an independent OpenAI reviewer. Human approval remains the gate")
+		return nil, "", nil
+	}
+	rev, err := server.NewChatReviewer(server.ChatReviewerConfig{
+		Model:   cfg.ReviewerModel,
+		BaseURL: cfg.ReviewerBaseURL,
+		APIKey:  key,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	log.Info("cross-exam reviewer enabled",
+		zap.String("vendor", server.ChatReviewerVendor),
+		zap.String("model", rev.Model()),
+	)
+	return rev, rev.Model(), nil
 }
 
 func detectWorkspaceRoot() string {

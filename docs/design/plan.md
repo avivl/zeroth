@@ -38,7 +38,7 @@ Implement in that order. A UI that can apply without a kernel is a defect. A har
 
 ## 6. Project decisions
 
-These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z-0010](../prd/zeroth.md#decision-register) live in [`docs/adr/`](../adr/); the PRD register is the index.
+These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z-0011](../prd/zeroth.md#decision-register) live in [`docs/adr/`](../adr/); the PRD register is the index.
 
 1. **Name: Zeroth.** The governing constraint is numbered zero because it had to sit above rules that already existed.
 2. **Human control is the kernel**, not a feature flag. Policy outranks the harness.
@@ -49,6 +49,7 @@ These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z
 7. **Plan-then-apply is mandatory** for consequential actions. Autonomy tiers change how much a session may do, not whether a plan exists.
 8. **Trunk-based development.** Short-lived branches, squash merge onto `main`, `main` always green. A PR is required. CI is required. CODEOWNERS require a human on `internal/policy/`, `internal/plan/`, and `pkg/api/`, including agent-authored PRs. See `.github/workflows/ci.yml` and `.github/CODEOWNERS`.
 9. **The SHA is the version.** Identify builds by git commit SHA. Do not add semver tags or a product version constant inside the repo.
+10. **Stage-1 cross-examiner is a different vendor than the producer.** Claude Code produces the plan. OpenAI Chat Completions reviews it. See [ADR-Z-0011](../adr/Z-0011-independent-cross-exam-vendor.md).
 
 ### Open decisions
 

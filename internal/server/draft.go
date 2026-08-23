@@ -153,7 +153,20 @@ func (s *Server) draftFromEffects(ctx context.Context, id session.ID, workspace 
 		zap.Bool("returned", out.Returned),
 	)
 	if s.tracker != nil && key != "" && !out.Returned {
-		body := tracker.FormatPlanComment(string(out.Plan.Hash), out.Plan.Summary, out.Plan.Render())
+		exam := tracker.PlanExam{}
+		if out.Plan.CrossExam != nil {
+			exam = tracker.PlanExam{
+				Verdict: out.Plan.CrossExam.Verdict,
+				Model:   out.Plan.CrossExam.ReviewerModel,
+				Notes:   out.Plan.CrossExam.Reasoning,
+			}
+		}
+		body := tracker.FormatPlanComment(tracker.PlanComment{
+			Hash:    string(out.Plan.Hash),
+			Summary: out.Plan.Summary,
+			Body:    out.Plan.Render(),
+			Exam:    exam,
+		})
 		if _, err := s.tracker.Comment(ctx, key, body); err != nil {
 			s.log.Warn("tracker plan comment", zap.String("key", key), zap.Error(err))
 		}

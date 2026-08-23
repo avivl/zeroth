@@ -31,7 +31,8 @@ type Provider interface {
 
 	// Comment posts markdown body on the issue. Empty key or body is
 	// ErrInvalid. The body is what operators read in the tracker; plan
-	// diffs belong in collapsed details (FormatPlanComment).
+	// diffs belong in collapsed details. The cross-exam verdict stays
+	// visible (FormatPlanComment).
 	Comment(ctx context.Context, key, body string) (CommentRef, error)
 
 	// SetState moves the issue to state. Empty key or Kind is ErrInvalid.

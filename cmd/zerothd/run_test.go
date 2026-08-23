@@ -59,6 +59,9 @@ func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
 	if !strings.Contains(out, "docker socket reachable") {
 		t.Fatalf("missing probe log: %s", out)
 	}
+	if !strings.Contains(out, "pass-through reviewer") {
+		t.Fatalf("missing pass-through reviewer warn: %s", out)
+	}
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		var rec struct {
 			Msg string `json:"msg"`
@@ -69,6 +72,36 @@ func TestRunDaemonLogsJSONAndProbes(t *testing.T) {
 		if rec.Msg == "" {
 			t.Fatalf("empty msg in %q", line)
 		}
+	}
+}
+
+func TestRunDaemonLogsReviewerEnabled(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	cfg := Config{
+		Addr:            "127.0.0.1:7998",
+		DBPath:          filepath.Join(t.TempDir(), "zeroth.db"),
+		DockerSocket:    "/tmp/docker.sock",
+		LogLevel:        "info",
+		LogEncoding:     "json",
+		ReviewerModel:   "gpt-4o",
+		ReviewerAPIKey:  "test-reviewer-key",
+		ReviewerBaseURL: "http://127.0.0.1:9/v1",
+	}
+	err := runDaemon(t.Context(), cfg, deps{
+		writer: &buf,
+		probe:  func(context.Context, string) error { return nil },
+		serve:  func(context.Context, string, http.Handler) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("runDaemon: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "cross-exam reviewer enabled") {
+		t.Fatalf("missing reviewer enabled log: %s", out)
+	}
+	if strings.Contains(out, "pass-through reviewer") {
+		t.Fatalf("pass-through warn with a configured reviewer: %s", out)
 	}
 }
 
@@ -86,7 +119,7 @@ func TestRootHelp(t *testing.T) {
 	t.Parallel()
 	cmd, _ := newRoot(deps{})
 	got := cmd.UsageString()
-	if !strings.Contains(got, "--addr") || !strings.Contains(got, "--db-path") {
+	if !strings.Contains(got, "--addr") || !strings.Contains(got, "--db-path") || !strings.Contains(got, "--reviewer-model") {
 		t.Fatalf("help missing flags: %s", got)
 	}
 }
