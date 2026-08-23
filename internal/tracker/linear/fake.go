@@ -179,6 +179,26 @@ func (f *FakeGraphQL) IssueState(key string) string {
 	return ""
 }
 
+// IssueAssignee returns the assignee user id for key.
+func (f *FakeGraphQL) IssueAssignee(key string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if iss := f.issues[key]; iss != nil {
+		return iss.AssigneeID
+	}
+	return ""
+}
+
+// IssueDelegate returns the delegate user id for key.
+func (f *FakeGraphQL) IssueDelegate(key string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if iss := f.issues[key]; iss != nil {
+		return iss.DelegateID
+	}
+	return ""
+}
+
 // ServeHTTP implements Linear's GraphQL endpoint.
 func (f *FakeGraphQL) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -392,18 +412,26 @@ func (f *FakeGraphQL) issueComments(id string) (any, string) {
 func (f *FakeGraphQL) issueUpdate(vars map[string]any) (any, string) {
 	id, _ := vars["id"].(string)
 	input, _ := vars["input"].(map[string]any)
-	stateID, _ := input["stateId"].(string)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	iss := f.issues[id]
 	if iss == nil {
 		return nil, "Entity not found: Issue"
 	}
-	for _, st := range f.states {
-		if st.ID == stateID {
-			iss.State = st
-			break
+	if v, ok := input["stateId"]; ok {
+		stateID, _ := v.(string)
+		for _, st := range f.states {
+			if st.ID == stateID {
+				iss.State = st
+				break
+			}
 		}
+	}
+	if v, ok := input["assigneeId"]; ok {
+		iss.AssigneeID = stringOrEmpty(v)
+	}
+	if v, ok := input["delegateId"]; ok {
+		iss.DelegateID = stringOrEmpty(v)
 	}
 	return map[string]any{
 		"issueUpdate": map[string]any{
@@ -531,5 +559,13 @@ func strVar(vars map[string]any, key string) string {
 		return ""
 	}
 	s, _ := vars[key].(string)
+	return s
+}
+
+func stringOrEmpty(v any) string {
+	if v == nil {
+		return ""
+	}
+	s, _ := v.(string)
 	return s
 }

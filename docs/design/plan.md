@@ -38,7 +38,7 @@ Implement in that order. A UI that can apply without a kernel is a defect. A har
 
 ## 6. Project decisions
 
-These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z-0008](../prd/zeroth.md#decision-register) live in [`docs/adr/`](../adr/); the PRD register is the index.
+These are locked unless an ADR supersedes them. Technical ADRs [Z-0001 through Z-0010](../prd/zeroth.md#decision-register) live in [`docs/adr/`](../adr/); the PRD register is the index.
 
 1. **Name: Zeroth.** The governing constraint is numbered zero because it had to sit above rules that already existed.
 2. **Human control is the kernel**, not a feature flag. Policy outranks the harness.

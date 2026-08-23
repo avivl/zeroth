@@ -18,6 +18,9 @@ func main() {
 	if os.Getenv("ZEROTH_FAKE_PID") != "" {
 		_ = os.WriteFile(".fake-pid", []byte(strconv.Itoa(os.Getpid())), 0o644)
 	}
+	if path := os.Getenv("ZEROTH_FAKE_HOST_WRITE"); path != "" {
+		_ = os.WriteFile(path, []byte("host-subprocess"), 0o644)
+	}
 
 	prompt := ""
 	if n := len(os.Args); n > 0 {

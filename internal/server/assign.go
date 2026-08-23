@@ -184,7 +184,7 @@ func (s *Server) completeTracker(ctx context.Context, id session.ID) {
 		return
 	}
 	line := s.auditLine(ctx, id)
-	pr := s.takePR(id.String())
+	pr := s.peekPR(id.String())
 	body := tracker.FormatCompletion(tracker.Completion{
 		RunID:       id.String(),
 		Transcript:  "zeroth attach " + id.String(),
@@ -239,8 +239,20 @@ func (s *Server) rememberTracker(ctx context.Context, id session.ID) {
 
 func (s *Server) trackerKey(id session.ID) string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.keys[id.String()]
+	key := s.keys[id.String()]
+	s.mu.Unlock()
+	if key != "" {
+		return key
+	}
+	sid, err := store.ParseSessionID(id.String())
+	if err != nil {
+		return ""
+	}
+	sess, err := s.store.GetSession(context.Background(), sid)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(sess.TrackerRef)
 }
 
 func (s *Server) forgetTracker(id session.ID, key string) {

@@ -15,7 +15,10 @@
 // the live overlay, patches modify rows onto existing files (never a
 // silent full-file overwrite), rechecks the recorded postcondition
 // hash, then commits, pushes, and opens a GitHub pull request so the
-// tracker completion comment can link it. A plan memory_proposal row is applied as Notebook.Propose,
+// tracker completion comment can link it. Retract (POST /runs/{id}/retract)
+// closes that PR, comments the reason on the tracker issue, un-assigns
+// the agent, and moves the issue back to unstarted so a fresh assignment
+// can start a new run. A plan memory_proposal row is applied as Notebook.Propose,
 // never as a direct write (Z1-022). Stop remains 501 until the session
 // machine grows a cancelled terminal. The daemon wires this package to
 // the store, signer, session supervisor, tracker.Provider,
@@ -23,11 +26,12 @@
 // or Claude Code by name. Assign-to-Zeroth is the tracker watch loop:
 // Assigned starts a headless run, Unassigned fails it and stops the
 // sandbox. The worker drives one harness plan-generation attempt per
-// draft. Request-changes posts the operator comment on the tracker
-// issue, appends it to the run prompt, and starts another attempt on
-// the same run. A new assign also reads the issue comment thread so
-// the correction survives un-assign. A run that produces no draft
-// fails instead of completing.
+// draft as a host subprocess against the overlay (ADR-Z-0010).
+// Request-changes posts the operator comment on the tracker issue,
+// appends it to the run prompt, and starts another attempt on the same
+// run. A new assign also reads the issue comment thread so the
+// correction survives un-assign. A run that produces no draft fails
+// instead of completing.
 // Draft attaches the plan id to the session row before proposing;
 // status sync must not clear that id.
 package server

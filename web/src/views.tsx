@@ -5,6 +5,7 @@ import {
   AuditResourceType,
   MemoryProposalStatus,
   PlanStatus,
+  RunStatus,
   type AgentPatch,
   type Approval,
   type AuditRecord,
@@ -14,6 +15,7 @@ import {
   type MemoryEntry,
   type MemoryProposal,
   type Plan,
+  type Run,
 } from "@zeroth/api";
 import { errorMessage } from "./api/client";
 import { useRunEvents } from "./api/useRunEvents";
@@ -23,11 +25,13 @@ import {
   DiffTable,
   Empty,
   ErrorText,
+  PlanGateBanner,
   SignatureChip,
   StreamingText,
   Thinking,
   statusLabel,
 } from "./components/ui";
+import { executePlanGate, type PlanGateOutcome } from "./planGate";
 import { hrefFor } from "./routes";
 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[]): {
@@ -129,20 +133,27 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
   const { events, status, text } = useRunEvents(id);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [planGate, setPlanGate] = useState<PlanGateOutcome | null>(null);
   const [auditByPlan, setAuditByPlan] = useState<AuditRecord | null>(null);
   const [auditValid, setAuditValid] = useState<boolean | undefined>(undefined);
+  const [retractReason, setRetractReason] = useState("");
 
   const plan = (plans ?? []).find((p) => p.id === run?.plan_id) ?? (plans ?? [])[0];
+
+  function refresh() {
+    reload();
+    reloadPlans();
+    reloadCk();
+    reloadMem();
+  }
 
   async function act(name: string, fn: () => Promise<void>) {
     setBusy(name);
     setActionError(null);
+    setPlanGate(null);
     try {
       await fn();
-      reload();
-      reloadPlans();
-      reloadCk();
-      reloadMem();
+      refresh();
     } catch (err) {
       setActionError(errorMessage(err));
     } finally {
@@ -163,7 +174,7 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
       {actionError ? <ErrorText>{actionError}</ErrorText> : null}
       <div className="rail">
         <div className="stack">
-          <StreamingText text={text} status={status === "reconnecting" ? "reconnecting after drop" : status} />
+          <StreamingText text={text} status={status} />
           <section className="card">
             <h3>Trace</h3>
             <Thinking events={events} />
@@ -174,18 +185,59 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
               audit={auditByPlan}
               auditValid={auditValid}
               busy={busy}
+              gate={planGate && planGate.planId === plan.id ? planGate : null}
               onApprove={() =>
-                act("approve", async () => {
-                  await api.plans.approvePlan(plan.id, { comment: "approved in UI" });
-                })
+                void (async () => {
+                  setBusy("approve");
+                  setActionError(null);
+                  try {
+                    const result = await executePlanGate(
+                      "approve",
+                      plan.id,
+                      () => api.plans.approvePlan(plan.id, { comment: "approved in UI" }),
+                      setPlanGate,
+                    );
+                    if (result.ok) {
+                      refresh();
+                    }
+                  } catch (err) {
+                    setActionError(errorMessage(err));
+                  } finally {
+                    setBusy(null);
+                  }
+                })()
               }
               onApply={() =>
-                act("apply", async () => {
+                void (async () => {
+                  setBusy("apply");
+                  setActionError(null);
                   setAuditValid(undefined);
-                  const res = await api.plans.applyPlan(plan.id);
-                  const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
-                  setAuditByPlan(list.data.items.find((r) => r.id === res.data.audit_id) ?? list.data.items[0] ?? null);
-                })
+                  try {
+                    const result = await executePlanGate(
+                      "apply",
+                      plan.id,
+                      () => api.plans.applyPlan(plan.id),
+                      setPlanGate,
+                    );
+                    if (result.ok) {
+                      try {
+                        const list = await api.audit.listAudit({ resource_id: plan.id, limit: 5 });
+                        setAuditByPlan(
+                          list.data.items.find((r) => r.id === result.value.data.audit_id) ??
+                            list.data.items[0] ??
+                            null,
+                        );
+                      } catch (err) {
+                        setActionError(errorMessage(err));
+                      }
+                      refresh();
+                    }
+                  } catch (err) {
+                    setActionError(errorMessage(err));
+                  } finally {
+                    setBusy(null);
+                  }
+                })()
               }
               onChanges={(comment) =>
                 act("changes", async () => {
@@ -213,6 +265,20 @@ export function RunDetailView({ api, id }: { api: Client; id: string }) {
           ) : (
             <Empty>No change plan on this run yet.</Empty>
           )}
+          {run ? (
+            <RetractCard
+              run={run}
+              reason={retractReason}
+              busy={busy}
+              onReason={setRetractReason}
+              onRetract={() =>
+                act("retract", async () => {
+                  await api.runs.retractRun(id, { reason: retractReason });
+                  setRetractReason("");
+                })
+              }
+            />
+          ) : null}
         </div>
         <aside className="stack">
           <EvalGates plan={plan} stats={agent?.stats} />
@@ -325,6 +391,7 @@ export function ChangePlanCard({
   audit,
   auditValid,
   busy,
+  gate,
   onApprove,
   onApply,
   onChanges,
@@ -335,6 +402,7 @@ export function ChangePlanCard({
   audit?: AuditRecord | null;
   auditValid?: boolean;
   busy: string | null;
+  gate?: PlanGateOutcome | null;
   onApprove: () => void;
   onApply: () => void;
   onChanges: (comment: string) => void;
@@ -356,10 +424,10 @@ export function ChangePlanCard({
       <CrossExamNotes exam={plan.cross_exam} />
       <div className="row" style={{ marginTop: "0.75rem" }}>
         <button type="button" className="btn btn-primary" disabled={!canApprove || busy !== null} onClick={onApprove}>
-          Approve
+          {busy === "approve" ? "Sending approval…" : "Approve"}
         </button>
         <button type="button" className="btn" disabled={!canApply || busy !== null} onClick={onApply}>
-          Apply
+          {busy === "apply" ? "Sending apply…" : "Apply"}
         </button>
         <button type="button" className="btn" disabled={busy !== null} onClick={onBranch}>
           Branch
@@ -369,12 +437,80 @@ export function ChangePlanCard({
         disabled={busy !== null || (!canApprove && plan.status !== PlanStatus.Draft)}
         onReject={onChanges}
       />
+      {gate ? <PlanGateBanner outcome={gate} /> : null}
       {audit ? (
         <p className="row" style={{ marginTop: "0.75rem" }}>
           <span className="muted">Signed apply</span>
           <SignatureChip signature={audit.signature} valid={auditValid} onVerify={() => onVerify?.()} />
         </p>
       ) : null}
+    </section>
+  );
+}
+
+export function RetractCard({
+  run,
+  reason,
+  busy,
+  onReason,
+  onRetract,
+}: {
+  run: Run;
+  reason: string;
+  busy: string | null;
+  onReason: (value: string) => void;
+  onRetract: () => void;
+}) {
+  if (run.retracted_at) {
+    return (
+      <section className="card stack" aria-label="Retraction">
+        <div className="row">
+          <h3 style={{ margin: 0 }}>Retracted</h3>
+          <Badge kind="retracted">retracted</Badge>
+        </div>
+        <p>{run.retract_reason}</p>
+        {run.pull_request ? (
+          <p className="muted">
+            Pull request <a href={run.pull_request}>{run.pull_request}</a> was closed.
+          </p>
+        ) : null}
+      </section>
+    );
+  }
+  const terminal =
+    run.status === RunStatus.Completed || run.status === RunStatus.Failed || run.status === RunStatus.Cancelled;
+  if (!terminal && !run.pull_request) {
+    return null;
+  }
+  const canRetract = reason.trim().length > 0 && busy === null;
+  return (
+    <section className="card stack" aria-label="Retract run output">
+      <h3 style={{ margin: 0 }}>Retract</h3>
+      <p className="muted">
+        Close the pull request this run opened and record why on the Linear issue. The issue goes back to Todo,
+        unassigned, so a fresh assignment can start a new run. You do not need to visit GitHub.
+      </p>
+      {run.pull_request ? (
+        <p>
+          Pull request <a href={run.pull_request}>{run.pull_request}</a>
+        </p>
+      ) : (
+        <p className="muted">No pull request on this run. Retract still records the reason on the issue thread.</p>
+      )}
+      <label>
+        Reason
+        <textarea
+          value={reason}
+          onChange={(e) => onReason(e.target.value)}
+          rows={3}
+          placeholder="What was wrong with this run's output?"
+        />
+      </label>
+      <div className="row">
+        <button type="button" className="btn btn-danger" disabled={!canRetract} onClick={onRetract}>
+          Retract
+        </button>
+      </div>
     </section>
   );
 }

@@ -21,6 +21,7 @@ const (
 	ActionAgentUpdate    = "agent.update"
 	ActionAgentRotateKey = "agent.rotate_key"
 	ActionRunCreate      = "run.create"
+	ActionRunRetract     = "run.retract"
 	ActionPlanApprove    = "plan.approve"
 	ActionPlanApply      = "plan.apply"
 	ActionPlanCrossExam  = "plan.cross_exam"

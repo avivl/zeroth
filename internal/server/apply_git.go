@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -103,6 +104,63 @@ func (p *gitPublisher) Publish(ctx context.Context, req ApplyPublish) (ApplyRef,
 		return ApplyRef{}, err
 	}
 	return ApplyRef{Branch: branch, Commit: sha, PullRequest: pr}, nil
+}
+
+func (p *gitPublisher) ClosePullRequest(ctx context.Context, url, comment string) error {
+	if p.gh == nil {
+		p.gh = runGH
+	}
+	if p.execer == nil {
+		p.execer = newGitPublisher().execer
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("gh pr close: empty url")
+	}
+	state, err := p.prState(ctx, url)
+	if err != nil {
+		return err
+	}
+	switch strings.ToUpper(strings.TrimSpace(state)) {
+	case "CLOSED":
+		return nil
+	case "MERGED":
+		return fmt.Errorf("%w: %s", errPRMerged, url)
+	}
+	args := []string{"pr", "close", url}
+	if c := strings.TrimSpace(comment); c != "" {
+		args = append(args, "--comment", c)
+	}
+	_, err = resilience.Get(ctx, p.execer, func(ctx context.Context) (string, error) {
+		return p.gh(ctx, args...)
+	})
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "already closed") {
+			return nil
+		}
+		if strings.Contains(msg, "already merged") || strings.Contains(msg, "was merged") {
+			return fmt.Errorf("%w: %s", errPRMerged, url)
+		}
+		return fmt.Errorf("gh pr close: %w", err)
+	}
+	return nil
+}
+
+func (p *gitPublisher) prState(ctx context.Context, url string) (string, error) {
+	out, err := resilience.Get(ctx, p.execer, func(ctx context.Context) (string, error) {
+		return p.gh(ctx, "pr", "view", url, "--json", "state")
+	})
+	if err != nil {
+		return "", fmt.Errorf("gh pr view: %w", err)
+	}
+	var parsed struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &parsed); err != nil {
+		return "", nil
+	}
+	return parsed.State, nil
 }
 
 func (p *gitPublisher) addWorktree(ctx context.Context, repo, branch, dir string) (string, error) {

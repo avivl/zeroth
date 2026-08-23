@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { CrossExam, PlanEffect, PlanEffectType, RunStatus } from "@zeroth/api";
 import { PlanEffectType as Effect } from "@zeroth/api";
+import { liveTailLabel, type StreamStatus } from "../api/runEvents";
+import type { PlanGateOutcome } from "../planGate";
 
 export function Badge({
   kind,
@@ -90,16 +92,39 @@ export function StreamingText({
   status,
 }: {
   text: string;
-  status?: string;
+  status?: StreamStatus;
 }) {
+  const label = status ? liveTailLabel(status) : undefined;
   return (
-    <section className="card" aria-live="polite">
+    <section className="card" aria-live="polite" aria-label="Live output">
       <div className="row">
         <h3 style={{ margin: 0 }}>Live output</h3>
-        {status ? <span className="muted">{status}</span> : null}
+        {label ? (
+          <span className="live-tail-status muted" data-live-tail={status}>
+            Live tail: {label}
+          </span>
+        ) : null}
       </div>
       <pre className="stream">{text || "Waiting for tokens…"}</pre>
     </section>
+  );
+}
+
+export function PlanGateBanner({ outcome }: { outcome: PlanGateOutcome }) {
+  const title = outcome.kind === "approve" ? "Approve" : "Apply";
+  const role = outcome.phase === "error" ? "alert" : "status";
+  return (
+    <div
+      className={`plan-gate plan-gate-${outcome.phase}`}
+      role={role}
+      aria-live={outcome.phase === "error" ? "assertive" : "polite"}
+      aria-busy={outcome.phase === "pending" ? true : undefined}
+      data-plan-gate={outcome.kind}
+      data-plan-gate-phase={outcome.phase}
+    >
+      <strong className="plan-gate-label">Plan gate · {title}</strong>
+      <p>{outcome.message}</p>
+    </div>
   );
 }
 

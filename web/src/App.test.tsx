@@ -2,8 +2,8 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { expect, test } from "vitest";
 import { App, CrossExamNotes } from "./App";
-import { ChangePlanCard, RejectCommentBox } from "./views";
-import { PlanStatus, PlanEffectType, type Plan } from "@zeroth/api";
+import { ChangePlanCard, RejectCommentBox, RetractCard } from "./views";
+import { PlanStatus, PlanEffectType, RunStatus, type Plan, type Run } from "@zeroth/api";
 import { contrastRatio, darkTheme, lightTheme, themePairs, AA_NORMAL } from "./contrast";
 import { parseHash, hrefFor } from "./routes";
 
@@ -76,6 +76,43 @@ test("change plan card exposes approve, apply, reject with comment, and branch",
   expect(html).toContain("README.md");
   expect(html).toContain("lease-1");
   expect(html).toContain("Cross-exam");
+  expect(html).not.toContain("Plan gate");
+  expect(html).not.toContain("data-plan-gate");
+});
+
+const completedRun: Run = {
+  id: "s_48",
+  agent_id: "a_default",
+  status: RunStatus.Completed,
+  pull_request: "https://github.com/avivl/zeroth/pull/48",
+  created_at: "2026-08-22T00:00:00Z",
+  updated_at: "2026-08-22T00:00:00Z",
+};
+
+test("retract card requires a reason and names the pull request", () => {
+  const disabled = renderToString(
+    createElement(RetractCard, {
+      run: completedRun,
+      reason: "",
+      busy: null,
+      onReason: () => undefined,
+      onRetract: () => undefined,
+    }),
+  );
+  expect(disabled).toContain("Retract");
+  expect(disabled).toContain("https://github.com/avivl/zeroth/pull/48");
+  expect(disabled).toContain("disabled");
+
+  const ready = renderToString(
+    createElement(RetractCard, {
+      run: completedRun,
+      reason: "Apply overwrote README.md instead of patching it.",
+      busy: null,
+      onReason: () => undefined,
+      onRetract: () => undefined,
+    }),
+  );
+  expect(ready).toContain("Apply overwrote README.md instead of patching it.");
 });
 
 test("reject comment box requires typed feedback", () => {

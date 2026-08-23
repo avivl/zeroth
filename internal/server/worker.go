@@ -141,6 +141,7 @@ func (s *Server) runHarnessTurn(ctx context.Context, l *liveRun) {
 		zap.String("tracker", s.trackerKey(l.id)),
 	)
 
+	// Host subprocess against the overlay cwd, not sandbox.Exec (ADR-Z-0010).
 	handle, err := s.harness.Start(ctx, harness.Spec{
 		Workspace: ws,
 		Prompt:    prompt,

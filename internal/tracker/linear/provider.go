@@ -32,6 +32,9 @@ type Provider struct {
 	known       map[string]tracker.Issue
 	out         chan tracker.AssignmentEvent
 	assigning   bool
+	// assignGen bumps on Unassign so a poll that listed issues before
+	// the agent was cleared cannot emit Assigned and start a new run.
+	assignGen uint64
 }
 
 // New returns a Linear tracker provider.
@@ -214,6 +217,54 @@ func (p *Provider) SetState(ctx context.Context, key string, state tracker.State
 	return nil
 }
 
+// Unassign implements [tracker.Provider].
+func (p *Provider) Unassign(ctx context.Context, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return fmt.Errorf("tracker linear unassign: %w", tracker.ErrInvalid)
+	}
+	if err := p.ensureAgent(ctx); err != nil {
+		return fmt.Errorf("tracker linear unassign: %w", err)
+	}
+	issue, err := p.GetIssue(ctx, key)
+	if err != nil {
+		return err
+	}
+	agent := p.agentID()
+	input := map[string]any{}
+	if agent != "" && issue.AssigneeID == agent {
+		input["assigneeId"] = nil
+	}
+	if agent != "" && issue.DelegateID == agent {
+		input["delegateId"] = nil
+	}
+	if len(input) > 0 {
+		var data struct {
+			IssueUpdate struct {
+				Success bool `json:"success"`
+			} `json:"issueUpdate"`
+		}
+		err = p.query(ctx, "IssueUpdate", qIssueUpdate, map[string]any{
+			"id":    issue.ID,
+			"input": input,
+		}, &data)
+		if err != nil {
+			return fmt.Errorf("tracker linear unassign: %w", err)
+		}
+		if !data.IssueUpdate.Success {
+			return fmt.Errorf("tracker linear unassign: %w", tracker.ErrUnavailable)
+		}
+	}
+	p.mu.Lock()
+	p.assignGen++
+	delete(p.known, issue.Key)
+	if issue.ID != "" {
+		delete(p.known, issue.ID)
+	}
+	p.mu.Unlock()
+	return nil
+}
+
 func (p *Provider) lookupStateID(ctx context.Context, issueID string, want tracker.State) (string, error) {
 	var data struct {
 		Issue *struct {
@@ -320,6 +371,9 @@ func (n issueNode) toIssue() tracker.Issue {
 	}
 	if n.Assignee != nil {
 		iss.AssigneeID = n.Assignee.ID
+	}
+	if n.Delegate != nil {
+		iss.DelegateID = n.Delegate.ID
 	}
 	if n.State != nil {
 		iss.State = tracker.State{

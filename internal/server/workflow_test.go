@@ -24,10 +24,13 @@ import (
 )
 
 type recordingPublisher struct {
-	mu    sync.Mutex
-	req   server.ApplyPublish
-	files map[string]string
-	ref   server.ApplyRef
+	mu           sync.Mutex
+	req          server.ApplyPublish
+	files        map[string]string
+	ref          server.ApplyRef
+	closed       []string
+	closeComment string
+	closeErr     error
 }
 
 func (p *recordingPublisher) Publish(_ context.Context, req server.ApplyPublish) (server.ApplyRef, error) {
@@ -56,6 +59,17 @@ func (p *recordingPublisher) Publish(_ context.Context, req server.ApplyPublish)
 	}
 	p.ref = ref
 	return ref, nil
+}
+
+func (p *recordingPublisher) ClosePullRequest(_ context.Context, url, comment string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.closed = append(p.closed, url)
+	p.closeComment = comment
+	if p.closeErr != nil {
+		return p.closeErr
+	}
+	return nil
 }
 
 type applyEnv struct {

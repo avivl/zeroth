@@ -109,6 +109,39 @@ func FormatFailedComment(runID, reason string) string {
 	return b.String()
 }
 
+// FormatRetractComment is posted when an operator (or a later safety
+// check) disavows a run that already opened a pull request. The issue
+// thread is the complete record; the reason must stay visible.
+func FormatRetractComment(c Retract) string {
+	var b strings.Builder
+	b.WriteString("### Zeroth retracted\n\n")
+	if c.RunID != "" {
+		fmt.Fprintf(&b, "Run `%s` output has been retracted.\n\n", c.RunID)
+	} else {
+		b.WriteString("Prior run output has been retracted.\n\n")
+	}
+	if r := strings.TrimSpace(c.Reason); r != "" {
+		b.WriteString(r)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("| | |\n| --- | --- |\n")
+	fmt.Fprintf(&b, "| Pull request | %s |\n", retractPR(c.PullRequest, c.Closed))
+	b.WriteString("\nThe pull request is closed (not merged). This issue is unassigned and back in Todo so a fresh assignment can start a new run.\n")
+	return b.String()
+}
+
+func retractPR(url string, closed bool) string {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return "none opened"
+	}
+	link := displayLink(url)
+	if closed {
+		return link + " (closed)"
+	}
+	return link
+}
+
 func codeFence(body string) (open, close string) {
 	// Nested markdown fences break Linear's renderer. A longer tilde
 	// fence stays valid when the plan body already contains ``` diffs.
