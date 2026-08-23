@@ -76,6 +76,12 @@ func (h *stubHarness) startCount() int {
 	return h.starts
 }
 
+func (h *stubHarness) lastPrompt() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastSpec.Prompt
+}
+
 func (h *stubHarness) startedSpec() harness.Spec {
 	h.mu.Lock()
 	defer h.mu.Unlock()

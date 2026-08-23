@@ -187,6 +187,31 @@ func display(v, fallback string) string {
 	return v
 }
 
+// IsSystemComment reports whether body is a Zeroth-authored tracker
+// comment (started, plan, completed, cancelled, failed). Those rows
+// are the agent's own residue and must not be ingested as operator
+// memory or treated as a settled human decision.
+func IsSystemComment(body string) bool {
+	return strings.HasPrefix(strings.TrimSpace(body), "### Zeroth ")
+}
+
+// HumanComments returns the operator-authored subset of a thread,
+// oldest first. System comments, bot comments, and empty bodies
+// are dropped.
+func HumanComments(comments []Comment) []Comment {
+	out := make([]Comment, 0, len(comments))
+	for _, c := range comments {
+		if c.Bot || IsSystemComment(c.Body) {
+			continue
+		}
+		if strings.TrimSpace(c.Body) == "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 func displayLink(v string) string {
 	v = strings.TrimSpace(v)
 	if v == "" {

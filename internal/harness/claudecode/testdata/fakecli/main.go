@@ -62,10 +62,8 @@ func main() {
 		emitTool()
 		emitResult()
 	default:
-		// Fast-exit paths used to emit and return without reading stdin.
-		// The driver writes the first prompt after Start; if this process
-		// has already exited, that write fails with broken pipe and
-		// stop_idempotent flakes under load.
+		// Start writes the user prompt on stdin after exec. Exit only
+		// after that write, or the parent hits a broken-pipe on prompt.
 		_ = readUserText()
 		emitDelta("hello-token")
 		emitTool()
