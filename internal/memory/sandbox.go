@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/avivl/zeroth/internal/sandbox"
@@ -35,9 +36,37 @@ func HydrateSandbox(ctx context.Context, d sandbox.Driver, id sandbox.ID, facts 
 	}
 	excludeBody := excludeMarker + "\n" + strings.Join(CompiledPaths(), "\n") + "\n" + CompiledMarkerDir + "/\n"
 	b64 := base64.StdEncoding.EncodeToString([]byte(excludeBody))
-	_, _ = d.Exec(ctx, id, sandbox.Cmd{
-		Argv: []string{"sh", "-c", `if [ -d /workspace/.git ]; then mkdir -p /workspace/.git/info; printf %s "$BLOB" | base64 -d >> /workspace/.git/info/exclude; git update-index --skip-worktree -- AGENTS.md CLAUDE.md .cursor/rules/zeroth-memory.mdc 2>/dev/null || true; fi`},
+	res, err := d.Exec(ctx, id, sandbox.Cmd{
+		Argv: []string{"sh", "-c", protectSandboxScript()},
 		Env:  []string{"BLOB=" + b64},
 	})
+	if err != nil {
+		return fmt.Errorf("memory hydrate sandbox protect: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("memory hydrate sandbox protect: exit %d: %s", res.ExitCode, res.Stderr)
+	}
 	return nil
+}
+
+// protectSandboxScript writes .git/info/exclude and sets skip-worktree
+// on tracked compiled paths. set -e so a failed mkdir, exclude write, or
+// skip-worktree is the script's exit status rather than || true.
+// Untracked paths are covered by exclude; ls-files failing in the if
+// test is not a protection failure. Missing git is the same: alpine
+// images have no git binary, and seedOverlay does not copy .git.
+func protectSandboxScript() string {
+	var b strings.Builder
+	b.WriteString(`set -e
+if [ ! -d /workspace/.git ]; then
+  exit 0
+fi
+mkdir -p /workspace/.git/info
+printf %s "$BLOB" | base64 -d >> /workspace/.git/info/exclude
+`)
+	for _, p := range CompiledPaths() {
+		q := strconv.Quote(p)
+		fmt.Fprintf(&b, "if git ls-files --error-unmatch -- %s >/dev/null 2>&1; then git update-index --skip-worktree -- %s; fi\n", q, q)
+	}
+	return b.String()
 }
