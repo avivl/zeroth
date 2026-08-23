@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,10 +143,19 @@ func (i *instance) spawn(prompt, resumeSession string) error {
 	// belongs here too. The argv prompt stays for the fake CLI and for
 	// operators reading ps output.
 	if err := writeUserMessage(stdin, prompt); err != nil {
-		i.kill()
-		return fmt.Errorf("prompt: %w", err)
+		// The fake CLI (and a child that already consumed argv and
+		// exited) closes stdin before this write. EPIPE is that race,
+		// not a failed Start. A real error still aborts.
+		if !isBrokenPipe(err) {
+			i.kill()
+			return fmt.Errorf("prompt: %w", err)
+		}
 	}
 	return nil
+}
+
+func isBrokenPipe(err error) bool {
+	return errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrClosedPipe)
 }
 
 func childEnv(specEnv []string, key string) []string {

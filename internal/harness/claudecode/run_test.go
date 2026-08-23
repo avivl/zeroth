@@ -180,6 +180,45 @@ func TestSteerAfterExitRestarts(t *testing.T) {
 	waitToken(t, ch, "hello-token", 10*time.Second)
 }
 
+func TestStartIgnoresBrokenPipeWhenChildExits(t *testing.T) {
+	t.Parallel()
+	d := NewWithBin(buildFake(t))
+	h, err := d.Start(t.Context(), harness.Spec{
+		Workspace: t.TempDir(),
+		Prompt:    "stop twice",
+		Env: []string{
+			apiKeyEnv + "=" + testKey,
+			"ZEROTH_FAKE_EXIT_BEFORE_STDIN=1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = d.Stop(context.Background(), h.ID) })
+	if err := d.Stop(t.Context(), h.ID); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := d.Stop(t.Context(), h.ID); err != nil {
+		t.Fatalf("Stop again: %v", err)
+	}
+}
+
+func TestWriteUserMessageBrokenPipe(t *testing.T) {
+	t.Parallel()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err = writeUserMessage(w, "hi")
+	if !isBrokenPipe(err) {
+		t.Fatalf("err = %v, want broken pipe", err)
+	}
+}
+
 func TestStartWritesPromptOnStdin(t *testing.T) {
 	t.Parallel()
 	d := NewWithBin(buildFake(t))
