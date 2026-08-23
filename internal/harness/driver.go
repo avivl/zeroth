@@ -83,7 +83,9 @@ const (
 	EventEffects EventKind = "effects"
 	// EventError is a non-terminal driver or vendor error.
 	EventError EventKind = "error"
-	// EventExited records subprocess exit (clean, signal, or Stop).
+	// EventExited records subprocess exit (clean, signal, or Stop). A
+	// driver must not report a truncated or errored output stream as a
+	// clean exit: the payload has to distinguish the two.
 	EventExited EventKind = "exited"
 )
 

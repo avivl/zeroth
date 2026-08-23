@@ -268,8 +268,11 @@ func waitToken(t *testing.T, ch <-chan harness.Event, needle string, timeout tim
 	}
 }
 
-func waitKind(t *testing.T, ch <-chan harness.Event, k harness.EventKind, timeout time.Duration) {
+// waitKind drains ch until an event of kind k arrives and returns everything
+// it saw, k included, so callers can assert on the run as a whole.
+func waitKind(t *testing.T, ch <-chan harness.Event, k harness.EventKind, timeout time.Duration) []harness.Event {
 	t.Helper()
+	var seen []harness.Event
 	deadline := time.After(timeout)
 	for {
 		select {
@@ -277,11 +280,12 @@ func waitKind(t *testing.T, ch <-chan harness.Event, k harness.EventKind, timeou
 			if !ok {
 				t.Fatalf("stream closed looking for %s", k)
 			}
+			seen = append(seen, ev)
 			if ev.Kind == k {
-				return
+				return seen
 			}
 		case <-deadline:
-			t.Fatalf("timeout looking for %s", k)
+			t.Fatalf("timeout looking for %s after %d events", k, len(seen))
 		}
 	}
 }
@@ -313,4 +317,115 @@ func buildFake(t *testing.T) string {
 		t.Fatalf("build fakecli: %v\n%s", err, out)
 	}
 	return bin
+}
+
+func TestTruncatedStreamIsNotACleanExit(t *testing.T) {
+	t.Parallel()
+	// 42-67: the scan can end in an error rather than EOF. A child that
+	// then exits 0 must not be reported as a clean exit, and the partial
+	// transcript must not be salvaged into a proposed plan.
+	d := NewWithBin(buildFake(t))
+	h, err := d.Start(t.Context(), harness.Spec{
+		Workspace: t.TempDir(),
+		Prompt:    "TRUNCATE please",
+		Env:       []string{apiKeyEnv + "=" + testKey},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Stop(context.Background(), h.ID) })
+
+	ch, err := d.Stream(t.Context(), h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := waitKind(t, ch, harness.EventExited, 20*time.Second)
+
+	var exited, errored *harness.Event
+	for i := range events {
+		ev := &events[i]
+		if strings.Contains(ev.Payload, testKey) {
+			t.Fatalf("api key leaked into %s payload", ev.Kind)
+		}
+		switch ev.Kind {
+		case harness.EventExited:
+			exited = ev
+		case harness.EventError:
+			errored = ev
+		}
+	}
+
+	if exited == nil {
+		t.Fatal("no exited event")
+	}
+	// The child exited 0. The payload has to carry both facts: the stream
+	// broke, and the process itself ended cleanly.
+	if !strings.HasPrefix(exited.Payload, "stream error: ") || !strings.HasSuffix(exited.Payload, "; exit 0") {
+		t.Fatalf("exited payload = %q, want \"stream error: ...; exit 0\"", exited.Payload)
+	}
+	if errored == nil {
+		t.Fatal("no error event for the failed scan")
+	}
+	if !strings.Contains(errored.Payload, "harness claudecode stdout") {
+		t.Fatalf("error payload = %q, want the wrapped scan error", errored.Payload)
+	}
+}
+
+func TestTruncatedStreamDoesNotSalvageEffects(t *testing.T) {
+	t.Parallel()
+	// 42-67: with no effects event from the scan, read() falls back to
+	// ParseEffects over the whole transcript, which on a resume already
+	// holds the prior turn's effects. Salvaging those would let a truncated
+	// turn propose a plan it never actually produced. TRUNCATEFIRST breaks
+	// the stream before any line reaches the transcript, so the resumed
+	// effects are the only thing left to parse.
+	d := NewWithBin(buildFake(t))
+	h, err := d.Start(t.Context(), harness.Spec{
+		Workspace: t.TempDir(),
+		Prompt:    "TRUNCATEFIRST please",
+		Env:       []string{apiKeyEnv + "=" + testKey},
+		Resume: harness.Checkpoint{
+			Transcript: `{"effects":[{"op":"modify","target":"README.md","diff":"+prior turn"}]}`,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.Stop(context.Background(), h.ID) })
+
+	ch, err := d.Stream(t.Context(), h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range waitKind(t, ch, harness.EventExited, 20*time.Second) {
+		if ev.Kind == harness.EventEffects {
+			t.Fatalf("truncated turn salvaged effects from the resumed transcript: %#v", ev.Effects)
+		}
+	}
+}
+
+func TestExitPayload(t *testing.T) {
+	t.Parallel()
+	scanErr := errors.New("boom")
+	cases := []struct {
+		name     string
+		scanErr  error
+		stopping bool
+		want     string
+	}{
+		// 42-67: Stop is set after the scan already failed, so it must not
+		// rewrite the outcome into a plain "stopped".
+		{"truncated then stopped", scanErr, true, "stream error: boom; stopped"},
+		{"truncated clean exit", scanErr, false, "stream error: boom; exit 0"},
+		{"stopped", nil, true, "stopped"},
+		{"clean exit", nil, false, "exit 0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := exitPayload(nil, tc.scanErr, tc.stopping, nil, testKey); got != tc.want {
+				t.Fatalf("payload = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
