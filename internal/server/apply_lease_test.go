@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -106,6 +107,133 @@ func TestApplyLeaserAcquireCleansUpOnPartialFailure(t *testing.T) {
 		if _, getErr := st.GetLease(t.Context(), lid); !errors.Is(getErr, store.ErrNotFound) {
 			t.Fatalf("%s still in store after failed acquire: %v", id, getErr)
 		}
+	}
+}
+
+func TestApplyLeaserAcquireSkipsDuplicateLeaseIDs(t *testing.T) {
+	t.Parallel()
+	st, leaser := newApplyLeaser(t)
+	p := approvedLeasePlan(t, "lease-1")
+	p.Rows = append([]plan.Row(nil), p.Rows...)
+	second := p.Rows[0]
+	second.Target = "b.txt"
+	second.IdempotencyKey = "idem-b"
+	p.Rows = append(p.Rows, second)
+
+	held, err := leaser.Acquire(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(held) != 1 {
+		t.Fatalf("acquired %d, want 1 unique lease", len(held))
+	}
+	if err := leaser.Release(t.Context(), held); err != nil {
+		t.Fatal(err)
+	}
+	lid, err := store.ParseLeaseID("lease-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetLease(t.Context(), lid); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("lease still present: %v", err)
+	}
+}
+
+func TestApplyLeaserAcquireEmptyLeaseReleasesMinted(t *testing.T) {
+	t.Parallel()
+	st, leaser := newApplyLeaser(t)
+	p := approvedLeasePlan(t, "lease-1")
+	p.Rows = append([]plan.Row(nil), p.Rows...)
+	second := p.Rows[0]
+	second.Target = "b.txt"
+	second.Lease = ""
+	second.IdempotencyKey = "idem-b"
+	p.Rows = append(p.Rows, second)
+
+	_, err := leaser.Acquire(t.Context(), p)
+	if !errors.Is(err, plan.ErrInvalid) {
+		t.Fatalf("err=%v, want ErrInvalid", err)
+	}
+	lid, err := store.ParseLeaseID("lease-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetLease(t.Context(), lid); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("minted lease not rolled back: %v", err)
+	}
+}
+
+func TestApplyLeaserAcquireInvalidScope(t *testing.T) {
+	t.Parallel()
+	_, leaser := newApplyLeaser(t)
+	p := approvedLeasePlan(t, "lease-1")
+	p.Scope = ""
+	_, err := leaser.Acquire(t.Context(), p)
+	if err == nil {
+		t.Fatal("expected invalid scope")
+	}
+}
+
+func TestApplyLeaserReleaseSkipsEmptyAndDuplicateIDs(t *testing.T) {
+	t.Parallel()
+	st, leaser := newApplyLeaser(t)
+	p := approvedLeasePlan(t, "lease-1")
+	held, err := leaser.Acquire(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = leaser.Release(t.Context(), []policy.Lease{held[0], {}, held[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lid, err := store.ParseLeaseID(string(held[0].ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetLease(t.Context(), lid); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("lease still present: %v", err)
+	}
+}
+
+func TestApplyLeaserReleaseReportsDeleteError(t *testing.T) {
+	t.Parallel()
+	st, base := newApplyLeaser(t)
+	p := approvedLeasePlan(t, "lease-1")
+	held, err := base.Acquire(t.Context(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failing := &applyLeaser{store: &deleteLeaseFailer{Store: st, err: errors.New("disk")}, agent: base.agent}
+	if err := failing.Release(t.Context(), held); err == nil {
+		t.Fatal("expected delete error")
+	}
+	if err := base.deleteLease(t.Context(), ""); err == nil {
+		t.Fatal("expected empty id error")
+	}
+}
+
+func TestApplyLeaserAcquireReportsReleaseError(t *testing.T) {
+	t.Parallel()
+	st, base := newApplyLeaser(t)
+	failing := &applyLeaser{
+		store: &leaseIOFailer{Store: st, createFailAt: 2, deleteErr: errors.New("cannot delete")},
+		agent: base.agent,
+	}
+	p := approvedLeasePlan(t, "lease-1")
+	p.Rows = append([]plan.Row(nil), p.Rows...)
+	second := p.Rows[0]
+	second.Target = "b.txt"
+	second.Lease = "lease-2"
+	second.IdempotencyKey = "idem-b"
+	p.Rows = append(p.Rows, second)
+
+	_, err := failing.Acquire(t.Context(), p)
+	if err == nil {
+		t.Fatal("expected acquire to fail")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "injected create lease failure") || !strings.Contains(msg, "release:") {
+		t.Fatalf("err=%v, want create failure plus release error", err)
 	}
 }
 
@@ -265,6 +393,44 @@ func (s *createLeaseFailer) CreateLease(ctx context.Context, l store.Lease) erro
 		return errors.New("injected create lease failure")
 	}
 	return s.Store.CreateLease(ctx, l)
+}
+
+type deleteLeaseFailer struct {
+	store.Store
+	err error
+}
+
+func (s *deleteLeaseFailer) DeleteLease(ctx context.Context, id store.LeaseID) error {
+	if s.err != nil {
+		return s.err
+	}
+	return s.Store.DeleteLease(ctx, id)
+}
+
+type leaseIOFailer struct {
+	store.Store
+	mu           sync.Mutex
+	createFailAt int
+	creates      int
+	deleteErr    error
+}
+
+func (s *leaseIOFailer) CreateLease(ctx context.Context, l store.Lease) error {
+	s.mu.Lock()
+	s.creates++
+	n := s.creates
+	s.mu.Unlock()
+	if s.createFailAt > 0 && n == s.createFailAt {
+		return errors.New("injected create lease failure")
+	}
+	return s.Store.CreateLease(ctx, l)
+}
+
+func (s *leaseIOFailer) DeleteLease(ctx context.Context, id store.LeaseID) error {
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
+	return s.Store.DeleteLease(ctx, id)
 }
 
 type hashWorld struct {
