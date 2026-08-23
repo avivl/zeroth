@@ -86,7 +86,10 @@ func copyWorkspace(src, dest string) (int, error) {
 		}
 		info, err := os.Lstat(from)
 		if err != nil {
-			continue
+			// Skipping a stat failure would seed an overlay that silently
+			// diverges from the source workspace. Fail instead, as
+			// observeWorkspace does when a draft-time read errors.
+			return n, fmt.Errorf("could not stat workspace file %s: %w", rel, err)
 		}
 		if !info.Mode().IsRegular() {
 			continue

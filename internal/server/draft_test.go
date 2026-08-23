@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -188,6 +189,86 @@ func TestCopyWorkspaceSeedsTrackedFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dest, ".npmrc")); err == nil {
 		t.Fatal("credential file should not be copied")
 	}
+}
+
+func TestCopyWorkspaceLstatErrorFailsLoudly(t *testing.T) {
+	t.Parallel()
+	src := gitWorkspaceWithMissingTrackedFile(t)
+	dest := t.TempDir()
+	n, err := copyWorkspace(src, dest)
+	if err == nil {
+		t.Fatalf("expected stat error, copied %d files", n)
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "could not stat workspace file") {
+		t.Fatalf("missing diagnosable prefix: %s", msg)
+	}
+	if !strings.Contains(msg, "blocked.md") {
+		t.Fatalf("error should name the unstatable file: %s", msg)
+	}
+	if _, statErr := os.Stat(filepath.Join(dest, "blocked.md")); statErr == nil {
+		t.Fatal("unstatable source file should not appear in the overlay")
+	}
+}
+
+func TestSeedOverlayLstatErrorFailsLoudly(t *testing.T) {
+	t.Parallel()
+	src := gitWorkspaceWithMissingTrackedFile(t)
+	dest := t.TempDir()
+	sbx, err := sandbox.NewID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		log:           zap.NewNop(),
+		sandbox:       &stubOverlay{dir: dest},
+		workspaceRoot: src,
+	}
+	err = s.seedOverlay(sbx, store.Session{})
+	if err == nil {
+		t.Fatal("expected seed overlay to fail on unstatable file")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "server seed overlay") {
+		t.Fatalf("missing seed prefix: %s", msg)
+	}
+	if !strings.Contains(msg, "could not stat workspace file") || !strings.Contains(msg, "blocked.md") {
+		t.Fatalf("error should name the unstatable file: %s", msg)
+	}
+	if _, statErr := os.Stat(filepath.Join(dest, "blocked.md")); statErr == nil {
+		t.Fatal("failed seed should not leave the unstatable file in the overlay")
+	}
+}
+
+func gitWorkspaceWithMissingTrackedFile(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("docs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(src, "blocked.md")
+	if err := os.WriteFile(blocked, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = src
+		cmd.Env = append(gitCommandEnv(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("init", "-b", "main")
+	run("add", "README.md", "blocked.md")
+	if err := os.Remove(blocked); err != nil {
+		t.Fatal(err)
+	}
+	return src
 }
 
 func TestOverlaySourcePrefersLocalWorkspaceRepo(t *testing.T) {
