@@ -24,15 +24,18 @@ import (
 )
 
 type stubTracker struct {
-	mu         sync.Mutex
-	ch         chan tracker.AssignmentEvent
-	comments   []string
-	states     []tracker.StateKind
-	artifacts  []tracker.Artifact
-	unassigned []string
-	issue      tracker.Issue
-	issues     map[string]tracker.Issue
-	threads    map[string][]tracker.Comment
+	mu          sync.Mutex
+	ch          chan tracker.AssignmentEvent
+	comments    []string
+	states      []tracker.StateKind
+	artifacts   []tracker.Artifact
+	unassigned  []string
+	issue       tracker.Issue
+	issues      map[string]tracker.Issue
+	threads     map[string][]tracker.Comment
+	commentErr  error
+	unassignErr error
+	stateErr    error
 }
 
 func newStubTracker(iss tracker.Issue) *stubTracker {
@@ -91,12 +94,18 @@ func (s *stubTracker) ListComments(_ context.Context, key string) ([]tracker.Com
 func (s *stubTracker) Comment(_ context.Context, _, body string) (tracker.CommentRef, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.commentErr != nil {
+		return tracker.CommentRef{}, s.commentErr
+	}
 	s.comments = append(s.comments, body)
 	return tracker.CommentRef{ID: "c1"}, nil
 }
 func (s *stubTracker) SetState(_ context.Context, _ string, state tracker.State) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stateErr != nil {
+		return s.stateErr
+	}
 	s.states = append(s.states, state.Kind)
 	return nil
 }
@@ -112,6 +121,9 @@ func (s *stubTracker) LinkArtifact(_ context.Context, _ string, a tracker.Artifa
 func (s *stubTracker) Unassign(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.unassignErr != nil {
+		return s.unassignErr
+	}
 	s.unassigned = append(s.unassigned, key)
 	return nil
 }

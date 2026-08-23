@@ -111,6 +111,22 @@ func TestFormatRetractCommentWithoutPR(t *testing.T) {
 			t.Fatalf("missing %q in %s", want, body)
 		}
 	}
+	fallback := tracker.FormatRetractComment(tracker.Retract{Reason: "  "})
+	if !strings.Contains(fallback, "Prior run output has been retracted") {
+		t.Fatalf("missing fallback: %s", fallback)
+	}
+	if !strings.Contains(fallback, "none opened") {
+		t.Fatalf("missing none: %s", fallback)
+	}
+	open := tracker.FormatRetractComment(tracker.Retract{
+		PullRequest: "https://github.com/avivl/zeroth/pull/1",
+	})
+	if strings.Contains(open, "(closed)") {
+		t.Fatalf("open pr should not say closed: %s", open)
+	}
+	if !strings.Contains(open, "[open](https://github.com/avivl/zeroth/pull/1)") {
+		t.Fatalf("open pr link: %s", open)
+	}
 }
 
 func TestFormatFailedComment(t *testing.T) {
