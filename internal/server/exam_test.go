@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +39,14 @@ func (c *capturingReviewer) Review(_ context.Context, model string, packet plan.
 	return plan.Review{Verdict: plan.VerdictPass, Notes: "in scope", Model: model}, nil
 }
 
+// failingReviewer stands in for a reviewer outage, which is what 42-53 will
+// make reachable once a real independent reviewer is wired up.
+type failingReviewer struct{}
+
+func (failingReviewer) Review(context.Context, string, plan.Packet) (plan.Review, error) {
+	return plan.Review{}, errors.New("reviewer unavailable")
+}
+
 type examEnv struct {
 	t   *testing.T
 	st  store.Store
@@ -47,15 +57,28 @@ type examEnv struct {
 
 func examSetup(t *testing.T) *examEnv {
 	t.Helper()
+	rev := &capturingReviewer{}
+	e := examSetupWith(t, rev, nil)
+	e.rev = rev
+	return e
+}
+
+// examSetupWith builds an env around a chosen reviewer. wrap, when non-nil,
+// decorates the sqlite store so a test can break one specific call.
+func examSetupWith(t *testing.T, reviewer plan.Reviewer, wrap func(store.Store) store.Store) *examEnv {
+	t.Helper()
 	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	rev := &capturingReviewer{}
+	var backing store.Store = st
+	if wrap != nil {
+		backing = wrap(st)
+	}
 	srv, err := server.New(server.Config{
-		Store:         st,
-		Reviewer:      rev,
+		Store:         backing,
+		Reviewer:      reviewer,
 		TokenInterval: time.Hour,
 		TokenCount:    1000,
 	})
@@ -65,7 +88,36 @@ func examSetup(t *testing.T) *examEnv {
 	t.Cleanup(srv.Close)
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &examEnv{t: t, st: st, srv: srv, hs: hs, rev: rev}
+	return &examEnv{t: t, st: st, srv: srv, hs: hs}
+}
+
+// failReloadStore breaks the GetPlan that BranchPlan issues to reload a branch
+// after cross-exam. The exam itself has to succeed, so reads only start
+// failing once the exam has written its verdict back for that plan.
+type failReloadStore struct {
+	store.Store
+	mu       sync.Mutex
+	examined map[store.PlanID]bool
+}
+
+func (f *failReloadStore) UpdatePlan(ctx context.Context, p store.Plan) error {
+	if err := f.Store.UpdatePlan(ctx, p); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.examined[p.ID] = true
+	return nil
+}
+
+func (f *failReloadStore) GetPlan(ctx context.Context, id store.PlanID) (store.Plan, error) {
+	f.mu.Lock()
+	examined := f.examined[id]
+	f.mu.Unlock()
+	if examined {
+		return store.Plan{}, errors.New("store unavailable")
+	}
+	return f.Store.GetPlan(ctx, id)
 }
 
 func (e *examEnv) patchReviewer(block bool) {
@@ -391,5 +443,51 @@ func TestChatReviewerExamineDraftSurfacesRealVerdict(t *testing.T) {
 	}
 	if !strings.HasPrefix(*approvals.Items[0].Summary, "fail:") {
 		t.Fatalf("approval summary %q should lead with the verdict", *approvals.Items[0].Summary)
+	}
+}
+
+func TestBranchPlanSurfacesExamFailure(t *testing.T) {
+	t.Parallel()
+	// 42-68: BranchPlan swallowed the ExamineDraft error and still returned
+	// 201, so a branch whose cross-exam never ran read as a clean success.
+	e := examSetupWith(t, failingReviewer{}, nil)
+	e.patchReviewer(false)
+	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	}, map[string]string{"docs/design/plan.md": "pre"})
+
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/branch", gen.BranchPlanRequest{})
+	defer res.Body.Close()
+	slurp, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("branch status = %d, want 500 when cross-exam fails: %s", res.StatusCode, slurp)
+	}
+	if !strings.Contains(string(slurp), "cross-exam") {
+		t.Fatalf("error body = %s, want it to name cross-exam", slurp)
+	}
+}
+
+func TestBranchPlanSurfacesReloadFailure(t *testing.T) {
+	t.Parallel()
+	// 42-68: the reload after a successful cross-exam was swallowed too, so a
+	// failed read returned the stale pre-exam plan as a clean 201.
+	e := examSetupWith(t, &capturingReviewer{}, func(st store.Store) store.Store {
+		return &failReloadStore{Store: st, examined: map[store.PlanID]bool{}}
+	})
+	e.patchReviewer(false)
+	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	}, map[string]string{"docs/design/plan.md": "pre"})
+
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/branch", gen.BranchPlanRequest{})
+	defer res.Body.Close()
+	slurp, _ := io.ReadAll(res.Body)
+	if res.StatusCode == http.StatusCreated {
+		t.Fatalf("branch returned 201 despite a failed reload: %s", slurp)
+	}
+	if res.StatusCode < 500 {
+		t.Fatalf("branch status = %d, want a server error: %s", res.StatusCode, slurp)
 	}
 }

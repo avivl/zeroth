@@ -223,12 +223,24 @@ func (s *Server) BranchPlan(w http.ResponseWriter, r *http.Request, id gen.PlanI
 		})
 	}
 	if s.reviewer != nil {
-		if _, err := s.ExamineDraft(r.Context(), pid); err == nil {
-			got, err := s.store.GetPlan(r.Context(), pid)
-			if err == nil {
-				branch = got
-			}
+		// A branch whose cross-exam did not run must not read as a clean
+		// 201. The row stays: plan.Approve rejects a nil CrossExam with
+		// ErrNotExamined, so it is inert until an exam succeeds.
+		if _, err := s.ExamineDraft(r.Context(), pid); err != nil {
+			s.log.Error("branch cross-exam",
+				zap.String("plan", pid.String()),
+				zap.String("parent", src.ID.String()),
+				zap.Error(err))
+			writeError(w, http.StatusInternalServerError, "internal",
+				fmt.Sprintf("branch cross-exam: %v", err))
+			return
 		}
+		got, err := s.store.GetPlan(r.Context(), pid)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		branch = got
 	}
 	writeJSON(w, http.StatusCreated, planFrom(branch))
 }
