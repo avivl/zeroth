@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -37,6 +38,14 @@ func (c *capturingReviewer) Review(_ context.Context, model string, packet plan.
 	return plan.Review{Verdict: plan.VerdictPass, Notes: "in scope", Model: model}, nil
 }
 
+// failingReviewer stands in for a reviewer outage, which is what 42-53 will
+// make reachable once a real independent reviewer is wired up.
+type failingReviewer struct{}
+
+func (failingReviewer) Review(context.Context, string, plan.Packet) (plan.Review, error) {
+	return plan.Review{}, errors.New("reviewer unavailable")
+}
+
 type examEnv struct {
 	t   *testing.T
 	st  store.Store
@@ -47,15 +56,22 @@ type examEnv struct {
 
 func examSetup(t *testing.T) *examEnv {
 	t.Helper()
+	rev := &capturingReviewer{}
+	e := examSetupWith(t, rev)
+	e.rev = rev
+	return e
+}
+
+func examSetupWith(t *testing.T, reviewer plan.Reviewer) *examEnv {
+	t.Helper()
 	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	rev := &capturingReviewer{}
 	srv, err := server.New(server.Config{
 		Store:         st,
-		Reviewer:      rev,
+		Reviewer:      reviewer,
 		TokenInterval: time.Hour,
 		TokenCount:    1000,
 	})
@@ -65,7 +81,7 @@ func examSetup(t *testing.T) *examEnv {
 	t.Cleanup(srv.Close)
 	hs := httptest.NewServer(srv.Handler())
 	t.Cleanup(hs.Close)
-	return &examEnv{t: t, st: st, srv: srv, hs: hs, rev: rev}
+	return &examEnv{t: t, st: st, srv: srv, hs: hs}
 }
 
 func (e *examEnv) patchReviewer(block bool) {
@@ -391,5 +407,27 @@ func TestChatReviewerExamineDraftSurfacesRealVerdict(t *testing.T) {
 	}
 	if !strings.HasPrefix(*approvals.Items[0].Summary, "fail:") {
 		t.Fatalf("approval summary %q should lead with the verdict", *approvals.Items[0].Summary)
+	}
+}
+
+func TestBranchPlanSurfacesExamFailure(t *testing.T) {
+	t.Parallel()
+	// 42-68: BranchPlan swallowed the ExamineDraft error and still returned
+	// 201, so a branch whose cross-exam never ran read as a clean success.
+	e := examSetupWith(t, failingReviewer{})
+	e.patchReviewer(false)
+	run := createRun(t, e.hs.URL, "Allowed-paths: docs/")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	}, map[string]string{"docs/design/plan.md": "pre"})
+
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/branch", gen.BranchPlanRequest{})
+	defer res.Body.Close()
+	slurp, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("branch status = %d, want 500 when cross-exam fails: %s", res.StatusCode, slurp)
+	}
+	if !strings.Contains(string(slurp), "cross-exam") {
+		t.Fatalf("error body = %s, want it to name cross-exam", slurp)
 	}
 }
