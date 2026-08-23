@@ -54,18 +54,6 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	}
 	s.mu.Unlock()
 
-	iss := ev.Issue
-	if iss.Key == "" && s.tracker != nil {
-		s.log.Info("tracker get issue on assign", zap.String("key", key))
-		got, err := s.tracker.GetIssue(ctx, key)
-		if err != nil {
-			s.log.Warn("tracker get issue on assign", zap.String("key", key), zap.Error(err))
-		} else {
-			iss = got
-		}
-	}
-	prompt := issuePrompt(key, iss)
-
 	id, err := session.NewID()
 	if err != nil {
 		return fmt.Errorf("server assign: %w", err)
@@ -78,6 +66,12 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	if err != nil {
 		return fmt.Errorf("server assign: %w", err)
 	}
+
+	iss, comments := s.loadIssueThread(ctx, key, ev.Issue)
+	s.ingestOperatorComments(ctx, key, comments)
+	facts := s.sessionFacts(ctx, sid.String(), aid.String())
+	prompt := issuePrompt(key, iss, comments, facts)
+
 	now := time.Now().UTC()
 	sess := store.Session{
 		ID:         sid,
@@ -310,18 +304,4 @@ func (s *Server) stopAllSandboxes() {
 		_ = s.sandbox.Kill(ctx, id)
 		_ = s.sandbox.Stop(ctx, id)
 	}
-}
-
-func issuePrompt(key string, iss tracker.Issue) string {
-	title := strings.TrimSpace(iss.Title)
-	if title == "" {
-		title = key
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Linear %s: %s", key, title)
-	if d := strings.TrimSpace(iss.Description); d != "" {
-		b.WriteString("\n\n")
-		b.WriteString(d)
-	}
-	return b.String()
 }

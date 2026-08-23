@@ -127,3 +127,43 @@ func TestFormatFailedComment(t *testing.T) {
 		}
 	}
 }
+
+func TestIsSystemComment(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		body string
+		want bool
+	}{
+		{tracker.FormatStartedComment("s_1", "42-43"), true},
+		{tracker.FormatPlanComment("h", "touch README", "diff"), true},
+		{tracker.FormatCompletion(tracker.Completion{RunID: "s_1"}), true},
+		{tracker.FormatCancelComment("s_1"), true},
+		{tracker.FormatFailedComment("s_1", "no plan"), true},
+		{"The new doc should live at docs/linear-setup.md, not docs/operator/.", false},
+		{"### not zeroth", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := tracker.IsSystemComment(tc.body); got != tc.want {
+			t.Fatalf("IsSystemComment(%q) = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestHumanCommentsDropsSystemAndBots(t *testing.T) {
+	t.Parallel()
+	in := []tracker.Comment{
+		{ID: "1", Body: "put it at docs/linear-setup.md", Author: "alice"},
+		{ID: "2", Body: tracker.FormatStartedComment("s_1", "42-43"), Author: "alice"},
+		{ID: "3", Body: "bot chatter", Author: "zeroth", Bot: true},
+		{ID: "4", Body: "   ", Author: "alice"},
+		{ID: "5", Body: "existing docs/ folders are document types", Author: "alice"},
+	}
+	got := tracker.HumanComments(in)
+	if len(got) != 2 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].ID != "1" || got[1].ID != "5" {
+		t.Fatalf("order %+v", got)
+	}
+}

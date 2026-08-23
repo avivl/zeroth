@@ -59,6 +59,9 @@ func TestProviderConformance(t *testing.T) {
 			t.Run("get_issue", func(t *testing.T) { testGetIssue(t, tc.open) })
 			t.Run("get_issue_missing", func(t *testing.T) { testGetIssueMissing(t, tc.open) })
 			t.Run("get_issue_empty", func(t *testing.T) { testGetIssueEmpty(t, tc.open) })
+			t.Run("list_comments", func(t *testing.T) { testListComments(t, tc.open) })
+			t.Run("list_comments_empty_thread", func(t *testing.T) { testListCommentsEmpty(t, tc.open) })
+			t.Run("list_comments_invalid", func(t *testing.T) { testListCommentsInvalid(t, tc.open) })
 			t.Run("comment", func(t *testing.T) { testComment(t, tc.open) })
 			t.Run("comment_invalid", func(t *testing.T) { testCommentInvalid(t, tc.open) })
 			t.Run("set_state", func(t *testing.T) { testSetState(t, tc.open) })
@@ -100,6 +103,74 @@ func testGetIssueEmpty(t *testing.T, open func(t *testing.T) (tracker.Provider, 
 	_, err := p.GetIssue(t.Context(), "  ")
 	if !errors.Is(err, tracker.ErrInvalid) {
 		t.Fatalf("GetIssue empty = %v, want ErrInvalid", err)
+	}
+}
+
+func testListComments(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, fake := open(t)
+	decision := "The new doc should live at docs/linear-setup.md, not docs/operator/."
+	fake.PutComment(linear.FakeComment{
+		IssueID:  "42-1",
+		Body:     decision,
+		UserName: "alice",
+	})
+	got, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	found := false
+	for _, c := range got {
+		if strings.Contains(c.Body, decision) && c.Author == "alice" && !c.Bot {
+			found = true
+			if c.ID == "" {
+				t.Fatal("empty comment id")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("operator comment missing: %+v", got)
+	}
+
+	ref, err := p.Comment(t.Context(), "42-1", "posted after seed")
+	if err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	again, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatalf("ListComments after post: %v", err)
+	}
+	posted := false
+	for _, c := range again {
+		if c.ID == ref.ID && strings.Contains(c.Body, "posted after seed") {
+			posted = true
+		}
+	}
+	if !posted {
+		t.Fatalf("posted comment missing: %+v", again)
+	}
+}
+
+func testListCommentsEmpty(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, _ := open(t)
+	got, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatalf("ListComments empty thread: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("want empty thread, got %+v", got)
+	}
+}
+
+func testListCommentsInvalid(t *testing.T, open func(t *testing.T) (tracker.Provider, *linear.FakeGraphQL)) {
+	t.Helper()
+	p, _ := open(t)
+	if _, err := p.ListComments(t.Context(), "  "); !errors.Is(err, tracker.ErrInvalid) {
+		t.Fatalf("empty key = %v, want ErrInvalid", err)
+	}
+	if _, err := p.ListComments(t.Context(), "no-such-issue"); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("missing = %v, want ErrNotFound", err)
 	}
 }
 
