@@ -12,4 +12,7 @@
 // files inside the sandbox (AGENTS.md, CLAUDE.md, .cursor/rules). Those
 // files are a build artifact of the notebook, never the source of truth,
 // and they are excluded from checkpoints and commits (Z1-118).
+// Operator comments on a tracker issue are a human write: assign-to-Zeroth
+// copies them into the notebook before hydration so a settled decision
+// survives the next fresh run.
 package memory

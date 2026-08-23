@@ -54,26 +54,6 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	}
 	s.mu.Unlock()
 
-	iss := ev.Issue
-	if iss.Key == "" && s.tracker != nil {
-		s.log.Info("tracker get issue on assign", zap.String("key", key))
-		got, err := s.tracker.GetIssue(ctx, key)
-		if err != nil {
-			s.log.Warn("tracker get issue on assign", zap.String("key", key), zap.Error(err))
-		} else {
-			iss = got
-		}
-	}
-	prompt := issuePrompt(key, iss)
-	if s.tracker != nil {
-		comments, err := s.tracker.ListComments(ctx, key)
-		if err != nil {
-			s.log.Warn("tracker list comments on assign", zap.String("key", key), zap.Error(err))
-		} else {
-			prompt = appendIssueComments(prompt, comments)
-		}
-	}
-
 	id, err := session.NewID()
 	if err != nil {
 		return fmt.Errorf("server assign: %w", err)
@@ -86,6 +66,12 @@ func (s *Server) handleAssigned(ctx context.Context, ev tracker.AssignmentEvent)
 	if err != nil {
 		return fmt.Errorf("server assign: %w", err)
 	}
+
+	iss, comments := s.loadIssueThread(ctx, key, ev.Issue)
+	s.ingestOperatorComments(ctx, key, comments)
+	facts := s.sessionFacts(ctx, sid.String(), aid.String())
+	prompt := issuePrompt(key, iss, comments, facts)
+
 	now := time.Now().UTC()
 	sess := store.Session{
 		ID:         sid,
@@ -318,61 +304,4 @@ func (s *Server) stopAllSandboxes() {
 		_ = s.sandbox.Kill(ctx, id)
 		_ = s.sandbox.Stop(ctx, id)
 	}
-}
-
-func issuePrompt(key string, iss tracker.Issue) string {
-	title := strings.TrimSpace(iss.Title)
-	if title == "" {
-		title = key
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Linear %s: %s", key, title)
-	if d := strings.TrimSpace(iss.Description); d != "" {
-		b.WriteString("\n\n")
-		b.WriteString(d)
-	}
-	return b.String()
-}
-
-const operatorRejectionHeading = "## Operator rejection"
-
-func appendOperatorRejection(prompt, comment string) string {
-	comment = strings.TrimSpace(comment)
-	if comment == "" {
-		return prompt
-	}
-	var b strings.Builder
-	b.WriteString(strings.TrimRight(prompt, "\n"))
-	b.WriteString("\n\n")
-	b.WriteString(operatorRejectionHeading)
-	b.WriteString("\n\n")
-	b.WriteString(comment)
-	b.WriteByte('\n')
-	return b.String()
-}
-
-func appendIssueComments(prompt string, comments []tracker.IssueComment) string {
-	var body strings.Builder
-	n := 0
-	for _, c := range comments {
-		text := strings.TrimSpace(c.Body)
-		if text == "" {
-			continue
-		}
-		n++
-		body.WriteByte('\n')
-		author := strings.TrimSpace(c.Author)
-		if author == "" {
-			author = "comment"
-		}
-		fmt.Fprintf(&body, "### %s\n\n%s\n", author, text)
-	}
-	if n == 0 {
-		return prompt
-	}
-	var b strings.Builder
-	b.WriteString(strings.TrimRight(prompt, "\n"))
-	b.WriteString("\n\n## Issue comments\n")
-	b.WriteString(body.String())
-	return b.String()
 }

@@ -9,8 +9,11 @@
 // and memory notebook write plus proposal accept/reject. Sandbox spawn
 // copies the operator's local checkout into the overlay (when configured)
 // and compiles the notebook slice into AGENTS.md before the worker starts
-// (Z1-118). Draft observation hashes files from that overlay; a missing
-// modify/destroy target fails with a workspace-observe error rather than
+// (Z1-118). Assign-to-Zeroth reads the issue title, description, and
+// comment thread, ingests operator comments as notebook facts, and
+// includes that slice in the harness prompt. Draft observation hashes
+// files from that overlay; a missing modify/destroy target fails with a
+// workspace-observe error rather than
 // an opaque plan-builder rejection. Apply rechecks those hashes against
 // the live overlay, patches modify rows onto existing files (never a
 // silent full-file overwrite), rechecks the recorded postcondition

@@ -213,6 +213,7 @@ pre,
 
 .badge-destroy,
 .badge-failed,
+.badge-fail,
 .badge-rejected,
 .badge-danger,
 .badge-retracted {
@@ -229,6 +230,15 @@ pre,
 .badge-pass {
   color: var(--ok);
   background: var(--ok-bg);
+}
+
+.badge-pass_with_notes {
+  color: var(--pending);
+  background: var(--pending-bg);
+}
+
+.exam-concern {
+  border: 1px solid var(--danger);
 }
 
 .task-row {

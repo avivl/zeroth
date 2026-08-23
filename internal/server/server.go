@@ -67,6 +67,10 @@ type Config struct {
 	Sandbox        sandbox.Driver
 	TrackerWebhook bool
 	WorkspaceRoot  string
+	// DefaultReviewerModel, when set, is written onto the default
+	// agent if that agent has no reviewer model yet. zerothd sets
+	// this when an independent reviewer is configured.
+	DefaultReviewerModel string
 	// Publisher opens a git branch and pull request after a successful
 	// apply of file rows. Nil uses git plus the gh CLI.
 	Publisher ApplyPublisher
@@ -74,20 +78,21 @@ type Config struct {
 
 // Server serves the OpenAPI contract against a session supervisor.
 type Server struct {
-	store         store.Store
-	audit         *audit.Log
-	log           *zap.Logger
-	reviewer      plan.Reviewer
-	harness       harness.Driver
-	elog          *storeLog
-	sup           *session.Supervisor
-	interval      time.Duration
-	tokens        int
-	tracker       tracker.Provider
-	sandbox       sandbox.Driver
-	webhook       http.Handler
-	workspaceRoot string
-	publisher     ApplyPublisher
+	store                store.Store
+	audit                *audit.Log
+	log                  *zap.Logger
+	reviewer             plan.Reviewer
+	harness              harness.Driver
+	elog                 *storeLog
+	sup                  *session.Supervisor
+	interval             time.Duration
+	tokens               int
+	tracker              tracker.Provider
+	sandbox              sandbox.Driver
+	webhook              http.Handler
+	workspaceRoot        string
+	publisher            ApplyPublisher
+	defaultReviewerModel string
 
 	root   context.Context
 	cancel context.CancelFunc
@@ -151,26 +156,27 @@ func New(cfg Config) (*Server, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &Server{
-		store:         cfg.Store,
-		audit:         trail,
-		log:           log,
-		reviewer:      reviewer,
-		harness:       cfg.Harness,
-		elog:          elog,
-		sup:           sup,
-		interval:      interval,
-		tokens:        tokens,
-		tracker:       cfg.Tracker,
-		sandbox:       cfg.Sandbox,
-		workspaceRoot: strings.TrimSpace(cfg.WorkspaceRoot),
-		publisher:     cfg.Publisher,
-		root:          ctx,
-		cancel:        cancel,
-		lives:         make(map[string]*liveRun),
-		byTracker:     make(map[string]session.ID),
-		sandboxes:     make(map[string]sandbox.ID),
-		keys:          make(map[string]string),
-		prs:           make(map[string]string),
+		store:                cfg.Store,
+		audit:                trail,
+		log:                  log,
+		reviewer:             reviewer,
+		harness:              cfg.Harness,
+		elog:                 elog,
+		sup:                  sup,
+		interval:             interval,
+		tokens:               tokens,
+		tracker:              cfg.Tracker,
+		sandbox:              cfg.Sandbox,
+		workspaceRoot:        strings.TrimSpace(cfg.WorkspaceRoot),
+		publisher:            cfg.Publisher,
+		defaultReviewerModel: strings.TrimSpace(cfg.DefaultReviewerModel),
+		root:                 ctx,
+		cancel:               cancel,
+		lives:                make(map[string]*liveRun),
+		byTracker:            make(map[string]session.ID),
+		sandboxes:            make(map[string]sandbox.ID),
+		keys:                 make(map[string]string),
+		prs:                  make(map[string]string),
 	}
 	if s.publisher == nil {
 		s.publisher = newGitPublisher()
@@ -229,23 +235,31 @@ func (s *Server) ensureDefaultAgent(ctx context.Context) error {
 		return fmt.Errorf("server default agent: %w", err)
 	}
 	created := false
-	_, err = s.store.GetAgent(ctx, id)
+	a, err := s.store.GetAgent(ctx, id)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
 			return fmt.Errorf("server default agent: %w", err)
 		}
 		now := time.Now().UTC()
-		if err := s.store.CreateAgent(ctx, store.Agent{
-			ID:        id,
-			Name:      "default",
-			Harness:   "claudecode",
-			Status:    string(gen.Ready),
-			CreatedAt: now,
-			UpdatedAt: now,
-		}); err != nil {
+		a = store.Agent{
+			ID:            id,
+			Name:          "default",
+			Harness:       "claudecode",
+			Status:        string(gen.Ready),
+			ReviewerModel: s.defaultReviewerModel,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		if err := s.store.CreateAgent(ctx, a); err != nil {
 			return fmt.Errorf("server default agent: %w", err)
 		}
 		created = true
+	} else if s.defaultReviewerModel != "" && strings.TrimSpace(a.ReviewerModel) == "" {
+		a.ReviewerModel = s.defaultReviewerModel
+		a.UpdatedAt = time.Now().UTC()
+		if err := s.store.UpdateAgent(ctx, a); err != nil {
+			return fmt.Errorf("server default agent: %w", err)
+		}
 	}
 	if err := s.audit.EnsureAgentKey(ctx, id, created); err != nil {
 		return fmt.Errorf("server default agent key: %w", err)

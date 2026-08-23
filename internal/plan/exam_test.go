@@ -361,6 +361,89 @@ func TestPacketEncodeNeverContainsPlantedTranscript(t *testing.T) {
 	}
 }
 
+func TestPacketEncodeAsksForLabeledVerdict(t *testing.T) {
+	t.Parallel()
+	enc := PacketFrom(mustBuild(t, Draft{}), testIssue()).Encode()
+	if !strings.Contains(enc, "VERDICT: pass|fail|pass_with_notes") {
+		t.Fatalf("encode missing labeled verdict shape: %s", enc)
+	}
+}
+
+func TestParseReview(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		in      string
+		verdict string
+		notes   string
+	}{
+		{
+			name:    "labeled",
+			in:      "VERDICT: fail\nNOTES:\nscope violation: .ssh/authorized_keys",
+			verdict: VerdictFail,
+			notes:   "scope violation: .ssh/authorized_keys",
+		},
+		{
+			name:    "json",
+			in:      `{"verdict":"pass_with_notes","notes":"cost ceiling is high"}`,
+			verdict: VerdictPassWithNotes,
+			notes:   "cost ceiling is high",
+		},
+		{
+			name:    "fenced json",
+			in:      "```json\n{\"verdict\":\"pass\",\"notes\":\"ok\"}\n```",
+			verdict: VerdictPass,
+			notes:   "ok",
+		},
+		{
+			name:    "bare verdict line",
+			in:      "fail\nextra path outside the issue",
+			verdict: VerdictFail,
+			notes:   "extra path outside the issue",
+		},
+		{
+			name:    "unparseable is a fail",
+			in:      "I like this plan, ship it.",
+			verdict: VerdictFail,
+			notes:   "I like this plan, ship it.",
+		},
+		{
+			name:    "empty is a fail",
+			in:      "  ",
+			verdict: VerdictFail,
+			notes:   "empty reviewer reply",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ParseReview("gpt-4o", tc.in)
+			if got.Verdict != tc.verdict {
+				t.Fatalf("verdict %q, want %q", got.Verdict, tc.verdict)
+			}
+			if got.Notes != tc.notes {
+				t.Fatalf("notes %q, want %q", got.Notes, tc.notes)
+			}
+			if got.Model != "gpt-4o" {
+				t.Fatalf("model %q", got.Model)
+			}
+		})
+	}
+}
+
+func TestCrossExamFlagsConcern(t *testing.T) {
+	t.Parallel()
+	if (CrossExam{Verdict: VerdictPass}).FlagsConcern() {
+		t.Fatal("pass must not flag a concern")
+	}
+	if !(CrossExam{Verdict: VerdictFail}).FlagsConcern() {
+		t.Fatal("fail must flag a concern")
+	}
+	if !(CrossExam{Verdict: VerdictPassWithNotes}).FlagsConcern() {
+		t.Fatal("pass_with_notes must flag a concern")
+	}
+}
+
 func TestExamineDoesNotMutateInput(t *testing.T) {
 	t.Parallel()
 	p := mustBuild(t, Draft{})

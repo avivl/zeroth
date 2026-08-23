@@ -8,6 +8,10 @@ import (
 
 const passNotesModel = "pass-notes"
 
+// PassThroughNotes is the placeholder when no independent reviewer is
+// configured. A real reviewer must never return this string.
+const PassThroughNotes = "No independent reviewer model is configured. Human approval is the gate."
+
 // passNotesReviewer lets a draft reach the human inbox when no
 // independent reviewer model is configured. Missing review is still a
 // deny for Approve (the exam must run); this is the exam, not a skip of
@@ -21,7 +25,7 @@ func (passNotesReviewer) Review(_ context.Context, model string, _ plan.Packet) 
 	}
 	return plan.Review{
 		Verdict: plan.VerdictPassWithNotes,
-		Notes:   "No independent reviewer model is configured. Human approval is the gate.",
+		Notes:   PassThroughNotes,
 		Model:   model,
 	}, nil
 }

@@ -165,6 +165,75 @@ func TestUnauthorizedDoesNotLeakKey(t *testing.T) {
 	}
 }
 
+func TestListCommentsHumanBotAndPosted(t *testing.T) {
+	t.Parallel()
+	fake := NewFake()
+	p, _ := testProvider(t, fake)
+
+	if _, err := p.ListComments(t.Context(), "  "); !errors.Is(err, tracker.ErrInvalid) {
+		t.Fatalf("empty key = %v, want ErrInvalid", err)
+	}
+	if _, err := p.ListComments(t.Context(), "no-such"); !errors.Is(err, tracker.ErrNotFound) {
+		t.Fatalf("missing = %v, want ErrNotFound", err)
+	}
+	empty, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty thread %+v", empty)
+	}
+
+	at := time.Date(2026, 8, 22, 15, 4, 5, 0, time.UTC)
+	fake.PutComment(FakeComment{
+		IssueID:   "42-1",
+		Body:      "put it at docs/linear-setup.md",
+		UserID:    "user_alice",
+		UserName:  "alice",
+		CreatedAt: at.Format(time.RFC3339),
+	})
+	fake.PutComment(FakeComment{
+		IssueID:  "42-1",
+		Body:     "agent residue",
+		UserName: "zeroth-bot",
+		Bot:      true,
+	})
+	got, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].Author != "alice" || got[0].Bot || !got[0].At.Equal(at) {
+		t.Fatalf("human %+v", got[0])
+	}
+	if !strings.Contains(got[0].Body, "docs/linear-setup.md") {
+		t.Fatalf("body %+v", got[0])
+	}
+	if !got[1].Bot || got[1].Author != "zeroth-bot" {
+		t.Fatalf("bot %+v", got[1])
+	}
+
+	ref, err := p.Comment(t.Context(), "42-1", "posted by the provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := p.ListComments(t.Context(), "42-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range again {
+		if c.ID == ref.ID && strings.Contains(c.Body, "posted by the provider") && !c.Bot {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("posted comment missing: %+v", again)
+	}
+}
+
 func TestSetStateByName(t *testing.T) {
 	t.Parallel()
 	fake := NewFake()

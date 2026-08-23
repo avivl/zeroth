@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,20 +25,50 @@ import (
 )
 
 type stubTracker struct {
-	mu         sync.Mutex
-	ch         chan tracker.AssignmentEvent
-	comments   []string
-	states     []tracker.StateKind
-	artifacts  []tracker.Artifact
-	unassigned []string
-	issue      tracker.Issue
+	mu          sync.Mutex
+	ch          chan tracker.AssignmentEvent
+	comments    []string
+	states      []tracker.StateKind
+	artifacts   []tracker.Artifact
+	unassigned  []string
+	issue       tracker.Issue
+	issues      map[string]tracker.Issue
+	threads     map[string][]tracker.Comment
+	commentErr  error
+	unassignErr error
+	stateErr    error
 }
 
 func newStubTracker(iss tracker.Issue) *stubTracker {
-	return &stubTracker{
-		ch:    make(chan tracker.AssignmentEvent, 8),
-		issue: iss,
+	s := &stubTracker{
+		ch:      make(chan tracker.AssignmentEvent, 8),
+		issue:   iss,
+		issues:  make(map[string]tracker.Issue),
+		threads: make(map[string][]tracker.Comment),
 	}
+	s.putIssueLocked(iss)
+	return s
+}
+
+func (s *stubTracker) putIssueLocked(iss tracker.Issue) {
+	if iss.Key != "" {
+		s.issues[iss.Key] = iss
+	}
+	if iss.ID != "" {
+		s.issues[iss.ID] = iss
+	}
+}
+
+func (s *stubTracker) putIssue(iss tracker.Issue) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.putIssueLocked(iss)
+}
+
+func (s *stubTracker) putThread(key string, comments []tracker.Comment) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.threads[key] = append([]tracker.Comment(nil), comments...)
 }
 
 func (s *stubTracker) Name() string { return "stub" }
@@ -47,37 +78,45 @@ func (s *stubTracker) Capabilities() tracker.Capabilities {
 func (s *stubTracker) GetIssue(_ context.Context, key string) (tracker.Issue, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.issue.Key != key && s.issue.ID != key {
+	iss, ok := s.issues[key]
+	if !ok {
 		return tracker.Issue{}, tracker.ErrNotFound
 	}
-	return s.issue, nil
+	return iss, nil
 }
-func (s *stubTracker) Comment(_ context.Context, _, body string) (tracker.CommentRef, error) {
+func (s *stubTracker) ListComments(_ context.Context, key string) ([]tracker.Comment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.comments = append(s.comments, body)
-	return tracker.CommentRef{ID: "c1"}, nil
-}
-func (s *stubTracker) ListComments(_ context.Context, key string) ([]tracker.IssueComment, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.issue.Key != key && s.issue.ID != key {
+	if _, ok := s.issues[key]; !ok {
 		return nil, tracker.ErrNotFound
 	}
-	out := make([]tracker.IssueComment, 0, len(s.comments))
-	for i, body := range s.comments {
-		out = append(out, tracker.IssueComment{
-			ID:        fmt.Sprintf("c%d", i+1),
-			Body:      body,
-			Author:    "operator",
-			CreatedAt: time.Unix(int64(i+1), 0).UTC(),
-		})
+	return append([]tracker.Comment(nil), s.threads[key]...), nil
+}
+func (s *stubTracker) Comment(_ context.Context, key, body string) (tracker.CommentRef, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.commentErr != nil {
+		return tracker.CommentRef{}, s.commentErr
 	}
-	return out, nil
+	s.comments = append(s.comments, body)
+	id := fmt.Sprintf("c%d", len(s.comments))
+	posted := tracker.Comment{
+		ID:     id,
+		Body:   body,
+		Author: "operator",
+		At:     time.Unix(int64(len(s.comments)), 0).UTC(),
+	}
+	if k := strings.TrimSpace(key); k != "" {
+		s.threads[k] = append(s.threads[k], posted)
+	}
+	return tracker.CommentRef{ID: id}, nil
 }
 func (s *stubTracker) SetState(_ context.Context, _ string, state tracker.State) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stateErr != nil {
+		return s.stateErr
+	}
 	s.states = append(s.states, state.Kind)
 	return nil
 }
@@ -93,6 +132,9 @@ func (s *stubTracker) LinkArtifact(_ context.Context, _ string, a tracker.Artifa
 func (s *stubTracker) Unassign(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.unassignErr != nil {
+		return s.unassignErr
+	}
 	s.unassigned = append(s.unassigned, key)
 	return nil
 }
@@ -208,6 +250,30 @@ func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, cmd sandbox.Cmd) (s
 	if inst.killed {
 		return sandbox.ExecResult{}, sandbox.ErrKilled
 	}
+	dest, blob := "", ""
+	for _, e := range cmd.Env {
+		k, v, _ := strings.Cut(e, "=")
+		switch k {
+		case "DEST":
+			dest = v
+		case "BLOB":
+			blob = v
+		}
+	}
+	if dest != "" && blob != "" {
+		data, err := base64.StdEncoding.DecodeString(blob)
+		if err != nil {
+			return sandbox.ExecResult{ExitCode: 1, Stderr: err.Error()}, nil
+		}
+		rel := strings.TrimPrefix(dest, sandbox.WorkspaceDir+"/")
+		path := filepath.Join(inst.workspace, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return sandbox.ExecResult{ExitCode: 1, Stderr: err.Error()}, nil
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return sandbox.ExecResult{ExitCode: 1, Stderr: err.Error()}, nil
+		}
+	}
 	return sandbox.ExecResult{ExitCode: 0, Stdout: "alive\n"}, nil
 }
 
@@ -262,6 +328,23 @@ func (f *fakeSandbox) anyID() sandbox.ID {
 		return id
 	}
 	return sandbox.ID{}
+}
+
+func (f *fakeSandbox) overlayFiles(rel string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, inst := range f.inst {
+		if inst.workspace == "" {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(inst.workspace, filepath.FromSlash(rel)))
+		if err != nil {
+			continue
+		}
+		out = append(out, string(body))
+	}
+	return out
 }
 
 func (f *fakeSandbox) execCalls() [][]string {

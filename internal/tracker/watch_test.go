@@ -21,11 +21,11 @@ func (s *stubProvider) Capabilities() tracker.Capabilities {
 func (s *stubProvider) GetIssue(context.Context, string) (tracker.Issue, error) {
 	return tracker.Issue{}, tracker.ErrNotFound
 }
+func (s *stubProvider) ListComments(context.Context, string) ([]tracker.Comment, error) {
+	return nil, tracker.ErrNotFound
+}
 func (s *stubProvider) Comment(context.Context, string, string) (tracker.CommentRef, error) {
 	return tracker.CommentRef{}, tracker.ErrInvalid
-}
-func (s *stubProvider) ListComments(context.Context, string) ([]tracker.IssueComment, error) {
-	return nil, tracker.ErrNotFound
 }
 func (s *stubProvider) SetState(context.Context, string, tracker.State) error {
 	return tracker.ErrInvalid

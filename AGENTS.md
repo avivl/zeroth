@@ -118,7 +118,7 @@ Do not introduce a second logging, CLI, config, or resilience approach.
 
 - **Zap** (`internal/logging`) is the structured logger for `zerothd` and `zeroth`. Level and encoder are configurable (`console` for local dev, `json` for CI and production). There is no package-level global logger.
 - **Cobra** owns both command trees. `cmd/zeroth` has `version`, `run`, `attach`, `bg`, `runs`, `verify`, `reject`, and `retract`. `cmd/zerothd` is a Cobra root whose flags are the daemon's startup surface.
-- **Viper** loads `zerothd` startup config with precedence **flags > env (`ZEROTH_*`) > config file > defaults**: bind address, DB path, docker socket, log level, log encoding, signing-key path.
+- **Viper** loads `zerothd` startup config with precedence **flags > env (`ZEROTH_*`) > config file > defaults**: bind address, DB path, docker socket, log level, log encoding, signing-key path, reviewer model, reviewer base URL, reviewer API key.
 - **Failsafe-go** (`internal/resilience`) wraps calls that leave the process (retry + timeout, circuit breaker when the same remote is called repeatedly). The worked example is `resilience.DialUnix`, used by `zerothd` to probe the Docker socket. Follow [docs/design/resilience.md](docs/design/resilience.md) in sandbox, harness, and tracker drivers. Do not invent a parallel retry loop.
 
 `internal/policy` stays I/O-free (ADR-Z-0001). It must not import Zap, `internal/logging`, Viper, Cobra, or Failsafe-go. If a decision ever needs a log line, the **caller** injects a logger (or logs after the decision returns). A global Zap logger inside the kernel would be a defect.

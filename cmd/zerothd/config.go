@@ -12,11 +12,13 @@ import (
 )
 
 const (
-	defaultAddr         = "127.0.0.1:8420"
-	defaultDBPath       = "zeroth.db"
-	defaultDockerSocket = "/var/run/docker.sock"
-	defaultLogLevel     = "info"
-	defaultLogEncoding  = "console"
+	defaultAddr            = "127.0.0.1:8420"
+	defaultDBPath          = "zeroth.db"
+	defaultDockerSocket    = "/var/run/docker.sock"
+	defaultLogLevel        = "info"
+	defaultLogEncoding     = "console"
+	defaultReviewerModel   = "gpt-4o"
+	defaultReviewerBaseURL = "https://api.openai.com/v1"
 )
 
 // Config is zerothd startup configuration. Precedence is flags, then env,
@@ -40,6 +42,15 @@ type Config struct {
 	// LinearAuthStyle is "personal" (raw API key, default) or "oauth"
 	// (Bearer actor token). See linear.AuthStyle.
 	LinearAuthStyle string
+
+	// ReviewerModel is the independent cross-exam model. It must
+	// differ from the producer (Claude Code). Default gpt-4o.
+	ReviewerModel string
+	// ReviewerBaseURL is the OpenAI-compatible Chat Completions root.
+	ReviewerBaseURL string
+	// ReviewerAPIKey is the reviewer credential. OPENAI_API_KEY is
+	// accepted as a vendor-standard alias when this is empty.
+	ReviewerAPIKey string
 }
 
 func registerFlags(cmd *cobra.Command) {
@@ -59,6 +70,9 @@ func registerFlags(cmd *cobra.Command) {
 	f.String("linear-poll-interval", "15s", "assignment poll interval (ZEROTH_LINEAR_POLL_INTERVAL)")
 	f.String("linear-webhook-secret", "", "opt-in Linear webhook HMAC secret (ZEROTH_LINEAR_WEBHOOK_SECRET)")
 	f.String("linear-auth-style", "personal", "Linear auth: personal (API key) or oauth (Bearer actor token) (ZEROTH_LINEAR_AUTH_STYLE)")
+	f.String("reviewer-model", defaultReviewerModel, "independent cross-exam model, a different vendor than the producer (ZEROTH_REVIEWER_MODEL)")
+	f.String("reviewer-base-url", defaultReviewerBaseURL, "OpenAI-compatible Chat Completions root (ZEROTH_REVIEWER_BASE_URL)")
+	f.String("reviewer-api-key", "", "reviewer API key; OPENAI_API_KEY is also accepted (ZEROTH_REVIEWER_API_KEY)")
 }
 
 func setDefaults(v *viper.Viper) {
@@ -76,6 +90,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("linear-poll-interval", "15s")
 	v.SetDefault("linear-webhook-secret", "")
 	v.SetDefault("linear-auth-style", "personal")
+	v.SetDefault("reviewer-model", defaultReviewerModel)
+	v.SetDefault("reviewer-base-url", defaultReviewerBaseURL)
+	v.SetDefault("reviewer-api-key", "")
 }
 
 func loadConfig(cmd *cobra.Command, v *viper.Viper) error {
@@ -109,7 +126,7 @@ func loadConfig(cmd *cobra.Command, v *viper.Viper) error {
 		"addr", "db-path", "docker-socket", "log-level", "log-encoding", "signing-key",
 		"linear-api-key", "linear-endpoint", "linear-agent-user", "linear-team-id",
 		"linear-project-id", "linear-poll-interval", "linear-webhook-secret",
-		"linear-auth-style",
+		"linear-auth-style", "reviewer-model", "reviewer-base-url", "reviewer-api-key",
 	} {
 		if !cmd.Flags().Changed(name) {
 			continue
@@ -149,5 +166,8 @@ func configFrom(v *viper.Viper) Config {
 		LinearPollInterval:  poll,
 		LinearWebhookSecret: strings.TrimSpace(v.GetString("linear-webhook-secret")),
 		LinearAuthStyle:     strings.TrimSpace(v.GetString("linear-auth-style")),
+		ReviewerModel:       strings.TrimSpace(v.GetString("reviewer-model")),
+		ReviewerBaseURL:     strings.TrimSpace(v.GetString("reviewer-base-url")),
+		ReviewerAPIKey:      strings.TrimSpace(v.GetString("reviewer-api-key")),
 	}
 }

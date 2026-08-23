@@ -88,6 +88,12 @@ func (h *stubHarness) prompts() []string {
 	return out
 }
 
+func (h *stubHarness) lastPrompt() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastSpec.Prompt
+}
+
 func waitHarnessStarts(t *testing.T, h *stubHarness, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
 	"testing"
 )
@@ -61,6 +62,16 @@ func TestRetractRequiresReason(t *testing.T) {
 	t.Parallel()
 	cmd := newRoot()
 	cmd.SetArgs([]string{"retract", "s_1"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestRetractWhitespaceReason(t *testing.T) {
+	t.Parallel()
+	cmd := newRoot()
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"retract", "s_1", "--reason", "   "})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error")
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +106,55 @@ func (p *Provider) GetIssue(ctx context.Context, key string) (tracker.Issue, err
 	return data.Issue.toIssue(), nil
 }
 
+// ListComments implements [tracker.Provider].
+func (p *Provider) ListComments(ctx context.Context, key string) ([]tracker.Comment, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil, fmt.Errorf("tracker linear list comments: %w", tracker.ErrInvalid)
+	}
+	issue, err := p.GetIssue(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	var out []tracker.Comment
+	var after *string
+	for {
+		vars := map[string]any{"id": issue.ID}
+		if after != nil {
+			vars["after"] = *after
+		}
+		var data struct {
+			Issue *struct {
+				Comments *struct {
+					PageInfo struct {
+						HasNextPage bool   `json:"hasNextPage"`
+						EndCursor   string `json:"endCursor"`
+					} `json:"pageInfo"`
+					Nodes []commentNode `json:"nodes"`
+				} `json:"comments"`
+			} `json:"issue"`
+		}
+		if err := p.query(ctx, "IssueComments", qIssueComments, vars, &data); err != nil {
+			return nil, fmt.Errorf("tracker linear list comments: %w", err)
+		}
+		if data.Issue == nil {
+			return nil, fmt.Errorf("tracker linear list comments %s: %w", key, tracker.ErrNotFound)
+		}
+		if data.Issue.Comments == nil {
+			break
+		}
+		for _, n := range data.Issue.Comments.Nodes {
+			out = append(out, n.toComment())
+		}
+		if !data.Issue.Comments.PageInfo.HasNextPage || data.Issue.Comments.PageInfo.EndCursor == "" {
+			break
+		}
+		c := data.Issue.Comments.PageInfo.EndCursor
+		after = &c
+	}
+	return out, nil
+}
+
 // Comment implements [tracker.Provider].
 func (p *Provider) Comment(ctx context.Context, key, body string) (tracker.CommentRef, error) {
 	key = strings.TrimSpace(key)
@@ -139,50 +187,6 @@ func (p *Provider) Comment(ctx context.Context, key, body string) (tracker.Comme
 		ID:  data.CommentCreate.Comment.ID,
 		URL: data.CommentCreate.Comment.URL,
 	}, nil
-}
-
-// ListComments implements [tracker.Provider].
-func (p *Provider) ListComments(ctx context.Context, key string) ([]tracker.IssueComment, error) {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil, fmt.Errorf("tracker linear list comments: %w", tracker.ErrInvalid)
-	}
-	issue, err := p.GetIssue(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	var data struct {
-		Issue *struct {
-			Comments struct {
-				Nodes []commentNode `json:"nodes"`
-			} `json:"comments"`
-		} `json:"issue"`
-	}
-	if err := p.query(ctx, "IssueComments", qIssueComments, map[string]any{"id": issue.ID}, &data); err != nil {
-		return nil, fmt.Errorf("tracker linear list comments: %w", err)
-	}
-	if data.Issue == nil {
-		return nil, fmt.Errorf("tracker linear list comments %s: %w", key, tracker.ErrNotFound)
-	}
-	out := make([]tracker.IssueComment, 0, len(data.Issue.Comments.Nodes))
-	for _, n := range data.Issue.Comments.Nodes {
-		c := tracker.IssueComment{
-			ID:        n.ID,
-			Body:      n.Body,
-			CreatedAt: n.CreatedAt,
-		}
-		if n.User != nil {
-			c.Author = n.User.Name
-		}
-		out = append(out, c)
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].ID < out[j].ID
-		}
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
-	})
-	return out, nil
 }
 
 // SetState implements [tracker.Provider].
@@ -358,6 +362,38 @@ type issueNode struct {
 	} `json:"team"`
 }
 
+type commentNode struct {
+	ID        string `json:"id"`
+	Body      string `json:"body"`
+	URL       string `json:"url"`
+	CreatedAt string `json:"createdAt"`
+	User      *struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"user"`
+	BotActor *struct {
+		Name string `json:"name"`
+	} `json:"botActor"`
+}
+
+func (n commentNode) toComment() tracker.Comment {
+	c := tracker.Comment{
+		ID:   n.ID,
+		Body: n.Body,
+		URL:  n.URL,
+		Bot:  n.User == nil && n.BotActor != nil,
+	}
+	if n.User != nil {
+		c.Author = n.User.Name
+	} else if n.BotActor != nil {
+		c.Author = n.BotActor.Name
+	}
+	if t, err := time.Parse(time.RFC3339, strings.TrimSpace(n.CreatedAt)); err == nil {
+		c.At = t.UTC()
+	}
+	return c
+}
+
 func (n issueNode) toIssue() tracker.Issue {
 	iss := tracker.Issue{
 		Key:         n.Identifier,
@@ -393,15 +429,6 @@ type workflowState struct {
 	Type string `json:"type"`
 }
 
-type commentNode struct {
-	ID        string    `json:"id"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"createdAt"`
-	User      *struct {
-		Name string `json:"name"`
-	} `json:"user"`
-}
-
 const (
 	qIssue = `query Issue($id: String!) {
   issue(id: $id) {
@@ -413,16 +440,21 @@ const (
     team { id }
   }
 }`
-	qCommentCreate = `mutation CommentCreate($input: CommentCreateInput!) {
-  commentCreate(input: $input) { success comment { id url } }
-}`
-	qIssueComments = `query IssueComments($id: String!) {
+	qIssueComments = `query IssueComments($id: String!, $after: String) {
   issue(id: $id) {
     id
-    comments(first: 100) {
-      nodes { id body createdAt user { name } }
+    comments(first: 50, after: $after, orderBy: createdAt) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id body url createdAt
+        user { id name }
+        botActor { name }
+      }
     }
   }
+}`
+	qCommentCreate = `mutation CommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) { success comment { id url } }
 }`
 	qIssueUpdate = `mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
   issueUpdate(id: $id, input: $input) { success issue { id identifier } }

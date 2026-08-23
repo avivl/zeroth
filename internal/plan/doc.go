@@ -2,7 +2,8 @@
 //
 // Consequential actions are proposed as a plan before they are applied.
 // Cross-exam is a structured challenge of the draft by a reviewer that
-// does not share the producer's context (Z1-019). Approve is the human
+// does not share the producer's context (Z1-019). The stage-1 reviewer
+// is a different vendor than the producer (ADR-Z-0011). Approve is the human
 // gate; apply is the only path that mutates the world. Autonomy is earned
 // tier by tier: it does not skip this package.
 //

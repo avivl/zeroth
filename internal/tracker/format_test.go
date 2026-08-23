@@ -9,7 +9,11 @@ import (
 
 func TestFormatPlanCommentCollapsesDiff(t *testing.T) {
 	t.Parallel()
-	body := tracker.FormatPlanComment("abc123", "touch README", "```diff\n-a\n+b\n```")
+	body := tracker.FormatPlanComment(tracker.PlanComment{
+		Hash:    "abc123",
+		Summary: "touch README",
+		Body:    "```diff\n-a\n+b\n```",
+	})
 	if !strings.Contains(body, "### Zeroth plan") {
 		t.Fatalf("missing heading: %s", body)
 	}
@@ -27,6 +31,37 @@ func TestFormatPlanCommentCollapsesDiff(t *testing.T) {
 	}
 	if strings.Contains(body, "```\n```diff") {
 		t.Fatalf("backtick fence around a diff breaks Linear: %s", body)
+	}
+}
+
+func TestFormatPlanCommentShowsExamOutsideDetails(t *testing.T) {
+	t.Parallel()
+	body := tracker.FormatPlanComment(tracker.PlanComment{
+		Hash:    "abc123",
+		Summary: "touch README",
+		Body:    "```diff\n-a\n+b\n```",
+		Exam: tracker.PlanExam{
+			Verdict: "fail",
+			Model:   "gpt-4o",
+			Notes:   "scope violation: .ssh/authorized_keys",
+		},
+	})
+	visible, _, ok := strings.Cut(body, "<details>")
+	if !ok {
+		t.Fatalf("missing details: %s", body)
+	}
+	for _, want := range []string{
+		"**Cross-exam: fail**",
+		"`gpt-4o`",
+		"Reviewer flagged a concern",
+		"scope violation: .ssh/authorized_keys",
+	} {
+		if !strings.Contains(visible, want) {
+			t.Fatalf("visible prefix missing %q:\n%s", want, visible)
+		}
+	}
+	if strings.Contains(visible, "```diff") {
+		t.Fatalf("diff leaked outside details: %s", visible)
 	}
 }
 
@@ -111,6 +146,22 @@ func TestFormatRetractCommentWithoutPR(t *testing.T) {
 			t.Fatalf("missing %q in %s", want, body)
 		}
 	}
+	fallback := tracker.FormatRetractComment(tracker.Retract{Reason: "  "})
+	if !strings.Contains(fallback, "Prior run output has been retracted") {
+		t.Fatalf("missing fallback: %s", fallback)
+	}
+	if !strings.Contains(fallback, "none opened") {
+		t.Fatalf("missing none: %s", fallback)
+	}
+	open := tracker.FormatRetractComment(tracker.Retract{
+		PullRequest: "https://github.com/avivl/zeroth/pull/1",
+	})
+	if strings.Contains(open, "(closed)") {
+		t.Fatalf("open pr should not say closed: %s", open)
+	}
+	if !strings.Contains(open, "[open](https://github.com/avivl/zeroth/pull/1)") {
+		t.Fatalf("open pr link: %s", open)
+	}
 }
 
 func TestFormatFailedComment(t *testing.T) {
@@ -141,5 +192,64 @@ func TestFormatRejectedComment(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("missing %q in %s", want, body)
 		}
+	}
+}
+
+func TestIsSystemComment(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		body string
+		want bool
+	}{
+		{tracker.FormatStartedComment("s_1", "42-43"), true},
+		{tracker.FormatPlanComment(tracker.PlanComment{Hash: "h", Summary: "touch README", Body: "diff"}), true},
+		{tracker.FormatCompletion(tracker.Completion{RunID: "s_1"}), true},
+		{tracker.FormatCancelComment("s_1"), true},
+		{tracker.FormatFailedComment("s_1", "no plan"), true},
+		{tracker.FormatRetractComment(tracker.Retract{RunID: "s_1", Reason: "bad pr"}), true},
+		{tracker.FormatRejectedComment("s_1", "p_1", "that heading doesn't exist, use the real one"), false},
+		{"The new doc should live at docs/linear-setup.md, not docs/operator/.", false},
+		{"### not zeroth", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := tracker.IsSystemComment(tc.body); got != tc.want {
+			t.Fatalf("IsSystemComment(%q) = %v, want %v", tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestHumanCommentsDropsSystemAndBots(t *testing.T) {
+	t.Parallel()
+	in := []tracker.Comment{
+		{ID: "1", Body: "put it at docs/linear-setup.md", Author: "alice"},
+		{ID: "2", Body: tracker.FormatStartedComment("s_1", "42-43"), Author: "alice"},
+		{ID: "3", Body: "bot chatter", Author: "zeroth", Bot: true},
+		{ID: "4", Body: "   ", Author: "alice"},
+		{ID: "5", Body: "existing docs/ folders are document types", Author: "alice"},
+	}
+	got := tracker.HumanComments(in)
+	if len(got) != 2 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].ID != "1" || got[1].ID != "5" {
+		t.Fatalf("order %+v", got)
+	}
+}
+
+func TestHumanCommentsKeepsPlanRejection(t *testing.T) {
+	t.Parallel()
+	correction := "that heading doesn't exist, use the real one"
+	in := []tracker.Comment{
+		{ID: "1", Body: tracker.FormatStartedComment("s_1", "42-54"), Author: "zeroth", Bot: true},
+		{ID: "2", Body: tracker.FormatRejectedComment("s_1", "p_1", correction), Author: "zeroth", Bot: true},
+		{ID: "3", Body: tracker.FormatPlanComment(tracker.PlanComment{Summary: "docs"}), Author: "zeroth"},
+	}
+	got := tracker.HumanComments(in)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	if got[0].ID != "2" || !strings.Contains(got[0].Body, correction) {
+		t.Fatalf("rejection dropped: %+v", got)
 	}
 }

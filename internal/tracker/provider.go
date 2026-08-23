@@ -22,16 +22,19 @@ type Provider interface {
 	// keys are ErrNotFound. Empty key is ErrInvalid.
 	GetIssue(ctx context.Context, key string) (Issue, error)
 
+	// ListComments returns the issue's comment thread, oldest first.
+	// Unknown keys are ErrNotFound. Empty key is ErrInvalid. An issue
+	// with no comments returns an empty slice, not an error. Stage-1
+	// assign-to-Zeroth reads this before drafting a plan so a settled
+	// operator decision, including a reject-with-comment, is in the
+	// next run's context rather than only on the previous plan row.
+	ListComments(ctx context.Context, key string) ([]Comment, error)
+
 	// Comment posts markdown body on the issue. Empty key or body is
 	// ErrInvalid. The body is what operators read in the tracker; plan
-	// diffs belong in collapsed details (FormatPlanComment).
+	// diffs belong in collapsed details. The cross-exam verdict stays
+	// visible (FormatPlanComment).
 	Comment(ctx context.Context, key, body string) (CommentRef, error)
-
-	// ListComments returns the issue's comment thread, oldest first.
-	// Empty key is ErrInvalid. Unknown keys are ErrNotFound. A new run
-	// reads this thread so an operator rejection is part of the next
-	// plan-drafting prompt, not only a row on the previous plan.
-	ListComments(ctx context.Context, key string) ([]IssueComment, error)
 
 	// SetState moves the issue to state. Empty key or Kind is ErrInvalid.
 	SetState(ctx context.Context, key string, state State) error

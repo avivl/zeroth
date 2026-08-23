@@ -5,31 +5,83 @@ import (
 	"strings"
 )
 
+// PlanExam is the cross-exam line operators read before opening the
+// collapsed plan body. Empty Verdict omits the line.
+type PlanExam struct {
+	Verdict string
+	Model   string
+	Notes   string
+}
+
+// PlanComment is the tracker body for a drafted plan. The verdict stays
+// visible. Diffs collapse.
+type PlanComment struct {
+	Hash    string
+	Summary string
+	Body    string
+	Exam    PlanExam
+}
+
 // FormatPlanComment renders a plan for a tracker comment. The full plan
 // body is collapsed so Linear (and a later GitHub Issues view) stays
-// readable; the summary stays visible.
-func FormatPlanComment(hash, summary, rendered string) string {
+// readable. The summary and cross-exam verdict stay visible: a fail
+// must not be buried in details.
+func FormatPlanComment(c PlanComment) string {
 	var b strings.Builder
 	b.WriteString("### Zeroth plan\n\n")
-	if s := strings.TrimSpace(summary); s != "" {
+	if s := strings.TrimSpace(c.Summary); s != "" {
 		b.WriteString(s)
 		b.WriteString("\n\n")
 	}
+	writeExam(&b, c.Exam)
 	b.WriteString("<details>\n<summary>Plan")
-	if h := strings.TrimSpace(hash); h != "" {
+	if h := strings.TrimSpace(c.Hash); h != "" {
 		fmt.Fprintf(&b, " <code>%s</code>", h)
 	}
 	b.WriteString("</summary>\n\n")
-	open, close := codeFence(rendered)
+	open, close := codeFence(c.Body)
 	b.WriteString(open)
 	b.WriteByte('\n')
-	b.WriteString(rendered)
-	if rendered != "" && !strings.HasSuffix(rendered, "\n") {
+	b.WriteString(c.Body)
+	if c.Body != "" && !strings.HasSuffix(c.Body, "\n") {
 		b.WriteByte('\n')
 	}
 	b.WriteString(close)
 	b.WriteString("\n\n</details>\n")
 	return b.String()
+}
+
+func writeExam(b *strings.Builder, exam PlanExam) {
+	verdict := strings.TrimSpace(exam.Verdict)
+	if verdict == "" {
+		return
+	}
+	fmt.Fprintf(b, "**Cross-exam: %s**", verdict)
+	if m := strings.TrimSpace(exam.Model); m != "" {
+		fmt.Fprintf(b, " (`%s`)", m)
+	}
+	b.WriteByte('\n')
+	if flagsConcern(verdict) {
+		b.WriteString("\nReviewer flagged a concern. Read this before approving.\n")
+	}
+	if notes := strings.TrimSpace(exam.Notes); notes != "" {
+		b.WriteByte('\n')
+		for _, line := range strings.Split(notes, "\n") {
+			b.WriteString("> ")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+	b.WriteByte('\n')
+}
+
+func flagsConcern(verdict string) bool {
+	switch strings.ToLower(strings.TrimSpace(verdict)) {
+	case "fail", "pass_with_notes":
+		return true
+	default:
+		return false
+	}
 }
 
 // FormatStartedComment is posted when assign-to-Zeroth opens a run.
@@ -157,6 +209,44 @@ func display(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// IsSystemComment reports whether body is a Zeroth-authored tracker
+// comment (started, plan, completed, cancelled, failed, retracted).
+// Those rows are the agent's own residue and must not be ingested as
+// operator memory or treated as a settled human decision.
+//
+// Plan-rejected comments are the exception: they carry the operator's
+// correction, so the next run must read them as human feedback.
+func IsSystemComment(body string) bool {
+	body = strings.TrimSpace(body)
+	if strings.HasPrefix(body, "### Zeroth plan rejected") {
+		return false
+	}
+	return strings.HasPrefix(body, "### Zeroth ")
+}
+
+// HumanComments returns the operator-authored subset of a thread,
+// oldest first. System comments, bot comments, and empty bodies
+// are dropped. A reject-with-comment is kept even when the vendor
+// marks the poster as a bot, because the body is the operator's
+// correction rather than agent residue.
+func HumanComments(comments []Comment) []Comment {
+	out := make([]Comment, 0, len(comments))
+	for _, c := range comments {
+		if strings.TrimSpace(c.Body) == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(c.Body), "### Zeroth plan rejected") {
+			out = append(out, c)
+			continue
+		}
+		if c.Bot || IsSystemComment(c.Body) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func displayLink(v string) string {

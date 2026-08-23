@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -474,6 +475,22 @@ func TestClosePullRequestTreatsGhAlreadyClosedAsSuccess(t *testing.T) {
 	}
 }
 
+func TestClosePullRequestAlreadyClosedMessage(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			if strings.Contains(strings.Join(args, " "), "pr view") {
+				return `{"state":"OPEN"}`, nil
+			}
+			return "", errors.New("GraphQL: already closed")
+		},
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/1", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClosePullRequestTreatsGhAlreadyMergedAsConflict(t *testing.T) {
 	t.Parallel()
 	p := &gitPublisher{
@@ -489,6 +506,55 @@ func TestClosePullRequestTreatsGhAlreadyMergedAsConflict(t *testing.T) {
 	err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/3", "nope")
 	if !errors.Is(err, errPRMerged) {
 		t.Fatalf("err %v, want errPRMerged", err)
+	}
+}
+
+func TestClosePullRequestGenericError(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			if strings.Contains(strings.Join(args, " "), "pr view") {
+				return `{"state":"OPEN"}`, nil
+			}
+			return "", errors.New("rate limited")
+		},
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/1", "x"); err == nil {
+		t.Fatal("expected close error")
+	}
+}
+
+func TestRetractHelpers(t *testing.T) {
+	t.Parallel()
+	if got := retractPostcondition(false, ""); got != "retracted" {
+		t.Fatalf("empty pr: %s", got)
+	}
+	if got := retractPostcondition(true, "https://example.com/pr/1"); got != "pr_closed" {
+		t.Fatalf("closed: %s", got)
+	}
+	if got := retractPostcondition(false, "https://example.com/pr/1"); got != "retracted" {
+		t.Fatalf("open pr: %s", got)
+	}
+	if got := firstNonEmpty("", "  ", "s_1"); got != "s_1" {
+		t.Fatalf("firstNonEmpty: %s", got)
+	}
+	if got := firstNonEmpty("", " "); got != "" {
+		t.Fatalf("all empty: %q", got)
+	}
+	if got := retractPRComment("", "bad patch"); strings.Contains(got, "run `") {
+		t.Fatalf("empty run id should omit run clause: %s", got)
+	}
+	if got := retractPRComment("s_9", "bad patch"); !strings.Contains(got, "run `s_9`") {
+		t.Fatalf("comment: %s", got)
+	}
+	status, code, _ := statusForRetractError(errPRMerged)
+	if status != http.StatusConflict || code != "conflict" {
+		t.Fatalf("merged %d %s", status, code)
+	}
+	status, _, _ = statusForRetractError(errors.New("pull request is already merged"))
+	if status != http.StatusConflict {
+		t.Fatalf("merged string %d", status)
 	}
 }
 

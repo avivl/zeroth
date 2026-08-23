@@ -283,3 +283,113 @@ func TestCrossExamPassRateIsQueryable(t *testing.T) {
 		t.Fatalf("stats %+v", stats)
 	}
 }
+
+func TestChatReviewerExamineDraftSurfacesRealVerdict(t *testing.T) {
+	t.Parallel()
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		reply := "VERDICT: pass\nNOTES:\npaths match the issue"
+		if strings.Contains(string(raw), ".ssh/") {
+			reply = "VERDICT: fail\nNOTES:\nscope violation: .ssh/authorized_keys"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{"message": map[string]string{"role": "assistant", "content": reply}},
+			},
+		})
+	}))
+	t.Cleanup(hs.Close)
+	rev, err := server.NewChatReviewer(server.ChatReviewerConfig{
+		Model:      "gpt-4o",
+		BaseURL:    hs.URL,
+		APIKey:     "test-reviewer-key",
+		HTTPClient: hs.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv, err := server.New(server.Config{
+		Store:                st,
+		Reviewer:             rev,
+		DefaultReviewerModel: "gpt-4o",
+		TokenInterval:        time.Hour,
+		TokenCount:           1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	api := httptest.NewServer(srv.Handler())
+	t.Cleanup(api.Close)
+
+	agentRes, err := http.Get(api.URL + "/agents/" + server.DefaultAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agentRes.Body.Close()
+	var agent gen.Agent
+	if err := json.NewDecoder(agentRes.Body).Decode(&agent); err != nil {
+		t.Fatal(err)
+	}
+	if agent.Reviewer == nil || agent.Reviewer.Model == nil || *agent.Reviewer.Model != "gpt-4o" {
+		t.Fatalf("default agent reviewer %+v", agent.Reviewer)
+	}
+
+	e := &examEnv{t: t, st: st, srv: srv, hs: api}
+	run := createRun(t, api.URL, "Fix the docs typo.\n\nAllowed-paths: docs/")
+	pid := e.seedPlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+		{Type: "create", Path: ".ssh/authorized_keys", Diff: "ssh-ed25519 AAAA sneak"},
+	}, map[string]string{"docs/design/plan.md": "pre"})
+
+	out, err := srv.ExamineDraft(t.Context(), pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Exam.Verdict != plan.VerdictFail {
+		t.Fatalf("verdict %s notes %q", out.Exam.Verdict, out.Exam.Reasoning)
+	}
+	if out.Exam.ReviewerModel != "gpt-4o" {
+		t.Fatalf("reviewer model %q", out.Exam.ReviewerModel)
+	}
+	if !strings.Contains(out.Exam.Reasoning, ".ssh/authorized_keys") {
+		t.Fatalf("notes %q", out.Exam.Reasoning)
+	}
+	if out.Exam.Reasoning == server.PassThroughNotes {
+		t.Fatal("placeholder notes from a configured reviewer")
+	}
+
+	res, err := http.Get(api.URL + "/plans/" + pid.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var got gen.Plan
+	if err := json.NewDecoder(res.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.CrossExam == nil || got.CrossExam.Verdict != "fail" {
+		t.Fatalf("plan cross_exam %+v", got.CrossExam)
+	}
+
+	inbox, err := http.Get(api.URL + "/approvals?status=pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inbox.Body.Close()
+	var approvals gen.ApprovalList
+	if err := json.NewDecoder(inbox.Body).Decode(&approvals); err != nil {
+		t.Fatal(err)
+	}
+	if len(approvals.Items) != 1 || approvals.Items[0].Summary == nil {
+		t.Fatalf("inbox %+v", approvals.Items)
+	}
+	if !strings.HasPrefix(*approvals.Items[0].Summary, "fail:") {
+		t.Fatalf("approval summary %q should lead with the verdict", *approvals.Items[0].Summary)
+	}
+}

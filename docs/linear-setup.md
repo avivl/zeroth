@@ -60,6 +60,9 @@ Two more flags matter for the walkthrough below, unrelated to Linear:
 |---|---|---|---|
 | `--addr` | `ZEROTH_ADDR` | `127.0.0.1:8420` | Bind address for `zerothd`'s local control plane (the HTTP/WebSocket API the CLI and web UI talk to). |
 | `--signing-key` | `ZEROTH_SIGNING_KEY` | (none) | Path to the secp256k1 signing key file. Required for the audit chain (42-27) — every consequential action is signed. |
+| `--reviewer-model` | `ZEROTH_REVIEWER_MODEL` | `gpt-4o` | Independent cross-exam model. Must differ from the producer (Claude Code). See [ADR-Z-0011](../adr/Z-0011-independent-cross-exam-vendor.md). |
+| `--reviewer-base-url` | `ZEROTH_REVIEWER_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible Chat Completions root. |
+| `--reviewer-api-key` | `ZEROTH_REVIEWER_API_KEY` | (none) | Reviewer API key. `OPENAI_API_KEY` is also accepted. Without a key, every plan gets the pass-through placeholder instead of a real second-model review. |
 
 ## Running it end to end
 
@@ -76,6 +79,7 @@ export ZEROTH_LINEAR_AGENT_USER="<Zeroth's actor user id>"
 export ZEROTH_LINEAR_TEAM_ID="<your team id>"       # optional but recommended
 export ZEROTH_LINEAR_PROJECT_ID="<your project id>" # optional but recommended
 export ZEROTH_SIGNING_KEY="$(pwd)/zeroth-signing.key"  # zerothd creates this on first run if absent
+export ZEROTH_REVIEWER_API_KEY="<openai api key>"      # or OPENAI_API_KEY; without this, cross-exam is a placeholder
 
 task up      # starts zerothd on 127.0.0.1:8420 with SQLite + the Docker sandbox driver
 ```
@@ -94,22 +98,25 @@ Now, in Linear:
 2. Assign it to the Zeroth actor, or keep yourself as assignee and
    delegate it to Zeroth (Linear's native agent-delegation, the same
    pattern this repo uses for Cursor).
-3. Within one poll interval (15s by default), Zeroth reads the issue,
-   its comments, and project memory, spawns a sandbox, copies this git
-   checkout into the overlay, and posts a comment on the issue with its
-   plan. `zerothd` uses the git toplevel of the directory it was started
-   from as that checkout (the `cd zeroth` above). The Claude Code
-   harness then runs as a **host subprocess of `zerothd`**, cwd the
-   overlay copy, not inside the container
-   ([ADR-Z-0010](adr/Z-0010-harness-host-subprocess.md)). Your working
-   tree is not the agent's cwd. The process can still see host paths
-   outside the overlay. A modify whose target is missing from the
-   overlay fails with a workspace-observe error in the daemon logs and
-   on the issue, not a generic "no precondition observed" message.
+3. Within one poll interval (15s by default), Zeroth reads the issue
+   title, description, and comment thread, plus accumulated project
+   memory, spawns a sandbox, copies this git checkout into the
+   overlay, and posts a comment on the issue with its plan. `zerothd`
+   uses the git toplevel of the directory it was started from as that
+   checkout (the `cd zeroth` above). The Claude Code harness then runs
+   as a **host subprocess of `zerothd`**, cwd the overlay copy, not
+   inside the container ([ADR-Z-0010](adr/Z-0010-harness-host-subprocess.md)).
+   Your working tree is not the agent's cwd. The process can still see
+   host paths outside the overlay. A modify whose target is missing
+   from the overlay fails with a workspace-observe error in the daemon
+   logs and on the issue, not a generic "no precondition observed"
+   message.
 4. Open `http://localhost:5173` and go to **Approvals**. The pending plan
    appears there: a change-plan card with create/modify/destroy/memory
    rows, each expandable to a diff, with leases and expiries shown per
-   resource, and the cross-exam verdict inline.
+   resource, and the cross-exam verdict inline. A fail or pass_with_notes
+   is an alert above Approve, not a collapsed footnote. The Linear plan
+   comment shows the same verdict outside the collapsed plan body.
 5. If the plan is wrong, do not un-assign. Type the correction into
    **Reject with comment** (or run `zeroth reject <plan-id> --comment
    "..."`). Zeroth posts that text on the issue, appends it to the run
