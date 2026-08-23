@@ -2,18 +2,38 @@
 # Coveralls account, no upload token, no third-party retention. octocov runs
 # inside GitHub Actions and commits its own badge.
 #
-# Threshold is the diff versus main, not an absolute floor. An absolute number
-# is premature (packages are at very different maturity) and would compete with
-# internal/policy's own 100% branch-coverage bar.
+# Two gates, and they do different jobs (42-69). diff catches erosion by a
+# single PR; the floor catches drift accumulated across many. The floor sits
+# just under where we actually are (68.21% at the time of writing) so that one
+# tolerated dip cannot trip it, and it only ever moves up, as each package's
+# tests land.
+#
+# The floor is raised deliberately, in its own PR, never as a side effect of one
+# that happens to add tests. Target is 85%; the steps between here and there are
+# tracked on 42-69.
+#
+# The diff term is not >= 0%. Coverage in internal/server moves +/-0.2% between
+# identical runs, because background goroutines get scheduled differently, so a
+# zero-tolerance rule fails unrelated PRs at random (see the note on the go job
+# in ci.yml). -0.3% is roughly three times the jitter observed repo-wide, which
+# is loose enough not to fire on noise and tight enough that real erosion still
+# hits the floor.
+#
+# exclude drops oapi-codegen output. It is 1002 statements of DO NOT EDIT code
+# at 0%, about a tenth of the repo, and no one is going to hand-write tests for
+# a generated client. Leaving it in would mean hand-written code had to reach
+# ~94% for the project to read 85%. Regenerate with `task generate`.
 #
 # report.datastores is required: octocov will not store a report if report: has
 # only an if: condition. The artifact is what the next PR diffs against.
 coverage:
   paths:
     - coverage.out
+  exclude:
+    - 'pkg/api/gen/go/**/*.go'
   badge:
     path: docs/coverage.svg
-  acceptable: diff >= 0%
+  acceptable: current >= 67.5% && diff >= -0.3%
 codeToTestRatio:
   code:
     - '**/*.go'
