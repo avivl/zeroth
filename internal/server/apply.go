@@ -345,7 +345,7 @@ func (l *applyLeaser) Acquire(ctx context.Context, p plan.Plan) ([]policy.Lease,
 	for _, row := range p.Rows {
 		id := string(row.Lease)
 		if id == "" {
-			return nil, fmt.Errorf("server apply lease: %w", plan.ErrInvalid)
+			return nil, l.failAcquire(ctx, out, plan.ErrInvalid)
 		}
 		if _, ok := seen[id]; ok {
 			continue
@@ -353,7 +353,7 @@ func (l *applyLeaser) Acquire(ctx context.Context, p plan.Plan) ([]policy.Lease,
 		seen[id] = struct{}{}
 		lid, err := store.ParseLeaseID(id)
 		if err != nil {
-			return nil, fmt.Errorf("server apply lease: %w", err)
+			return nil, l.failAcquire(ctx, out, err)
 		}
 		if err := l.store.CreateLease(ctx, store.Lease{
 			ID:        lid,
@@ -363,14 +363,53 @@ func (l *applyLeaser) Acquire(ctx context.Context, p plan.Plan) ([]policy.Lease,
 			ExpiresAt: p.ExpiresAt,
 			MintedAt:  now,
 		}); err != nil && !errors.Is(err, store.ErrConflict) {
-			return nil, fmt.Errorf("server apply lease: %w", err)
+			return nil, l.failAcquire(ctx, out, err)
 		}
 		out = append(out, policy.NewLease(policy.LeaseID(id), p.Scope, applyPrincipal, p.ExpiresAt, kinds...))
 	}
 	return out, nil
 }
 
-func (l *applyLeaser) Release(_ context.Context, _ []policy.Lease) error {
+func (l *applyLeaser) failAcquire(ctx context.Context, minted []policy.Lease, cause error) error {
+	if relErr := l.Release(context.WithoutCancel(ctx), minted); relErr != nil {
+		return fmt.Errorf("server apply lease: %w (release: %v)", cause, relErr)
+	}
+	return fmt.Errorf("server apply lease: %w", cause)
+}
+
+// Release deletes the corresponding store rows. A lease that is gone
+// cannot authorize anything: deny by default. Missing rows are treated
+// as already released so cancellation and retries stay idempotent.
+func (l *applyLeaser) Release(ctx context.Context, leases []policy.Lease) error {
+	var first error
+	seen := make(map[string]struct{})
+	for _, pl := range leases {
+		id := string(pl.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if err := l.deleteLease(ctx, id); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+func (l *applyLeaser) deleteLease(ctx context.Context, id string) error {
+	lid, err := store.ParseLeaseID(id)
+	if err != nil {
+		return fmt.Errorf("server apply lease release: %w", err)
+	}
+	if err := l.store.DeleteLease(ctx, lid); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("server apply lease release: %w", err)
+	}
 	return nil
 }
 
