@@ -21,6 +21,7 @@ import (
 	"github.com/avivl/zeroth/internal/store/sqlite"
 	"github.com/avivl/zeroth/internal/tracker"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
+	"go.uber.org/zap"
 )
 
 type recordingPublisher struct {
@@ -82,6 +83,16 @@ type applyEnv struct {
 
 func applySetup(t *testing.T) *applyEnv {
 	t.Helper()
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return applySetupOn(t, st, nil)
+}
+
+func applySetupOn(t *testing.T, st store.Store, log *zap.Logger) *applyEnv {
+	t.Helper()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs", "design"), 0o755); err != nil {
 		t.Fatal(err)
@@ -89,17 +100,13 @@ func applySetup(t *testing.T) *applyEnv {
 	if err := os.WriteFile(filepath.Join(root, "docs", "design", "plan.md"), []byte("typo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
 	rev := &capturingReviewer{}
 	pub := &recordingPublisher{}
 	sbx := newFakeSandbox()
 	tr := newStubTracker(tracker.Issue{Key: "42-50", Title: "Apply executor is a stub"})
 	srv, err := server.New(server.Config{
 		Store:         st,
+		Log:           log,
 		Reviewer:      rev,
 		TokenInterval: time.Hour,
 		TokenCount:    1000,
