@@ -256,6 +256,46 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           $ref: "#/components/responses/Conflict"
+  "/runs/{id}/retract":
+    post:
+      tags: [runs]
+      summary: Retract a run's output
+      description: |
+        Close any pull request this run opened, comment the retraction
+        and reason on the tracker issue, un-assign the agent, and move
+        the issue back to unstarted so a fresh assignment can start a
+        new run. The operator does not visit GitHub. The original run's
+        event log is unchanged; retraction is recorded on the run and
+        the signed audit chain.
+
+        This is the recovery path after a bad apply has already opened
+        a PR (Linear 42-56). A live run is a conflict: stop or un-assign
+        instead. An already-merged PR is a conflict: retract cannot
+        un-merge.
+      operationId: retractRun
+      parameters:
+        - $ref: "#/components/parameters/RunID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetractRequest"
+      responses:
+        "200":
+          description: Run output retracted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Run"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
   "/runs/{id}/checkpoints":
     post:
       tags: [checkpoints]
@@ -927,6 +967,7 @@ components:
         - completed
         - failed
         - cancelled
+        - retracted
     PlanStatus:
       type: string
       description: Plan lifecycle. Apply is POST /plans/{id}/apply after approve.
@@ -1017,6 +1058,27 @@ components:
           type: string
           format: date-time
           description: RFC 3339 timestamp in UTC.
+        pull_request:
+          type: string
+          format: uri
+          description: Pull request this run opened, when apply published one.
+        retract_reason:
+          type: string
+          minLength: 1
+          description: Why the run's output was retracted. Omitted until retract.
+        retracted_at:
+          type: string
+          format: date-time
+          description: RFC 3339 timestamp in UTC when the run's output was retracted.
+    RetractRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          description: Why this run's output is being disavowed. Posted on the tracker issue and the pull request.
     RunList:
       type: object
       additionalProperties: false

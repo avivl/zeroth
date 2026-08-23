@@ -72,6 +72,7 @@ export enum RunStatus {
   Completed = "completed",
   Failed = "failed",
   Cancelled = "cancelled",
+  Retracted = "retracted",
 }
 
 export interface Health {
@@ -194,6 +195,29 @@ export interface Run {
    * @format date-time
    */
   finished_at?: string;
+  /**
+   * Pull request this run opened, when apply published one.
+   * @format uri
+   */
+  pull_request?: string;
+  /**
+   * Why the run's output was retracted. Omitted until retract.
+   * @minLength 1
+   */
+  retract_reason?: string;
+  /**
+   * RFC 3339 timestamp in UTC when the run's output was retracted.
+   * @format date-time
+   */
+  retracted_at?: string;
+}
+
+export interface RetractRequest {
+  /**
+   * Why this run's output is being disavowed. Posted on the tracker issue and the pull request.
+   * @minLength 1
+   */
+  reason: string;
 }
 
 export interface RunList {
@@ -1216,6 +1240,24 @@ export class Api<
       this.request<Run, Error>({
         path: `/runs/${id}/stop`,
         method: "POST",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Close any pull request this run opened, comment the retraction and reason on the tracker issue, un-assign the agent, and move the issue back to unstarted so a fresh assignment can start a new run. The operator does not visit GitHub. The original run's event log is unchanged; retraction is recorded on the run and the signed audit chain. This is the recovery path after a bad apply has already opened a PR (Linear 42-56). A live run is a conflict: stop or un-assign instead. An already-merged PR is a conflict: retract cannot un-merge.
+     *
+     * @tags runs
+     * @name RetractRun
+     * @summary Retract a run's output
+     * @request POST:/runs/{id}/retract
+     */
+    retractRun: (id: RunID, data: RetractRequest, params: RequestParams = {}) =>
+      this.request<Run, Error>({
+        path: `/runs/${id}/retract`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
         format: "json",
         ...params,
       }),
