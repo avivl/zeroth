@@ -36,5 +36,7 @@
 // correction survives un-assign. A run that produces no draft fails
 // instead of completing.
 // Draft attaches the plan id to the session row before proposing;
-// status sync must not clear that id.
+// status sync must not clear that id. A checkpoint is ExportTar of the
+// live sandbox written next to the store; restore forks a run and
+// ImportTars that archive into a new sandbox.
 package server

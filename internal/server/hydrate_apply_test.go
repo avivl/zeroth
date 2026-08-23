@@ -119,7 +119,42 @@ func (f *recordingSandbox) ExportTar(_ context.Context, id sandbox.ID, w io.Writ
 	return tw.Close()
 }
 
-func (f *recordingSandbox) ImportTar(context.Context, sandbox.ID, io.Reader) error { return nil }
+func (f *recordingSandbox) ImportTar(_ context.Context, id sandbox.ID, r io.Reader) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		return sandbox.ErrNotFound
+	}
+	if inst.stopped {
+		return sandbox.ErrStopped
+	}
+	tr := tar.NewReader(r)
+	files := make(map[string]string)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != 0 {
+			continue
+		}
+		rel := strings.TrimPrefix(hdr.Name, "./")
+		if sandbox.ExcludedFromImport(rel) {
+			continue
+		}
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			return err
+		}
+		files[path.Clean(sandbox.WorkspaceDir+"/"+rel)] = string(body)
+	}
+	inst.files = files
+	return nil
+}
 func (f *recordingSandbox) AllowEgress(context.Context, sandbox.ID, []sandbox.EgressRule) error {
 	return nil
 }
