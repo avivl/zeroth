@@ -41,4 +41,10 @@ type Provider interface {
 	// LinkArtifact attaches a URL (PR, transcript, audit) to the issue.
 	// Empty key, URL, or Kind is ErrInvalid.
 	LinkArtifact(ctx context.Context, key string, a Artifact) error
+
+	// Unassign removes the agent identity from the issue (classic
+	// assignee and native delegate) so a later assignment can start a
+	// fresh run. Empty key is ErrInvalid. An issue that is not on the
+	// agent is a no-op, not an error.
+	Unassign(ctx context.Context, key string) error
 }

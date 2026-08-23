@@ -15,6 +15,8 @@ In Asimov's robot stories, the Three Laws were eventually found to be incomplete
 
 Stage 1 is **local and single-player**. You run a daemon (`zerothd`) and a CLI (`zeroth`) on your own machine. The kernel is policy (scopes, grants, leases). The workflow is plan-then-apply: draft, cross-exam, approve, apply. Sandbox, harness, tracker, and store are ports with one implementation each (Docker, Claude Code, Linear, SQLite). The UI is Vite + React. The repo is public and MIT licensed from day one.
 
+The Docker sandbox holds a **copy** of your git checkout (the overlay). The Claude Code harness is a **host subprocess** of `zerothd` whose working directory is that overlay, not a `docker exec` inside the container ([ADR-Z-0010](docs/adr/Z-0010-harness-host-subprocess.md)). Relative writes land in the copy. The process can still see host paths outside it. Plan-then-apply is what stops the agent from mutating the world. In-sandbox harness execution is not a stage-1 property.
+
 ## What this is not yet
 
 - **Not a hosted product.** There is no deployment story in stage 1. No cloud, no shared cluster, no “deploy Zeroth for the team.”
@@ -84,7 +86,7 @@ The UI under `web/` is a pnpm workspace package. `task web` and `task lint` inst
 
 PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests with a coverage profile, octocov (PR comment plus a fail if coverage drops versus main), conformance, `go vet`, staticcheck, a secret scan over the diff, the `web/` build and tests, and a check that `pkg/api/gen` matches `task generate`. `web/`-only PRs skip Go. `internal/`-only PRs skip web. Changes under `pkg/api/` run everything, because that tree is the contract. Merge to main commits `docs/coverage.svg`. The commit SHA is the version. There is no semver in this repository.
 
-`zeroth run <task>` starts a headless session. `zeroth attach <run-id>` replays recent events and live-tails (type to steer; Ctrl-C detaches). `zeroth bg <run-id>` demotes a run. `zeroth runs` lists. `zeroth verify <run-id>` checks the signed audit chain against the SQLite file with no daemon (`--db-path` / `ZEROTH_DB_PATH`). Live events are `GET /runs/{id}/events` over WebSocket.
+`zeroth run <task>` starts a headless session. `zeroth attach <run-id>` replays recent events and live-tails (type to steer; Ctrl-C detaches). `zeroth bg <run-id>` demotes a run. `zeroth runs` lists. `zeroth retract <run-id> --reason "..."` closes any pull request that run opened, comments the reason on the Linear issue, and leaves the issue ready for a fresh assignment. `zeroth verify <run-id>` checks the signed audit chain against the SQLite file with no daemon (`--db-path` / `ZEROTH_DB_PATH`). Live events are `GET /runs/{id}/events` over WebSocket.
 
 ## License
 

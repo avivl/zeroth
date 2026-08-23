@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/avivl/zeroth/internal/server"
 	"github.com/avivl/zeroth/internal/store/sqlite"
+	gen "github.com/avivl/zeroth/pkg/api/gen/go"
 )
 
 func TestCLIRunAttachBgRuns(t *testing.T) {
@@ -67,6 +70,50 @@ func TestCLIRunAttachBgRuns(t *testing.T) {
 	bg.SetArgs([]string{"--addr", host, "bg", id})
 	if err := bg.Execute(); err != nil {
 		t.Fatalf("bg: %v\n%s", err, bgOut.String())
+	}
+}
+
+func TestCLIRetract(t *testing.T) {
+	t.Parallel()
+	reason := "Apply overwrote README.md instead of patching it."
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/runs/s_48/retract" {
+			http.NotFound(w, r)
+			return
+		}
+		var req gen.RetractRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Reason != reason {
+			http.Error(w, "reason", http.StatusBadRequest)
+			return
+		}
+		now := time.Now().UTC()
+		_ = json.NewEncoder(w).Encode(gen.Run{
+			Id:            "s_48",
+			AgentId:       "a_default",
+			Status:        gen.RunStatusRetracted,
+			RetractReason: &reason,
+			RetractedAt:   &now,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}))
+	t.Cleanup(hs.Close)
+	host := strings.TrimPrefix(hs.URL, "http://")
+
+	var out bytes.Buffer
+	cmd := newRoot()
+	cmd.SetOut(&out)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"--addr", host, "retract", "s_48", "--reason", reason})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("retract: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "s_48 retracted") {
+		t.Fatalf("output %q", out.String())
 	}
 }
 

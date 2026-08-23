@@ -100,6 +100,8 @@ func cliArgs(prompt, resumeSession string) []string {
 }
 
 func (i *instance) spawn(prompt, resumeSession string) error {
+	// Host os/exec, not sandbox.Exec. cwd is the overlay HostWorkspace
+	// so draft observation sees the same tree (ADR-Z-0010).
 	cmd := exec.Command(i.bin, cliArgs(prompt, resumeSession)...)
 	cmd.Dir = i.workspace
 	cmd.Env = childEnv(i.env, i.key)

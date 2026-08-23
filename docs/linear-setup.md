@@ -102,7 +102,11 @@ Now, in Linear:
    project memory, spawns a sandbox, copies this git checkout into the
    overlay, and posts a comment on the issue with its plan. `zerothd`
    uses the git toplevel of the directory it was started from as that
-   checkout (the `cd zeroth` above). A modify whose target is missing
+   checkout (the `cd zeroth` above). The Claude Code harness then runs
+   as a **host subprocess of `zerothd`**, cwd the overlay copy, not
+   inside the container ([ADR-Z-0010](adr/Z-0010-harness-host-subprocess.md)).
+   Your working tree is not the agent's cwd. The process can still see
+   host paths outside the overlay. A modify whose target is missing
    from the overlay fails with a workspace-observe error in the daemon
    logs and on the issue, not a generic "no precondition observed"
    message.
@@ -112,12 +116,28 @@ Now, in Linear:
    resource, and the cross-exam verdict inline. A fail or pass_with_notes
    is an alert above Approve, not a collapsed footnote. The Linear plan
    comment shows the same verdict outside the collapsed plan body.
-5. Click **Approve**, then **Apply**. The signature chip next to the
-   applied plan should read valid — click **Verify** to confirm.
+5. Click **Approve**, then **Apply**. Each click shows a Plan gate banner
+   on the change-plan card with that REST call's real outcome (`POST
+   /plans/{id}/approve`, then `POST /plans/{id}/apply`). A live-output
+   reconnect is labeled "Live tail" on the output card and is not an
+   approve or apply result. The signature chip next to the applied plan
+   should read valid: click **Verify** to confirm.
 6. Zeroth opens a PR, links it back on the Linear issue, and moves the
    issue's status. The issue comment also carries cost, a transcript
    link, and an audit summary.
-7. To confirm the run is genuinely auditable, stop `zerothd` entirely and
+7. If that PR is wrong (a bad apply, a botched patch), do not close it
+   on GitHub and do not un-assign/re-assign to retry. From the run
+   detail view, or:
+
+   ```bash
+   zeroth retract <run-id> --reason "Apply overwrote README.md instead of patching it."
+   ```
+
+   That closes the PR, comments the reason on this issue, un-assigns
+   the agent, and moves the issue back to Todo. Re-assign when you want
+   a fresh run. The thread stays a complete record, including why the
+   prior output was retracted.
+8. To confirm the run is genuinely auditable, stop `zerothd` entirely and
    run, offline:
 
    ```bash
@@ -129,9 +149,35 @@ Now, in Linear:
 
 To cancel a run instead of approving it, un-assign the issue in Linear
 (or clear the Zeroth delegate if a human is still the assignee).
-`zerothd` fails the session and kills the sandbox — a subsequent `Exec`
-against it fails, confirming the sandbox actually died rather than just
-being marked stopped in a database row.
+`zerothd` fails the session, stops the harness subprocess, and kills the
+sandbox. A subsequent `Exec` against the sandbox fails, confirming the
+container actually died rather than just being marked stopped in a
+database row. Killing the sandbox container alone does **not** stop
+`claude`: that process is a child of `zerothd` (ADR-Z-0010).
+
+## Confirming harness vs sandbox (stage 1)
+
+This is the runbook step that keeps ADR-Z-0010 from drifting. During a
+live run, in a second terminal:
+
+```bash
+# Host: claude is a child of zerothd, cwd is the overlay temp dir.
+pgrep -a claude
+ls -l /proc/$(pgrep -n claude)/cwd
+
+# Sandbox: the container has no claude process.
+docker ps --filter name=zeroth-sbx --format '{{.Names}}'
+# pick the name, then:
+docker exec <zeroth-sbx-name> ps aux | grep -i claude || echo "no claude in sandbox (expected)"
+```
+
+`ls -l /proc/.../cwd` should resolve under the sandbox temp root (for
+example `/tmp/zeroth-sbx-...`), not the git checkout you started
+`task up` from. If `claude` is missing from `pgrep` and only appears
+inside `docker exec`, the harness has moved into the sandbox and
+[ADR-Z-0010](adr/Z-0010-harness-host-subprocess.md) needs a successor.
+Automated coverage is `TestSpawnIsHostSubprocess` and
+`TestHarnessStartUsesSandboxOverlayNotCheckout`.
 
 ## Troubleshooting
 

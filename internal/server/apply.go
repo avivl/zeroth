@@ -25,6 +25,9 @@ const applyPrincipal policy.PrincipalID = "operator"
 // request. Tests inject a fake. The daemon default is git plus gh.
 type ApplyPublisher interface {
 	Publish(ctx context.Context, req ApplyPublish) (ApplyRef, error)
+	// ClosePullRequest closes an open pull request. Already-closed is
+	// success. Already-merged is an error: retract cannot un-merge.
+	ClosePullRequest(ctx context.Context, url, comment string) error
 }
 
 // ApplyPublish is one applied plan ready to land on git.
@@ -141,14 +144,40 @@ func (s *Server) rememberPR(sessionID, url string) {
 	s.mu.Lock()
 	s.prs[sessionID] = url
 	s.mu.Unlock()
+	sid, err := store.ParseSessionID(sessionID)
+	if err != nil {
+		return
+	}
+	ctx := context.Background()
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	sess, err := s.store.GetSession(ctx, sid)
+	if err != nil {
+		return
+	}
+	sess.PullRequest = url
+	sess.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		s.log.Debug("remember pr", zap.String("run", sessionID), zap.Error(err))
+	}
 }
 
-func (s *Server) takePR(sessionID string) string {
+func (s *Server) peekPR(sessionID string) string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	url := s.prs[sessionID]
-	delete(s.prs, sessionID)
-	return url
+	s.mu.Unlock()
+	if strings.TrimSpace(url) != "" {
+		return strings.TrimSpace(url)
+	}
+	sid, err := store.ParseSessionID(sessionID)
+	if err != nil {
+		return ""
+	}
+	sess, err := s.store.GetSession(context.Background(), sid)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(sess.PullRequest)
 }
 
 type applyWorld struct {

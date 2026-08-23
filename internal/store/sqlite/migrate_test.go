@@ -124,12 +124,22 @@ func TestMigrateUpAndDown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v != 5 {
-		t.Fatalf("version = %d, want 5", v)
+	if v != 6 {
+		t.Fatalf("version = %d, want 6", v)
 	}
 	agent := store.Agent{ID: mustAID(t, "a1"), Name: "n", Harness: "h", Status: "ready"}
 	if err := s.CreateAgent(ctx, agent); err != nil {
 		t.Fatal(err)
+	}
+	if err := s.MigrateDown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	v, err = s.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v != 5 {
+		t.Fatalf("after 0006 down version = %d", v)
 	}
 	if err := s.MigrateDown(ctx); err != nil {
 		t.Fatal(err)
@@ -191,7 +201,7 @@ func TestMigrateUpAndDown(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err = s.Version(ctx)
-	if err != nil || v != 5 {
+	if err != nil || v != 6 {
 		t.Fatalf("after up version = %d err=%v", v, err)
 	}
 	if err := s.CreateAgent(ctx, agent); err != nil {
@@ -226,11 +236,13 @@ func TestMigrateDownPreservesEarlierRows(t *testing.T) {
 	if err := insertAgentV1(ctx, s, agentID); err != nil {
 		t.Fatal(err)
 	}
-	sess := store.Session{ID: mustSID(t, "s1"), AgentID: agentID, Status: "running", Prompt: "keep-me"}
-	if err := s.CreateSession(ctx, sess); err != nil {
+	sessID := mustSID(t, "s1")
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO sessions (id, agent_id, plan_id, status, prompt, tracker_ref, workspace_json, autonomy_tier, created_at_unix_nano, updated_at_unix_nano)
+		VALUES (?, ?, '', 'running', 'keep-me', '', '{}', '', 1, 1)`, sessID.String(), agentID.String()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE sessions SET note = 'hello' WHERE id = ?`, sess.ID.String()); err != nil {
+	if _, err := s.db.ExecContext(ctx, `UPDATE sessions SET note = 'hello' WHERE id = ?`, sessID.String()); err != nil {
 		t.Fatalf("set note: %v", err)
 	}
 
@@ -241,15 +253,15 @@ func TestMigrateDownPreservesEarlierRows(t *testing.T) {
 	if err != nil || v != 1 {
 		t.Fatalf("after 0002 down version = %d err=%v", v, err)
 	}
-	got, err := s.GetSession(ctx, sess.ID)
-	if err != nil {
+	var prompt string
+	if err := s.db.QueryRowContext(ctx, `SELECT prompt FROM sessions WHERE id = ?`, sessID.String()).Scan(&prompt); err != nil {
 		t.Fatal(err)
 	}
-	if got.Prompt != "keep-me" {
-		t.Fatalf("data loss on 0002 down: %+v", got)
+	if prompt != "keep-me" {
+		t.Fatalf("data loss on 0002 down: %q", prompt)
 	}
 	var note sql.NullString
-	err = s.db.QueryRowContext(ctx, `SELECT note FROM sessions WHERE id = ?`, sess.ID.String()).Scan(&note)
+	err = s.db.QueryRowContext(ctx, `SELECT note FROM sessions WHERE id = ?`, sessID.String()).Scan(&note)
 	if err == nil {
 		t.Fatal("note column still present after down")
 	}

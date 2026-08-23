@@ -23,12 +23,13 @@ import (
 )
 
 type stubTracker struct {
-	mu        sync.Mutex
-	ch        chan tracker.AssignmentEvent
-	comments  []string
-	states    []tracker.StateKind
-	artifacts []tracker.Artifact
-	issue     tracker.Issue
+	mu         sync.Mutex
+	ch         chan tracker.AssignmentEvent
+	comments   []string
+	states     []tracker.StateKind
+	artifacts  []tracker.Artifact
+	unassigned []string
+	issue      tracker.Issue
 }
 
 func newStubTracker(iss tracker.Issue) *stubTracker {
@@ -71,6 +72,12 @@ func (s *stubTracker) LinkArtifact(_ context.Context, _ string, a tracker.Artifa
 	s.artifacts = append(s.artifacts, a)
 	return nil
 }
+func (s *stubTracker) Unassign(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unassigned = append(s.unassigned, key)
+	return nil
+}
 func (s *stubTracker) commentBodies() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -96,11 +103,18 @@ func (s *stubTracker) artifactURLs() []string {
 	return out
 }
 
+func (s *stubTracker) unassignKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.unassigned...)
+}
+
 type fakeSandbox struct {
-	mu   sync.Mutex
-	n    int
-	seed map[string]string
-	inst map[string]*fakeInst
+	mu       sync.Mutex
+	n        int
+	seed     map[string]string
+	inst     map[string]*fakeInst
+	execArgv [][]string
 }
 
 type fakeInst struct {
@@ -162,9 +176,10 @@ func (f *fakeSandbox) HostWorkspace(id sandbox.ID) (string, error) {
 	return inst.workspace, nil
 }
 
-func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, _ sandbox.Cmd) (sandbox.ExecResult, error) {
+func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, cmd sandbox.Cmd) (sandbox.ExecResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.execArgv = append(f.execArgv, append([]string(nil), cmd.Argv...))
 	inst, ok := f.inst[id.String()]
 	if !ok {
 		return sandbox.ExecResult{}, sandbox.ErrNotFound
@@ -229,6 +244,16 @@ func (f *fakeSandbox) anyID() sandbox.ID {
 		return id
 	}
 	return sandbox.ID{}
+}
+
+func (f *fakeSandbox) execCalls() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]string, len(f.execArgv))
+	for i, argv := range f.execArgv {
+		out[i] = append([]string(nil), argv...)
+	}
+	return out
 }
 
 func TestAssignStartsHeadlessRun(t *testing.T) {
@@ -367,6 +392,11 @@ func assignServer(t *testing.T, tr tracker.Provider, sbx sandbox.Driver, interva
 
 func waitRunByTracker(t *testing.T, base, key string) gen.Run {
 	t.Helper()
+	return waitNewRunByTracker(t, base, key, "")
+}
+
+func waitNewRunByTracker(t *testing.T, base, key, notID string) gen.Run {
+	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		res, err := http.Get(base + "/runs")
@@ -380,13 +410,16 @@ func waitRunByTracker(t *testing.T, base, key string) gen.Run {
 		}
 		res.Body.Close()
 		for _, run := range list.Items {
-			if run.TrackerRef != nil && *run.TrackerRef == key {
+			if run.TrackerRef != nil && *run.TrackerRef == key && string(run.Id) != notID {
 				return run
 			}
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for tracker_ref %s", key)
+	if notID == "" {
+		t.Fatalf("timed out waiting for tracker_ref %s", key)
+	}
+	t.Fatalf("timed out waiting for a new run on tracker_ref %s (not %s)", key, notID)
 	return gen.Run{}
 }
 

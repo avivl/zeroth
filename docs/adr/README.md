@@ -41,4 +41,5 @@ No em dashes in these files. Use a period, comma, colon, or parentheses.
 | [Z-0007](Z-0007-secp256k1-schnorr.md) | secp256k1 Schnorr, Nostr compatible | Accepted |
 | [Z-0008](Z-0008-anthropic-api-key-auth.md) | Anthropic auth is API key only; per-provider auth matrix, quarterly review | Accepted |
 | [Z-0009](Z-0009-canonical-plan-hash.md) | Canonical plan hash, closed effect set, no unexpressible-effect fallback | Accepted |
+| [Z-0010](Z-0010-harness-host-subprocess.md) | Stage-1 harness is a host subprocess against the overlay | Accepted |
 | [Z-0011](Z-0011-independent-cross-exam-vendor.md) | Stage-1 cross-examiner is a different vendor than the producer | Accepted |

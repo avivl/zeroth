@@ -26,7 +26,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | Path | Belongs here | Does not belong here |
 | --- | --- | --- |
 | `cmd/zerothd` | Local daemon process | Business rules, port implementations |
-| `cmd/zeroth` | CLI and headless entry point (`run`, `attach`, `bg`, `runs`, `verify`) | A second copy of the kernel |
+| `cmd/zeroth` | CLI and headless entry point (`run`, `attach`, `bg`, `runs`, `retract`, `verify`) | A second copy of the kernel |
 | `internal/server` | Local HTTP surface: OpenAPI handlers, run-events WebSocket, session supervisor wiring | Vendor SDKs, policy rules |
 | `internal/policy` | Scopes, grants, leases. The kernel. | I/O, persistence, HTTP, agent loops. Agents do not modify this package. |
 | `internal/session` | Session state machine and event log | Tracker or harness I/O |
@@ -42,7 +42,7 @@ Empty `doc.go` packages are acceptable until that package has behavior. Do not i
 | `internal/sandbox` | `Driver` port plus `conformance_test.go` | Concrete runtimes (those go in subpackages) |
 | `internal/sandbox/docker` | Stage-1 `Driver` implementation | Changes to the port that are not reflected in conformance tests |
 | `internal/harness` | `Driver` port plus `conformance_test.go` | Vendor SDKs |
-| `internal/harness/claudecode` | Stage-1 harness implementation | Shortcuts that bypass plan-then-apply |
+| `internal/harness/claudecode` | Stage-1 harness implementation. Host subprocess against `HostWorkspace` (ADR-Z-0010), not `sandbox.Exec`. | Shortcuts that bypass plan-then-apply. Do not claim in-container execution until a new ADR. |
 | `internal/tracker` | `Provider` port plus `conformance_test.go` | Vendor SDKs |
 | `internal/tracker/linear` | Stage-1 tracker implementation | Kernel policy |
 | `internal/store` | `Store` port plus `conformance_test.go` | Cloud databases in stage 1 |
@@ -117,7 +117,7 @@ Go 1.27. Do not add a module dependency unless the package that needs it is bein
 Do not introduce a second logging, CLI, config, or resilience approach.
 
 - **Zap** (`internal/logging`) is the structured logger for `zerothd` and `zeroth`. Level and encoder are configurable (`console` for local dev, `json` for CI and production). There is no package-level global logger.
-- **Cobra** owns both command trees. `cmd/zeroth` has `version`, plus stubs for `run`, `attach`, and `bg`. `cmd/zerothd` is a Cobra root whose flags are the daemon's startup surface.
+- **Cobra** owns both command trees. `cmd/zeroth` has `version`, plus stubs for `run`, `attach`, `bg`, and `retract`. `cmd/zerothd` is a Cobra root whose flags are the daemon's startup surface.
 - **Viper** loads `zerothd` startup config with precedence **flags > env (`ZEROTH_*`) > config file > defaults**: bind address, DB path, docker socket, log level, log encoding, signing-key path, reviewer model, reviewer base URL, reviewer API key.
 - **Failsafe-go** (`internal/resilience`) wraps calls that leave the process (retry + timeout, circuit breaker when the same remote is called repeatedly). The worked example is `resilience.DialUnix`, used by `zerothd` to probe the Docker socket. Follow [docs/design/resilience.md](docs/design/resilience.md) in sandbox, harness, and tracker drivers. Do not invent a parallel retry loop.
 

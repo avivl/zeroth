@@ -215,7 +215,8 @@ pre,
 .badge-failed,
 .badge-fail,
 .badge-rejected,
-.badge-danger {
+.badge-danger,
+.badge-retracted {
   color: var(--danger);
   background: var(--danger-bg);
 }
@@ -381,6 +382,48 @@ pre,
 
 .error {
   color: var(--danger);
+}
+
+.live-tail-status {
+  font-size: 0.8rem;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+}
+
+.plan-gate {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.65rem;
+  border: 1px solid;
+}
+
+.plan-gate p {
+  margin: 0.2rem 0 0;
+}
+
+.plan-gate-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-gate-pending {
+  color: var(--pending);
+  background: var(--pending-bg);
+  border-color: var(--pending);
+}
+
+.plan-gate-ok {
+  color: var(--ok);
+  background: var(--ok-bg);
+  border-color: var(--ok);
+}
+
+.plan-gate-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger);
 }
 
 input[type="text"],

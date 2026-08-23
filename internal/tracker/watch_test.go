@@ -33,6 +33,9 @@ func (s *stubProvider) Assignments(context.Context) (<-chan tracker.AssignmentEv
 func (s *stubProvider) LinkArtifact(context.Context, string, tracker.Artifact) error {
 	return tracker.ErrInvalid
 }
+func (s *stubProvider) Unassign(context.Context, string) error {
+	return tracker.ErrInvalid
+}
 
 type recordingHandler struct {
 	assigned   []string

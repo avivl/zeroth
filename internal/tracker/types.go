@@ -33,7 +33,7 @@ type State struct {
 // Issue is one work item as the port sees it.
 type Issue struct {
 	// Key is the human identifier (for example "42-29"). It is what
-	// callers pass to GetIssue, Comment, SetState, and LinkArtifact.
+	// callers pass to GetIssue, Comment, SetState, LinkArtifact, and Unassign.
 	Key string
 	// ID is the vendor's opaque id. Drivers may use it internally.
 	ID          string
@@ -41,6 +41,7 @@ type Issue struct {
 	Description string
 	URL         string
 	AssigneeID  string
+	DelegateID  string
 	State       State
 	Project     string
 }
@@ -98,4 +99,13 @@ type Completion struct {
 	Transcript  string
 	PullRequest string
 	Audit       string
+}
+
+// Retract is what FormatRetractComment renders onto the issue when a
+// run's already-produced output is disavowed.
+type Retract struct {
+	RunID       string
+	Reason      string
+	PullRequest string
+	Closed      bool
 }

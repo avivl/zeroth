@@ -194,6 +194,18 @@ func (c *apiClient) postRun(ctx context.Context, id, suffix string) (gen.Run, er
 	return out, nil
 }
 
+func (c *apiClient) retract(ctx context.Context, id, reason string) (gen.Run, error) {
+	raw, _, err := c.do(ctx, http.MethodPost, "/runs/"+id+"/retract", gen.RetractRequest{Reason: reason})
+	if err != nil {
+		return gen.Run{}, fmt.Errorf("zeroth retract: %w", err)
+	}
+	var out gen.Run
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return gen.Run{}, fmt.Errorf("zeroth retract: %w", err)
+	}
+	return out, nil
+}
+
 func isConflict(err error) bool {
 	var ae *apiError
 	return errors.As(err, &ae) && ae.Status == http.StatusConflict
