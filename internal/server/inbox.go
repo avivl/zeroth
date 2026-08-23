@@ -1,13 +1,12 @@
 package server
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/avivl/zeroth/internal/audit"
+	"github.com/avivl/zeroth/internal/sandbox"
 	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/store"
 	gen "github.com/avivl/zeroth/pkg/api/gen/go"
@@ -117,7 +116,7 @@ func (s *Server) CreateRunCheckpoint(w http.ResponseWriter, r *http.Request, id 
 	}
 	ck, err := s.snapshotRun(r.Context(), sid, strOr(req.Label, "on-demand"))
 	if err != nil {
-		status, code, msg := statusForSessionError(err)
+		status, code, msg := statusForCheckpointError(err)
 		writeError(w, status, code, msg)
 		return
 	}
@@ -162,14 +161,23 @@ func (s *Server) RestoreCheckpoint(w http.ResponseWriter, r *http.Request, id ge
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
+	sbx, err := s.restoreSandbox(r.Context(), fork, ck.Location)
+	if err != nil {
+		status, code, msg := statusForCheckpointError(err)
+		writeError(w, status, code, msg)
+		return
+	}
 	if err := s.store.CreateSession(r.Context(), fork); err != nil {
+		s.stopSandboxID(sbx)
 		writeStoreError(w, err)
 		return
 	}
 	if err := s.sup.StartWith(r.Context(), nid); err != nil {
+		s.stopSandboxID(sbx)
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	s.rememberSandbox(nid.String(), sbx)
 	if _, err := s.audit.Append(r.Context(), audit.Entry{
 		Action:       audit.ActionCheckpointRest,
 		Target:       sid.String(),
@@ -195,42 +203,17 @@ func (s *Server) RestoreCheckpoint(w http.ResponseWriter, r *http.Request, id ge
 	writeJSON(w, http.StatusCreated, run)
 }
 
-func (s *Server) snapshotRun(ctx context.Context, id session.ID, label string) (store.Checkpoint, error) {
-	cid, err := newCheckpointID()
-	if err != nil {
-		return store.Checkpoint{}, err
+func statusForCheckpointError(err error) (int, string, string) {
+	switch {
+	case errors.Is(err, sandbox.ErrSecret):
+		return http.StatusConflict, "conflict", err.Error()
+	case errors.Is(err, sandbox.ErrNotFound), errors.Is(err, sandbox.ErrStopped):
+		return http.StatusConflict, "conflict", err.Error()
+	case errors.Is(err, errCheckpointNoSandbox):
+		return http.StatusConflict, "conflict", err.Error()
+	default:
+		return statusForSessionError(err)
 	}
-	sid, err := store.ParseSessionID(id.String())
-	if err != nil {
-		return store.Checkpoint{}, err
-	}
-	now := time.Now().UTC()
-	ck := store.Checkpoint{
-		ID:        cid,
-		SessionID: sid,
-		Label:     label,
-		Location:  cid.String(),
-		CreatedAt: now,
-	}
-	if err := s.store.CreateCheckpoint(ctx, ck); err != nil {
-		return store.Checkpoint{}, fmt.Errorf("checkpoint: %w", err)
-	}
-	if err := s.sup.TakeCheckpoint(ctx, id, cid.String()); err != nil {
-		return store.Checkpoint{}, fmt.Errorf("checkpoint event: %w", err)
-	}
-	sess, err := s.store.GetSession(ctx, sid)
-	if err == nil {
-		_, _ = s.audit.Append(ctx, audit.Entry{
-			Action:       audit.ActionCheckpoint,
-			Target:       cid.String(),
-			Approver:     audit.ApproverOperator,
-			AgentID:      sess.AgentID,
-			SessionID:    sid,
-			ResourceType: "checkpoint",
-			ResourceID:   cid.String(),
-		})
-	}
-	return ck, nil
 }
 
 func writeStoreError(w http.ResponseWriter, err error) {

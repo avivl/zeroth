@@ -38,7 +38,7 @@ be the resource groups on this surface.
 | Approvals | `GET /approvals` | Inbox lists pending plans. Reject-with-comment is `POST /plans/{id}/request-changes` from this view (and `zeroth reject`); approve/apply still go to the plan resource. |
 | Memory | `GET/POST /memory`, `GET /memory/proposals`, `POST /memory/proposals/{id}/accept`, `POST /memory/proposals/{id}/reject` | Operator writes vs agent proposals are separate paths. |
 | Audit | `GET /audit`, `POST /audit/{id}/verify` | HTTP verify re-checks one Schnorr signature. `zeroth verify <run-id>` walks the hash chain offline. |
-| Checkpoints | `GET /checkpoints`, `POST /runs/{id}/checkpoints`, `POST /checkpoints/{id}/restore` | Restore returns a new run forked from the snapshot. The original run is immutable. |
+| Checkpoints | `GET /checkpoints`, `POST /runs/{id}/checkpoints`, `POST /checkpoints/{id}/restore` | Create runs `ExportTar` on the live sandbox and stores the archive. Restore forks a new run and `ImportTar`s that archive into a fresh sandbox. The original run is immutable. |
 
 `GET /health` is liveness for the daemon. It is not a product view.
 

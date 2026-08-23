@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +68,11 @@ type Config struct {
 	Sandbox        sandbox.Driver
 	TrackerWebhook bool
 	WorkspaceRoot  string
+	// CheckpointDir is where sandbox tar archives are written. Location
+	// on the store row is the absolute path of that file. Empty creates
+	// a unique temp directory (tests). zerothd sets this next to the
+	// sqlite file so a restart can still ImportTar.
+	CheckpointDir string
 	// DefaultReviewerModel, when set, is written onto the default
 	// agent if that agent has no reviewer model yet. zerothd sets
 	// this when an independent reviewer is configured.
@@ -91,6 +97,7 @@ type Server struct {
 	sandbox              sandbox.Driver
 	webhook              http.Handler
 	workspaceRoot        string
+	checkpointDir        string
 	publisher            ApplyPublisher
 	defaultReviewerModel string
 
@@ -145,6 +152,14 @@ func New(cfg Config) (*Server, error) {
 		reviewer = passNotesReviewer{}
 		log.Warn("cross-exam using pass-through reviewer; human approval remains the gate")
 	}
+	checkpointDir := strings.TrimSpace(cfg.CheckpointDir)
+	if checkpointDir == "" {
+		dir, err := os.MkdirTemp("", "zeroth-ck-")
+		if err != nil {
+			return nil, fmt.Errorf("server: checkpoint dir: %w", err)
+		}
+		checkpointDir = dir
+	}
 	trail, err := audit.NewLog(cfg.Store, sg)
 	if err != nil {
 		return nil, fmt.Errorf("server: %w", err)
@@ -168,6 +183,7 @@ func New(cfg Config) (*Server, error) {
 		tracker:              cfg.Tracker,
 		sandbox:              cfg.Sandbox,
 		workspaceRoot:        strings.TrimSpace(cfg.WorkspaceRoot),
+		checkpointDir:        checkpointDir,
 		publisher:            cfg.Publisher,
 		defaultReviewerModel: strings.TrimSpace(cfg.DefaultReviewerModel),
 		root:                 ctx,

@@ -15,5 +15,7 @@
 // CredsDir. They are never written into /workspace. ExportTar strips a
 // hard exclusion list (credentials plus compiled memory artifacts from
 // Z1-118) and secret-scans what remains, failing closed on a finding.
-// One checkpoint hydrates any number of independent sandboxes.
+// One checkpoint hydrates any number of independent sandboxes. The
+// daemon writes that tar to disk and records the path as the store
+// Location; restore ImportTars it into a fresh sandbox.
 package sandbox

@@ -175,6 +175,8 @@ type fakeSandbox struct {
 	seed     map[string]string
 	inst     map[string]*fakeInst
 	execArgv [][]string
+	exports  int
+	imports  int
 }
 
 type fakeInst struct {
@@ -277,8 +279,39 @@ func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, cmd sandbox.Cmd) (s
 	return sandbox.ExecResult{ExitCode: 0, Stdout: "alive\n"}, nil
 }
 
-func (f *fakeSandbox) ExportTar(context.Context, sandbox.ID, io.Writer) error { return nil }
-func (f *fakeSandbox) ImportTar(context.Context, sandbox.ID, io.Reader) error { return nil }
+func (f *fakeSandbox) ExportTar(ctx context.Context, id sandbox.ID, w io.Writer) error {
+	f.mu.Lock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		f.mu.Unlock()
+		return sandbox.ErrNotFound
+	}
+	if inst.stopped {
+		f.mu.Unlock()
+		return sandbox.ErrStopped
+	}
+	dir := inst.workspace
+	f.exports++
+	f.mu.Unlock()
+	return sandbox.PackOverlay(ctx, dir, w)
+}
+
+func (f *fakeSandbox) ImportTar(_ context.Context, id sandbox.ID, r io.Reader) error {
+	f.mu.Lock()
+	inst, ok := f.inst[id.String()]
+	if !ok {
+		f.mu.Unlock()
+		return sandbox.ErrNotFound
+	}
+	if inst.stopped {
+		f.mu.Unlock()
+		return sandbox.ErrStopped
+	}
+	dir := inst.workspace
+	f.imports++
+	f.mu.Unlock()
+	return sandbox.ReplaceOverlay(dir, r)
+}
 func (f *fakeSandbox) AllowEgress(context.Context, sandbox.ID, []sandbox.EgressRule) error {
 	return nil
 }

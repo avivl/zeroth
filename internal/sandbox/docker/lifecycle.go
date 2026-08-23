@@ -30,7 +30,7 @@ func (d *Driver) Spawn(ctx context.Context, spec sandbox.Spec) (sandbox.Sandbox,
 		return sandbox.Sandbox{}, fmt.Errorf("sandbox docker spawn: temp dir: %w", err)
 	}
 	if spec.Workspace != nil {
-		if err := unpackTar(dir, spec.Workspace); err != nil {
+		if err := sandbox.UnpackOverlay(dir, spec.Workspace); err != nil {
 			_ = os.RemoveAll(dir)
 			return sandbox.Sandbox{}, fmt.Errorf("sandbox docker spawn: %w", err)
 		}

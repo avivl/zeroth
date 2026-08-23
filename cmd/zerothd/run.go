@@ -127,6 +127,7 @@ func runDaemon(ctx context.Context, cfg Config, d deps) error {
 		WorkspaceRoot:        workspaceRoot,
 		Reviewer:             reviewer,
 		DefaultReviewerModel: reviewerModel,
+		CheckpointDir:        filepath.Join(filepath.Dir(cfg.DBPath), "checkpoints"),
 	})
 	if err != nil {
 		return fmt.Errorf("zerothd server: %w", err)

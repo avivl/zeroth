@@ -242,7 +242,8 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 	}
 
 	ck := postJSON(t, e.hs.URL+"/runs/"+string(run.Id)+"/checkpoints", gen.CreateCheckpointRequest{})
-	// The run is terminal after apply, so an on-demand checkpoint may 409.
+	// The run is terminal after apply (sandbox released), so an
+	// on-demand checkpoint may 409.
 	ck.Body.Close()
 	if ck.StatusCode != http.StatusCreated && ck.StatusCode != http.StatusConflict {
 		t.Fatalf("checkpoint %d", ck.StatusCode)
