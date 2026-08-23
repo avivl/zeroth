@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/avivl/zeroth/internal/plan"
+	"github.com/avivl/zeroth/internal/store"
+	"github.com/avivl/zeroth/internal/store/sqlite"
 )
 
 func TestApplyWorldExecuteWritesAndHashes(t *testing.T) {
@@ -391,6 +395,116 @@ func TestGitPublisherProducesRefAndPR(t *testing.T) {
 	}
 }
 
+func TestClosePullRequestClosesOpenAndSkipsClosed(t *testing.T) {
+	t.Parallel()
+	var ghArgs [][]string
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			ghArgs = append(ghArgs, append([]string(nil), args...))
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "pr view") {
+				return `{"state":"OPEN"}`, nil
+			}
+			return "", nil
+		},
+		execer: newGitPublisher().execer,
+	}
+	url := "https://github.com/avivl/zeroth/pull/48"
+	if err := p.ClosePullRequest(t.Context(), url, "Retracted by Zeroth.\n\nbad patch\n"); err != nil {
+		t.Fatal(err)
+	}
+	if len(ghArgs) != 2 {
+		t.Fatalf("gh calls %v", ghArgs)
+	}
+	if !strings.Contains(strings.Join(ghArgs[1], " "), "pr close") {
+		t.Fatalf("close args %v", ghArgs[1])
+	}
+
+	p.gh = func(_ context.Context, args ...string) (string, error) {
+		if strings.Join(args, " ") == "pr view "+url+" --json state" {
+			return `{"state":"CLOSED"}`, nil
+		}
+		t.Fatalf("unexpected gh %v", args)
+		return "", nil
+	}
+	if err := p.ClosePullRequest(t.Context(), url, "again"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClosePullRequestRejectsMerged(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			return `{"state":"MERGED"}`, nil
+		},
+		execer: newGitPublisher().execer,
+	}
+	err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/1", "nope")
+	if !errors.Is(err, errPRMerged) {
+		t.Fatalf("err %v, want errPRMerged", err)
+	}
+}
+
+func TestClosePullRequestEmptyURL(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh:     func(context.Context, ...string) (string, error) { return "", nil },
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "  ", "nope"); err == nil {
+		t.Fatal("expected empty url error")
+	}
+}
+
+func TestClosePullRequestTreatsGhAlreadyClosedAsSuccess(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "pr view") {
+				return `{"state":"OPEN"}`, nil
+			}
+			return "", errors.New("GraphQL: Pull request is already closed")
+		},
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/2", ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClosePullRequestTreatsGhAlreadyMergedAsConflict(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(_ context.Context, args ...string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "pr view") {
+				return "not-json", nil
+			}
+			return "", errors.New("this pull request was merged")
+		},
+		execer: newGitPublisher().execer,
+	}
+	err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/3", "nope")
+	if !errors.Is(err, errPRMerged) {
+		t.Fatalf("err %v, want errPRMerged", err)
+	}
+}
+
+func TestClosePullRequestViewError(t *testing.T) {
+	t.Parallel()
+	p := &gitPublisher{
+		gh: func(context.Context, ...string) (string, error) {
+			return "", errors.New("gh: not found")
+		},
+		execer: newGitPublisher().execer,
+	}
+	if err := p.ClosePullRequest(t.Context(), "https://github.com/avivl/zeroth/pull/4", "x"); err == nil {
+		t.Fatal("expected view error")
+	}
+}
+
 func TestGithubRepoSlug(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -407,5 +521,49 @@ func TestGithubRepoSlug(t *testing.T) {
 		if got != tc.want || ok != tc.ok {
 			t.Fatalf("%s: got %q %v", tc.in, got, ok)
 		}
+	}
+}
+
+func TestPeekPRFallsBackToStore(t *testing.T) {
+	t.Parallel()
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv, err := New(Config{Store: st, TokenInterval: time.Hour, TokenCount: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	aid, err := store.ParseAgentID(DefaultAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid, err := store.ParseSessionID("s_retract_store")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	url := "https://github.com/avivl/zeroth/pull/48"
+	if err := st.CreateSession(t.Context(), store.Session{
+		ID:          sid,
+		AgentID:     aid,
+		Status:      "done",
+		PullRequest: url,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		FinishedAt:  now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := srv.peekPR(sid.String()); got != url {
+		t.Fatalf("peekPR from store = %q", got)
+	}
+	srv.rememberPR("", url)
+	srv.rememberPR(sid.String(), "")
+	if got := srv.peekPR("not-an-id"); got != "" {
+		t.Fatalf("invalid id peekPR = %q", got)
 	}
 }

@@ -146,6 +146,9 @@ func (s *Server) CreateRun(w http.ResponseWriter, r *http.Request) {
 	if err := s.syncSession(r.Context(), id); err != nil {
 		s.log.Warn("create run sync", zap.Error(err))
 	}
+	if sess.TrackerRef != "" {
+		s.rememberTracker(r.Context(), id)
+	}
 	s.startWorker(id)
 	run, ok, err := s.loadRun(r.Context(), id.String())
 	if err != nil || !ok {

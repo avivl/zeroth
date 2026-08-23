@@ -210,6 +210,7 @@ const (
 	RunStatusCompleted       RunStatus = "completed"
 	RunStatusFailed          RunStatus = "failed"
 	RunStatusPending         RunStatus = "pending"
+	RunStatusRetracted       RunStatus = "retracted"
 	RunStatusRunning         RunStatus = "running"
 	RunStatusStopped         RunStatus = "stopped"
 	RunStatusWaitingApproval RunStatus = "waiting_approval"
@@ -227,6 +228,8 @@ func (e RunStatus) Valid() bool {
 	case RunStatusFailed:
 		return true
 	case RunStatusPending:
+		return true
+	case RunStatusRetracted:
 		return true
 	case RunStatusRunning:
 		return true
@@ -711,6 +714,12 @@ type RequestChangesRequest struct {
 	Comment string `json:"comment"`
 }
 
+// RetractRequest defines model for RetractRequest.
+type RetractRequest struct {
+	// Reason Why this run's output is being disavowed. Posted on the tracker issue and the pull request.
+	Reason string `json:"reason"`
+}
+
 // ReviewerConfig defines model for ReviewerConfig.
 type ReviewerConfig struct {
 	// BlockOnFail When true, a failed cross-exam returns the plan to the agent with the notes attached instead of escalating to the human.
@@ -748,6 +757,15 @@ type Run struct {
 
 	// Prompt Operator prompt that started the run, when one was given.
 	Prompt *string `json:"prompt,omitempty"`
+
+	// PullRequest Pull request this run opened, when apply published one.
+	PullRequest *string `json:"pull_request,omitempty"`
+
+	// RetractReason Why the run's output was retracted. Omitted until retract.
+	RetractReason *string `json:"retract_reason,omitempty"`
+
+	// RetractedAt RFC 3339 timestamp in UTC when the run's output was retracted.
+	RetractedAt *time.Time `json:"retracted_at,omitempty"`
 
 	// Status Lifecycle of a run. Unknown values must be treated as non-terminal.
 	Status RunStatus `json:"status"`
@@ -968,6 +986,9 @@ type CreateRunJSONRequestBody CreateRunRequest
 // CreateRunCheckpointJSONRequestBody defines body for CreateRunCheckpoint for application/json ContentType.
 type CreateRunCheckpointJSONRequestBody CreateCheckpointRequest
 
+// RetractRunJSONRequestBody defines body for RetractRun for application/json ContentType.
+type RetractRunJSONRequestBody RetractRequest
+
 // SteerRunJSONRequestBody defines body for SteerRun for application/json ContentType.
 type SteerRunJSONRequestBody SteerRequest
 
@@ -1060,6 +1081,9 @@ type ServerInterface interface {
 	// ForegroundRun Foreground a run
 	// (POST /runs/{id}/foreground)
 	ForegroundRun(w http.ResponseWriter, r *http.Request, id RunID)
+	// RetractRun Retract a run's output
+	// (POST /runs/{id}/retract)
+	RetractRun(w http.ResponseWriter, r *http.Request, id RunID)
 	// SteerRun Steer a run
 	// (POST /runs/{id}/steer)
 	SteerRun(w http.ResponseWriter, r *http.Request, id RunID)
@@ -2114,6 +2138,32 @@ func (siw *ServerInterfaceWrapper) ForegroundRun(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// RetractRun operation middleware
+func (siw *ServerInterfaceWrapper) RetractRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id RunID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetractRun(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SteerRun operation middleware
 func (siw *ServerInterfaceWrapper) SteerRun(w http.ResponseWriter, r *http.Request) {
 
@@ -2295,6 +2345,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/background", wrapper.BackgroundRun)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/foreground", wrapper.ForegroundRun)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/stop", wrapper.StopRun)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/retract", wrapper.RetractRun)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/runs/{id}/checkpoints", wrapper.CreateRunCheckpoint)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/plans", wrapper.ListPlans)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/plans/{id}", wrapper.GetPlan)

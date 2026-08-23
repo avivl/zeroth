@@ -24,14 +24,15 @@ import (
 )
 
 type stubTracker struct {
-	mu        sync.Mutex
-	ch        chan tracker.AssignmentEvent
-	comments  []string
-	states    []tracker.StateKind
-	artifacts []tracker.Artifact
-	issue     tracker.Issue
-	issues    map[string]tracker.Issue
-	threads   map[string][]tracker.Comment
+	mu         sync.Mutex
+	ch         chan tracker.AssignmentEvent
+	comments   []string
+	states     []tracker.StateKind
+	artifacts  []tracker.Artifact
+	unassigned []string
+	issue      tracker.Issue
+	issues     map[string]tracker.Issue
+	threads    map[string][]tracker.Comment
 }
 
 func newStubTracker(iss tracker.Issue) *stubTracker {
@@ -108,6 +109,12 @@ func (s *stubTracker) LinkArtifact(_ context.Context, _ string, a tracker.Artifa
 	s.artifacts = append(s.artifacts, a)
 	return nil
 }
+func (s *stubTracker) Unassign(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.unassigned = append(s.unassigned, key)
+	return nil
+}
 func (s *stubTracker) commentBodies() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -131,6 +138,12 @@ func (s *stubTracker) artifactURLs() []string {
 		out = append(out, a.URL)
 	}
 	return out
+}
+
+func (s *stubTracker) unassignKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.unassigned...)
 }
 
 type fakeSandbox struct {
@@ -457,6 +470,11 @@ func assignServer(t *testing.T, tr tracker.Provider, sbx sandbox.Driver, interva
 
 func waitRunByTracker(t *testing.T, base, key string) gen.Run {
 	t.Helper()
+	return waitNewRunByTracker(t, base, key, "")
+}
+
+func waitNewRunByTracker(t *testing.T, base, key, notID string) gen.Run {
+	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		res, err := http.Get(base + "/runs")
@@ -470,13 +488,16 @@ func waitRunByTracker(t *testing.T, base, key string) gen.Run {
 		}
 		res.Body.Close()
 		for _, run := range list.Items {
-			if run.TrackerRef != nil && *run.TrackerRef == key {
+			if run.TrackerRef != nil && *run.TrackerRef == key && string(run.Id) != notID {
 				return run
 			}
 		}
 		time.Sleep(15 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for tracker_ref %s", key)
+	if notID == "" {
+		t.Fatalf("timed out waiting for tracker_ref %s", key)
+	}
+	t.Fatalf("timed out waiting for a new run on tracker_ref %s (not %s)", key, notID)
 	return gen.Run{}
 }
 

@@ -47,6 +47,9 @@ func (s *commentStub) Assignments(context.Context) (<-chan tracker.AssignmentEve
 func (s *commentStub) LinkArtifact(context.Context, string, tracker.Artifact) error {
 	return tracker.ErrInvalid
 }
+func (s *commentStub) Unassign(context.Context, string) error {
+	return tracker.ErrInvalid
+}
 
 func TestIssuePromptIncludesHumanCommentsAndMemory(t *testing.T) {
 	t.Parallel()

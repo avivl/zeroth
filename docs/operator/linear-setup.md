@@ -173,6 +173,12 @@ Once `zerothd` is running with the configuration above:
    cancelled, the harness subprocess is stopped, the sandbox is torn down, and
    the issue records that the run was cancelled rather than silently abandoned.
    Killing the sandbox container alone does not stop `claude`.
+9. **If a completed run opened a bad pull request**, retract it from Zeroth
+   (`zeroth retract <run-id> --reason "..."` or Retract on the run detail
+   view). That closes the PR, comments the reason on this issue, un-assigns
+   the agent, and moves the issue back to Todo. Do not close the PR on
+   GitHub and do not un-assign/re-assign to retry. The issue thread stays
+   a complete record, including the retraction.
 
 The first successful loop through steps 1–7 is the thing to aim for. If you get
 a plan comment on an issue you assigned, the integration is working.
