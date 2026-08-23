@@ -305,11 +305,8 @@ func TestGoldenApproveAndApplyOverHTTP(t *testing.T) {
 	if err := json.NewDecoder(leases.Body).Decode(&list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Items) == 0 {
-		t.Fatal("expected apply-minted leases")
-	}
-	if time.Now().After(list.Items[0].ExpiresAt.Add(time.Hour)) {
-		t.Fatalf("lease expiry %+v", list.Items[0].ExpiresAt)
+	if len(list.Items) != 0 {
+		t.Fatalf("apply should release leases, still have %d", len(list.Items))
 	}
 }
 

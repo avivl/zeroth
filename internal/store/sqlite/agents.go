@@ -281,6 +281,20 @@ func (s *Store) UpdateLease(ctx context.Context, l store.Lease) error {
 	return affectedOne(res, "update lease")
 }
 
+func (s *Store) DeleteLease(ctx context.Context, id store.LeaseID) error {
+	if err := s.guard(); err != nil {
+		return err
+	}
+	if id.IsZero() {
+		return wrap("delete lease", store.ErrInvalid)
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM leases WHERE id = ?`, id.String())
+	if err != nil {
+		return wrap("delete lease", err)
+	}
+	return affectedOne(res, "delete lease")
+}
+
 func (s *Store) ListLeases(ctx context.Context, q store.LeaseQuery) (store.Page[store.Lease], error) {
 	if err := s.guard(); err != nil {
 		return store.Page[store.Lease]{}, err

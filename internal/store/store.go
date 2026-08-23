@@ -76,6 +76,9 @@ type Store interface {
 	GetLease(ctx context.Context, id LeaseID) (Lease, error)
 	UpdateLease(ctx context.Context, l Lease) error
 	ListLeases(ctx context.Context, q LeaseQuery) (Page[Lease], error)
+	// DeleteLease removes a lease so it cannot authorize further
+	// effects. A missing id is ErrNotFound. Empty id is ErrInvalid.
+	DeleteLease(ctx context.Context, id LeaseID) error
 
 	CreateCheckpoint(ctx context.Context, c Checkpoint) error
 	GetCheckpoint(ctx context.Context, id CheckpointID) (Checkpoint, error)

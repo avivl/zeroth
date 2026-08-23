@@ -719,6 +719,22 @@ func testLeases(t *testing.T, open func(t *testing.T) store.Store) {
 	if err != nil || len(page.Items) != 1 {
 		t.Fatalf("ListLeases: %+v err=%v", page, err)
 	}
+	if err := s.DeleteLease(ctx, l.ID); err != nil {
+		t.Fatalf("DeleteLease: %v", err)
+	}
+	if _, err := s.GetLease(ctx, l.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetLease after delete: err=%v, want ErrNotFound", err)
+	}
+	page, err = s.ListLeases(ctx, store.LeaseQuery{AgentID: agent.ID, PageQuery: store.PageQuery{Limit: 10}})
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("ListLeases after delete: %+v err=%v", page, err)
+	}
+	if err := s.DeleteLease(ctx, l.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("DeleteLease missing: %v", err)
+	}
+	if err := s.DeleteLease(ctx, store.LeaseID{}); !errors.Is(err, store.ErrInvalid) {
+		t.Fatalf("DeleteLease empty: %v", err)
+	}
 }
 
 func testCheckpoints(t *testing.T, open func(t *testing.T) store.Store) {

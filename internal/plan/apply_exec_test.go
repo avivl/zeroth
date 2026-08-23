@@ -620,6 +620,27 @@ func TestApplyFirstRowFailureIsFailClosed(t *testing.T) {
 	}
 }
 
+func TestApplyReleasesOnCancel(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	applier, world, leases, _, _ := applyHarness(now)
+	p := threeApproved(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	world.after = func(Row) { cancel() }
+
+	got, err := applier.Apply(ctx, applyActor, p, Approval{PlanHash: p.Hash})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if got.AppliedThrough < 1 {
+		t.Fatalf("through=%d, first row should have landed before cancel", got.AppliedThrough)
+	}
+	acq, rel := leases.counts()
+	if acq != 1 || rel != 1 {
+		t.Fatalf("leases %d/%d", acq, rel)
+	}
+}
+
 func TestPropertyPreconditionDriftWritesNothing(t *testing.T) {
 	t.Parallel()
 	r := rand.New(rand.NewSource(11))
