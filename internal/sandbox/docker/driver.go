@@ -98,7 +98,8 @@ func (d *Driver) lookup(id sandbox.ID) (*instance, error) {
 }
 
 // HostWorkspace is the host directory bind-mounted at /workspace. The
-// harness runs against this tree (plan mode, no apply).
+// stage-1 harness is a host subprocess whose cwd is this tree
+// (ADR-Z-0010), not a docker exec. Plan mode, no apply.
 func (d *Driver) HostWorkspace(id sandbox.ID) (string, error) {
 	inst, err := d.lookup(id)
 	if err != nil {

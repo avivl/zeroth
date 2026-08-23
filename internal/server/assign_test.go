@@ -134,10 +134,11 @@ func (s *stubTracker) artifactURLs() []string {
 }
 
 type fakeSandbox struct {
-	mu   sync.Mutex
-	n    int
-	seed map[string]string
-	inst map[string]*fakeInst
+	mu       sync.Mutex
+	n        int
+	seed     map[string]string
+	inst     map[string]*fakeInst
+	execArgv [][]string
 }
 
 type fakeInst struct {
@@ -202,6 +203,7 @@ func (f *fakeSandbox) HostWorkspace(id sandbox.ID) (string, error) {
 func (f *fakeSandbox) Exec(_ context.Context, id sandbox.ID, cmd sandbox.Cmd) (sandbox.ExecResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.execArgv = append(f.execArgv, append([]string(nil), cmd.Argv...))
 	inst, ok := f.inst[id.String()]
 	if !ok {
 		return sandbox.ExecResult{}, sandbox.ErrNotFound
@@ -305,6 +307,16 @@ func (f *fakeSandbox) overlayFiles(rel string) []string {
 			continue
 		}
 		out = append(out, string(body))
+	}
+	return out
+}
+
+func (f *fakeSandbox) execCalls() [][]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]string, len(f.execArgv))
+	for i, argv := range f.execArgv {
+		out[i] = append([]string(nil), argv...)
 	}
 	return out
 }

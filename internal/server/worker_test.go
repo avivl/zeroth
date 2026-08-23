@@ -82,6 +82,12 @@ func (h *stubHarness) lastPrompt() string {
 	return h.lastSpec.Prompt
 }
 
+func (h *stubHarness) startedSpec() harness.Spec {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.lastSpec
+}
+
 func TestHarnessDraftsPlanOnceAndInboxShowsIt(t *testing.T) {
 	t.Parallel()
 	iss := tracker.Issue{
@@ -326,6 +332,50 @@ func TestHarnessBrokenHostWorkspaceFailsLoudly(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing diagnosable workspace error: %v", tr.commentBodies())
+	}
+}
+
+func TestHarnessStartUsesSandboxOverlayNotCheckout(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("host checkout README\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	iss := tracker.Issue{Key: "42-52a", Title: "harness overlay cwd"}
+	tr := newStubTracker(iss)
+	h := &stubHarness{
+		events: []harness.Event{
+			{Kind: harness.EventEffects, Effects: []harness.Effect{
+				{Type: "modify", Path: "README.md", Diff: "-host checkout README\n+updated README"},
+			}},
+			{Kind: harness.EventExited, Payload: "0"},
+		},
+	}
+	sbx := newFakeSandbox()
+	hs := harnessAssignServerCfg(t, tr, sbx, h, root)
+
+	tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-52a", Issue: iss, At: time.Now()}
+	run := waitRunByTracker(t, hs.URL, "42-52a")
+	_ = waitRunPlan(t, hs.URL, string(run.Id))
+
+	overlay, err := sbx.HostWorkspace(sbx.anyID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := h.startedSpec()
+	if spec.Workspace != overlay {
+		t.Fatalf("harness workspace %q, want overlay %q (ADR-Z-0010)", spec.Workspace, overlay)
+	}
+	if spec.Workspace == root {
+		t.Fatal("harness started in the operator checkout")
+	}
+	for _, argv := range sbx.execCalls() {
+		if len(argv) == 0 {
+			continue
+		}
+		if filepath.Base(argv[0]) == "claude" {
+			t.Fatalf("sandbox.Exec launched the harness: %q", argv)
+		}
 	}
 }
 
