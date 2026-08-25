@@ -40,3 +40,24 @@ Shim. `internal/harness/claudecode` wraps the `claude` CLI directly, the same in
 - The shim cannot express something ACP would give for free, mid-session steer beyond what is already proven, or checkpoint and resume semantics ACP handles natively and the shim cannot.
 - Claude Code changes its CLI or SDK surface in a way that breaks the shim and an ACP adapter is unaffected.
 - `agentclientprotocol/claude-agent-acp`, or a first-party Anthropic ACP surface, matures to the point of confirmed checkpoint and resume support, worth a fresh look even without a second harness forcing the question.
+
+## Amendment, 2026-08-24 (42-75)
+
+The invocation above says `--tools ""`. It is now `--tools Read`, plus a
+`--settings` deny rule set covering credential paths.
+
+Reason: with no tools the agent could not read the file it was being asked
+to diff. A modify effect is a unified diff whose context lines must match
+the file byte for byte, and the only prompt the agent receives is the
+tracker issue text. Three live runs on a docs-only README change produced
+invented context lines and, once, the literal placeholder
+`<<last line of README.md>>`. The plan builder rejected them correctly, so
+nothing was corrupted, but no run reached apply. Verified by reproduction:
+the shipped no-tools invocation produced `# README` plus
+`<existing content preserved>` on the first attempt; granting Read produced
+a correct EOF-anchored diff that applied, three times out of three.
+
+This does not weaken propose-only. Write tools are still absent and
+`--permission-mode plan` is unchanged: the agent can read, and still cannot
+act. The G4 result this ADR cites (10/10 structured effects) is unaffected;
+what changed is that the effects are now truthful about file content.

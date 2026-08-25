@@ -114,3 +114,24 @@ must not treat stage-1 isolation as already exercised.
   prerequisite, not a follow-up after the control plane is shared.
 - The compensating controls (`--tools ""`, plan mode) are removed or
   bypassed so the agent can mutate files without a plan.
+
+## Amendment, 2026-08-24 (42-75)
+
+`--tools ""` is now `--tools Read`, with a `--settings` denylist on
+credential paths (`.ssh`, `.aws`, `.config`, `.claude*`, `/etc`, `/root`,
+`/var/run/secrets`). See ADR-Z-0003's amendment for why: without a read
+tool the agent had to guess file content, and modify effects were rejected
+as a result.
+
+Against this ADR specifically:
+
+- The consequence "the process can read and write host paths outside the
+  overlay" was already accepted here. What changed is that the model can
+  now direct those reads rather than merely inheriting the capability.
+  The denylist is a new mitigation that did not previously exist.
+- The revisit trigger "the compensating controls are removed or bypassed
+  so the agent can mutate files without a plan" is **not** met. Read does
+  not mutate. No write tool is granted and plan mode is unchanged.
+- The trigger list is unchanged and still stands. This narrows one
+  compensating control without replacing the missing boundary, which is
+  one more reason in-sandbox execution is the real fix, not a follow-up.
