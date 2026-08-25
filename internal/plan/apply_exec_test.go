@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/avivl/zeroth/internal/policy"
+	"github.com/avivl/zeroth/internal/session"
 )
 
 const applyActor policy.PrincipalID = "alice"
@@ -410,6 +411,82 @@ func TestApplyReplayByIdempotencyKeyIsNoOp(t *testing.T) {
 	if len(world.writeKeys()) != 3 {
 		t.Fatalf("idempotent replay wrote again: %v", world.writeKeys())
 	}
+}
+
+func TestApplyIdenticalEffectsOnDistinctSessionsBothExecute(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC)
+	world := newWorld(nil)
+	clock := &testClock{now: now}
+	leases := &testLeaser{leases: []policy.Lease{coveringLease(now)}}
+	applier := &Applier{
+		Kernel:      policy.New(),
+		Clock:       clock,
+		World:       world,
+		Leases:      leases,
+		Checkpoints: &testCK{},
+		Audit:       testAuditor{},
+	}
+	effect := []Proposed{{Type: "create", Path: "CHANGELOG.md", Diff: "# Changelog\n"}}
+	first := approveCreate(t, "sess-1", "plan-a", effect, now)
+	second := approveCreate(t, "sess-2", "plan-b", effect, now)
+	if first.Rows[0].IdempotencyKey == second.Rows[0].IdempotencyKey {
+		t.Fatal("distinct sessions shared an idempotency key")
+	}
+
+	got1, err := applier.Apply(t.Context(), applyActor, first, Approval{PlanHash: first.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got1.Status != StatusApplied {
+		t.Fatalf("first status %s", got1.Status)
+	}
+	// Distinct sessions have distinct overlays. Clear the file hash so
+	// Observe looks like a fresh workspace, while keeping the Seen map
+	// that caused cross-run collisions.
+	world.mu.Lock()
+	delete(world.hashes, "CHANGELOG.md")
+	world.mu.Unlock()
+	got2, err := applier.Apply(t.Context(), applyActor, second, Approval{PlanHash: second.Hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.Status != StatusApplied {
+		t.Fatalf("second status %s", got2.Status)
+	}
+	writes := world.writeKeys()
+	if len(writes) != 2 {
+		t.Fatalf("shared world wrote %v, want both sessions to Execute", writes)
+	}
+	if writes[0] == writes[1] {
+		t.Fatal("both Executes used the same idempotency key")
+	}
+}
+
+func approveCreate(t *testing.T, sessRaw, planRaw string, effects []Proposed, now time.Time) Plan {
+	t.Helper()
+	d := validDraft()
+	id, err := ParseID(planRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := session.ParseID(sessRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.ID = id
+	d.SessionID = sess
+	d.Effects = effects
+	d.Observed = nil
+	p, err := Build(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := examined(p).Approve(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return approved
 }
 
 func TestApplyRefusesBlindPartialResume(t *testing.T) {

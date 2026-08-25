@@ -39,6 +39,35 @@ func TestBuildRows(t *testing.T) {
 	}
 }
 
+func TestBuildIdempotencyKeyIsScopedToSession(t *testing.T) {
+	t.Parallel()
+	d1 := validDraft()
+	d2 := validDraft()
+	sess2, err := session.ParseID("sess-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2.SessionID = sess2
+	p1, err := Build(d1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := Build(d2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1.Rows[0].IdempotencyKey == p2.Rows[0].IdempotencyKey {
+		t.Fatal("identical effects on distinct sessions must not share an idempotency key")
+	}
+	again, err := Build(d1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Rows[0].IdempotencyKey != p1.Rows[0].IdempotencyKey {
+		t.Fatal("retries of the same session and content must keep the same key")
+	}
+}
+
 func TestBuildModifyPostconditionIsPatchedFileHash(t *testing.T) {
 	t.Parallel()
 	original := "# demo\n## keep me\n"

@@ -10,7 +10,7 @@
 // A plan is a typed set of resource rows plus the constraints it was
 // drafted under (Z1-052). Each row names an operation, a target, a
 // payload, the lease it will consume, a precondition observed at draft
-// time, an idempotency key, and an expected postcondition: the hash of
+// time, a session-scoped idempotency key, and an expected postcondition: the hash of
 // the file after the payload is applied, not a hash of the payload text.
 // The plan as a whole carries a canonical hash, an expiry, a cost ceiling, and the
 // scope and credential classes it was drafted under. A revised plan is a

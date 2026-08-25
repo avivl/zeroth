@@ -27,8 +27,10 @@ import (
 type recordingPublisher struct {
 	mu           sync.Mutex
 	req          server.ApplyPublish
+	calls        []server.ApplyPublish
 	files        map[string]string
 	ref          server.ApplyRef
+	emptyPR      bool
 	closed       []string
 	closeComment string
 	closeErr     error
@@ -38,6 +40,7 @@ func (p *recordingPublisher) Publish(_ context.Context, req server.ApplyPublish)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.req = req
+	p.calls = append(p.calls, req)
 	p.files = make(map[string]string, len(req.Targets))
 	for _, target := range req.Targets {
 		body, err := os.ReadFile(filepath.Join(req.Workspace, filepath.FromSlash(target)))
@@ -46,6 +49,11 @@ func (p *recordingPublisher) Publish(_ context.Context, req server.ApplyPublish)
 			continue
 		}
 		p.files[target] = string(body)
+	}
+	if p.emptyPR {
+		ref := server.ApplyRef{Branch: req.Branch, Commit: "testsha"}
+		p.ref = ref
+		return ref, nil
 	}
 	ref := p.ref
 	if ref.PullRequest == "" {
@@ -399,6 +407,97 @@ func TestApplyCompletionCommentIncludesPullRequest(t *testing.T) {
 	}
 	if urls := e.tr.artifactURLs(); len(urls) == 0 || urls[0] != "https://github.com/avivl/zeroth/pull/99" {
 		t.Fatalf("artifacts %v", urls)
+	}
+}
+
+func TestIdenticalCreatesOnTwoRunsEachOpenPR(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	effects := []plan.Proposed{{Type: "create", Path: "CHANGELOG.md", Diff: "# Changelog\n"}}
+	for i := 0; i < 2; i++ {
+		run := createRun(t, e.hs.URL, "Create a CHANGELOG.md stub")
+		pid := e.seedPlan(run, effects, nil)
+		if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+			t.Fatal(err)
+		}
+		comment := "ship it"
+		res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+		res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("run %d approve %d", i, res.StatusCode)
+		}
+		applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+		slurp, _ := io.ReadAll(applied.Body)
+		applied.Body.Close()
+		if applied.StatusCode != http.StatusOK {
+			t.Fatalf("run %d apply %d %s", i, applied.StatusCode, slurp)
+		}
+		var out gen.ApplyPlanResponse
+		if err := json.Unmarshal(slurp, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Plan.Status != gen.PlanStatusApplied {
+			t.Fatalf("run %d status %s", i, out.Plan.Status)
+		}
+	}
+	e.pub.mu.Lock()
+	defer e.pub.mu.Unlock()
+	if len(e.pub.calls) != 2 {
+		t.Fatalf("publisher calls %d, want 2 independent PRs: %+v", len(e.pub.calls), e.pub.calls)
+	}
+	for i, req := range e.pub.calls {
+		if len(req.Targets) != 1 || req.Targets[0] != "CHANGELOG.md" {
+			t.Fatalf("call %d targets %v", i, req.Targets)
+		}
+		if e.pub.files["CHANGELOG.md"] != "# Changelog\n" && req.Workspace == "" {
+			t.Fatalf("call %d missing changelog payload: %+v", i, req)
+		}
+	}
+}
+
+func TestApplyWithoutPullRequestDoesNotCompleteTracker(t *testing.T) {
+	t.Parallel()
+	e := applySetup(t)
+	e.patchReviewer(false)
+	e.pub.emptyPR = true
+	e.tr.ch <- tracker.AssignmentEvent{Kind: tracker.Assigned, Key: "42-50", Issue: e.tr.issue, At: time.Now()}
+	run := waitRunByTracker(t, e.hs.URL, "42-50")
+	pid := e.seedPatchedFilePlan(run, []plan.Proposed{
+		{Type: "modify", Path: "docs/design/plan.md", Diff: "-typo\n+fixed"},
+	})
+	if _, err := e.srv.ExamineDraft(t.Context(), pid); err != nil {
+		t.Fatal(err)
+	}
+	comment := "ship it"
+	res := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/approve", gen.ApproveRequest{Comment: &comment})
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("approve %d", res.StatusCode)
+	}
+	applied := postJSON(t, e.hs.URL+"/plans/"+pid.String()+"/apply", struct{}{})
+	slurp, _ := io.ReadAll(applied.Body)
+	applied.Body.Close()
+	if applied.StatusCode == http.StatusOK {
+		t.Fatalf("apply without a PR reported success: %s", slurp)
+	}
+	if !strings.Contains(string(slurp), "no pull request") {
+		t.Fatalf("want a visible missing-PR error, got %s", slurp)
+	}
+	if e.tr.lastState() == tracker.StateCompleted {
+		t.Fatal("tracker moved to In Review without a PR")
+	}
+	foundFail := false
+	for _, c := range e.tr.commentBodies() {
+		if strings.Contains(c, "### Zeroth completed") {
+			t.Fatalf("completion comment without a PR: %s", c)
+		}
+		if strings.Contains(c, "### Zeroth failed") {
+			foundFail = true
+		}
+	}
+	if !foundFail {
+		t.Fatalf("missing fail comment: %v", e.tr.commentBodies())
 	}
 }
 

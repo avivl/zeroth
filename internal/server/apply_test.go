@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/avivl/zeroth/internal/audit"
 	"github.com/avivl/zeroth/internal/plan"
+	"github.com/avivl/zeroth/internal/session"
 	"github.com/avivl/zeroth/internal/store"
 	"github.com/avivl/zeroth/internal/store/sqlite"
 )
@@ -632,4 +634,172 @@ func TestPeekPRFallsBackToStore(t *testing.T) {
 	if got := srv.peekPR("not-an-id"); got != "" {
 		t.Fatalf("invalid id peekPR = %q", got)
 	}
+}
+
+type stubApplyPublisher struct {
+	calls []ApplyPublish
+	ref   ApplyRef
+}
+
+func (p *stubApplyPublisher) Publish(_ context.Context, req ApplyPublish) (ApplyRef, error) {
+	p.calls = append(p.calls, req)
+	ref := p.ref
+	if ref.PullRequest == "" {
+		ref = ApplyRef{Branch: req.Branch, Commit: "sha", PullRequest: "https://github.com/avivl/zeroth/pull/1"}
+	}
+	return ref, nil
+}
+
+func (p *stubApplyPublisher) ClosePullRequest(context.Context, string, string) error { return nil }
+
+func TestPublishAppliedEmptyFileEffectsIsAnError(t *testing.T) {
+	t.Parallel()
+	pub := &stubApplyPublisher{}
+	srv, sess, sid := publishTestServer(t, pub)
+	p := fileEffectPlan(t, "CHANGELOG.md")
+	err := srv.publishApplied(t.Context(), sess, sid, p, newApplyWorld(t.TempDir()), t.TempDir())
+	if err == nil {
+		t.Fatal("expected empty-targets file effects to fail")
+	}
+	if !strings.Contains(err.Error(), "no workspace targets were written") {
+		t.Fatalf("err %v", err)
+	}
+	if len(pub.calls) != 0 {
+		t.Fatalf("publisher ran: %+v", pub.calls)
+	}
+	if rec := lastPublishAudit(t, srv); rec.Action != "" {
+		t.Fatalf("failed empty publish still audited: %+v", rec)
+	}
+}
+
+func TestPublishAppliedMemoryOnlyRecordsNothingToPublish(t *testing.T) {
+	t.Parallel()
+	pub := &stubApplyPublisher{}
+	srv, sess, sid := publishTestServer(t, pub)
+	p := plan.Plan{
+		ID:      mustPlanID(t, "p_mem_only"),
+		Hash:    "hash-mem",
+		Summary: "remember a style",
+		Rows:    []plan.Row{{Op: plan.OpMemoryProposal, Target: "session/style", Payload: "prefer table tests"}},
+	}
+	if err := srv.publishApplied(t.Context(), sess, sid, p, newApplyWorld(t.TempDir()), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if len(pub.calls) != 0 {
+		t.Fatal("memory-only publish must not open a PR")
+	}
+	rec := lastPublishAudit(t, srv)
+	if rec.Action != audit.ActionPlanApplyPublish || rec.Postcondition != publishOutcomeNothingToPublish {
+		t.Fatalf("audit %+v", rec)
+	}
+}
+
+func TestPublishAppliedEmptyTargetsWithExistingPRIsAlreadyPublished(t *testing.T) {
+	t.Parallel()
+	pub := &stubApplyPublisher{}
+	srv, sess, sid := publishTestServer(t, pub)
+	url := "https://github.com/avivl/zeroth/pull/7"
+	srv.rememberPR(sess.ID.String(), url)
+	p := fileEffectPlan(t, "CHANGELOG.md")
+	if err := srv.publishApplied(t.Context(), sess, sid, p, newApplyWorld(t.TempDir()), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if len(pub.calls) != 0 {
+		t.Fatal("retry with an existing PR must not publish again")
+	}
+	rec := lastPublishAudit(t, srv)
+	if rec.Postcondition != publishOutcomeAlreadyPublished || rec.Target != url {
+		t.Fatalf("audit %+v", rec)
+	}
+}
+
+func TestPublishAppliedRecordsPublishedOutcome(t *testing.T) {
+	t.Parallel()
+	pub := &stubApplyPublisher{}
+	srv, sess, sid := publishTestServer(t, pub)
+	root := t.TempDir()
+	world := newApplyWorld(root)
+	row := plan.Row{Op: plan.OpCreate, Target: "CHANGELOG.md", Payload: "# Changelog\n", IdempotencyKey: "k"}
+	if _, err := world.Execute(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	p := fileEffectPlan(t, "CHANGELOG.md")
+	if err := srv.publishApplied(t.Context(), sess, sid, p, world, root); err != nil {
+		t.Fatal(err)
+	}
+	if len(pub.calls) != 1 || len(pub.calls[0].Targets) != 1 || pub.calls[0].Targets[0] != "CHANGELOG.md" {
+		t.Fatalf("publish %+v", pub.calls)
+	}
+	rec := lastPublishAudit(t, srv)
+	if rec.Postcondition != publishOutcomePublished {
+		t.Fatalf("audit %+v", rec)
+	}
+	if srv.peekPR(sess.ID.String()) != "https://github.com/avivl/zeroth/pull/1" {
+		t.Fatalf("pr %q", srv.peekPR(sess.ID.String()))
+	}
+}
+
+func publishTestServer(t *testing.T, pub ApplyPublisher) (*Server, store.Session, session.ID) {
+	t.Helper()
+	st, err := sqlite.New(filepath.Join(t.TempDir(), "zeroth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	srv, err := New(Config{Store: st, TokenInterval: time.Hour, TokenCount: 8, Publisher: pub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	aid, err := store.ParseAgentID(DefaultAgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sidStore, err := store.ParseSessionID("s_publish_empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	sess := store.Session{ID: sidStore, AgentID: aid, Status: "applying", CreatedAt: now, UpdatedAt: now}
+	if err := st.CreateSession(t.Context(), sess); err != nil {
+		t.Fatal(err)
+	}
+	sid, err := session.ParseID(sess.ID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return srv, sess, sid
+}
+
+func fileEffectPlan(t *testing.T, target string) plan.Plan {
+	t.Helper()
+	return plan.Plan{
+		ID:      mustPlanID(t, "p_file_effect"),
+		Hash:    "hash-file",
+		Summary: "create " + target,
+		Rows:    []plan.Row{{Op: plan.OpCreate, Target: target, Payload: "# Changelog\n"}},
+	}
+}
+
+func mustPlanID(t *testing.T, raw string) plan.ID {
+	t.Helper()
+	id, err := plan.ParseID(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func lastPublishAudit(t *testing.T, srv *Server) store.AuditRecord {
+	t.Helper()
+	chain, err := srv.store.AuditChain(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if chain[i].Action == audit.ActionPlanApplyPublish {
+			return chain[i]
+		}
+	}
+	return store.AuditRecord{}
 }
