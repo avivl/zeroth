@@ -91,3 +91,7 @@ PRs run GitHub Actions (`.github/workflows/ci.yml`): race tests with a coverage 
 ## License
 
 [MIT](LICENSE) © 2026 Aviv Laufer
+
+## License
+
+MIT. See [LICENSE](./LICENSE) for the full text.
