@@ -81,6 +81,29 @@ func validateSpec(spec harness.Spec) error {
 	return nil
 }
 
+// readOnlySettings denies Read on paths that hold credentials or host
+// configuration. Stage 1 runs claude as a host subprocess against the
+// overlay (ADR-Z-0010), so an unrestricted Read reaches the whole
+// filesystem of the user running zerothd, not just the workspace. This is
+// a denylist and not a jail: it covers the paths worth naming, and the
+// real containment arrives when the harness moves inside the sandbox.
+// Deny beats allow in Claude Code, so nothing here can be re-granted.
+const readOnlySettings = `{"permissions":{"deny":[` +
+	`"Read(//etc/**)",` +
+	`"Read(//Users/*/.ssh/**)",` +
+	`"Read(//Users/*/.aws/**)",` +
+	`"Read(//Users/*/.config/**)",` +
+	`"Read(//Users/*/.claude.json)",` +
+	`"Read(//Users/*/.claude/**)",` +
+	`"Read(//home/*/.ssh/**)",` +
+	`"Read(//home/*/.aws/**)",` +
+	`"Read(//home/*/.config/**)",` +
+	`"Read(//home/*/.claude.json)",` +
+	`"Read(//home/*/.claude/**)",` +
+	`"Read(//root/**)",` +
+	`"Read(//var/run/secrets/**)"` +
+	`]}}`
+
 func cliArgs(prompt, resumeSession string) []string {
 	args := []string{
 		"-p",
@@ -88,7 +111,12 @@ func cliArgs(prompt, resumeSession string) []string {
 		"--verbose",
 		"--include-partial-messages",
 		"--bare",
-		"--tools", "",
+		// Read, not "": a modify diff's context lines have to match the
+		// file byte for byte, and with no tools the agent has no way to
+		// know them (42-75). Read is the only tool granted; write tools
+		// stay unavailable, which is what keeps propose-only true.
+		"--tools", "Read",
+		"--settings", readOnlySettings,
 		"--permission-mode", "plan",
 		"--input-format", "stream-json",
 		"--system-prompt", ProposeEffectsPrompt,

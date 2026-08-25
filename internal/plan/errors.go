@@ -19,6 +19,12 @@ var (
 	// ErrNotInPlan is returned when apply is asked to perform a row the
 	// approved plan does not list.
 	ErrNotInPlan = errors.New("effect not in approved plan")
+	// ErrPlaceholderDiff is returned when a modify diff's context lines are
+	// unresolved template text rather than content read from the file
+	// (42-75). It is a distinct error because the generic hunk conflict it
+	// would otherwise produce is indistinguishable from an ordinary stale
+	// diff, and telling them apart needed a raw-payload trace read.
+	ErrPlaceholderDiff = errors.New("diff contains apparent placeholder text")
 	// ErrHashMismatch is returned when the stored hash does not match the
 	// canonical hash of the rows and constraints. A mismatch is a
 	// revision, not an approved plan.

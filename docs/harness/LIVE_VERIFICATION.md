@@ -23,7 +23,8 @@ environment (ADR-Z-0008). CI still uses the fake CLI. Re-run is opt-in.
 
 Prompt: `Reply with the single word ok. Do not call tools.` The adapter still
 sends [ProposeEffectsPrompt](../../internal/harness/claudecode/prompt.go) as
-`--system-prompt`, with `--tools ""` and `--permission-mode plan`.
+`--system-prompt`, with `--tools Read`, a `--settings` read denylist, and
+`--permission-mode plan`. (`--tools ""` until 42-75; see the tool_call row.)
 
 ```
 === RUN   TestLiveClaudeCodeStream
@@ -52,7 +53,7 @@ appeared in payloads or in the temp workspace.
 | Token deltas | Always emits `stream_event` / `content_block_delta` | `--verbose` alone does not. `--include-partial-messages` does. | **Fixed.** Added to the shim flags. |
 | After `result` | Process exits | Stdin kept open for Steer, so the process stays up | **Accepted.** The live test Stops after a quiet burst. `EventExited` payload is `stopped`. |
 | Truncated stdout | `TRUNCATE` prompt writes one line past the 1 MiB scanner cap, then exits 0 | An over-long or cut-short stream is possible on any long tool result | **Fixed.** `read` keeps `sc.Err()` instead of discarding it: the scan error becomes an `EventError`, the `EventExited` payload reads `stream error: <err>; exit 0`, and the partial transcript is not salvaged into effects (42-67). |
-| `tool_call` | Always synthesizes a `Read` tool_use | `--tools ""` plus the system prompt: no tool_use on this run | **Accepted.** Stage 1 is propose-effects, not tool execution (ADR-Z-0003, G4). The fake CLI covers the parser path. |
+| `tool_call` | Always synthesizes a `Read` tool_use | `--tools ""` plus the system prompt: no tool_use on this run | **Superseded by 42-75.** Accepted at the time, but with no tools the agent could not read the file it was diffing, so modify effects were guessed: invented context lines and literal placeholder text that the plan builder rejected. `--tools Read` is now granted, with a `--settings` denylist on credential paths. Write tools are still absent, so propose-only holds. |
 | `effects` event | Result JSON has a non-empty 3-file set | This prompt produced `{"effects":[]}` | **Accepted.** `ParseEffects` rejects an empty list (G4 corpus is non-empty). `handleResult` falls back to a token, so the two token events are delta plus result. |
 | User vs system prompt | Fake ignores the system prompt text | Live followed ProposeEffectsPrompt (`{"effects":[]}`) rather than the user "ok" | **Accepted.** The system prompt is the adapter contract. |
 

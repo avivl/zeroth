@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -46,6 +47,9 @@ func Materialize(op Op, original []byte, payload string) ([]byte, error) {
 
 func applyModify(original []byte, payload string) ([]byte, error) {
 	if LooksLikeDiff(payload) {
+		if marker, ok := placeholderInDiff(payload); ok {
+			return nil, fmt.Errorf("modify payload %q: %w", marker, ErrPlaceholderDiff)
+		}
 		out, err := ApplyPatch(original, payload)
 		if err != nil {
 			return nil, fmt.Errorf("modify payload is a diff but does not apply: %w", err)
@@ -59,6 +63,46 @@ func applyModify(original []byte, payload string) ([]byte, error) {
 		return nil, fmt.Errorf("modify payload would replace %d bytes with %d bytes; send a unified diff with context instead of overwriting", len(original), len(payload))
 	}
 	return []byte(payload), nil
+}
+
+// placeholderMarkers are the stand-in shapes an agent reaches for when it is
+// describing content instead of quoting it. Kept deliberately narrow: these
+// only ever run against context and delete lines, which must be verbatim file
+// content, so a match means the line cannot have come from the file.
+var placeholderMarkers = []*regexp.Regexp{
+	// <<last line of README.md>>, <existing content preserved>
+	regexp.MustCompile(`<<[^<>\n]+>>|<[a-z][^<>\n]*(content|existing|current|unchanged|rest|file|line)[^<>\n]*>`),
+	// [existing content here], [rest of file]
+	regexp.MustCompile(`(?i)\[[^\]\n]*(existing|unchanged|rest of|content here|snip|omitted)[^\]\n]*\]`),
+	// ... rest of file unchanged ...
+	regexp.MustCompile(`(?i)\.\.\.[^\n]*(rest|unchanged|existing|omitted|snip)[^\n]*`),
+}
+
+// placeholderInDiff reports the first context or delete line that is template
+// text rather than real file content. Added lines are exempt: a diff may
+// legitimately introduce text containing brackets or ellipses.
+func placeholderInDiff(payload string) (string, bool) {
+	for _, line := range strings.Split(payload, "\n") {
+		if strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
+			continue
+		}
+		if strings.HasPrefix(line, "@@") {
+			continue
+		}
+		if strings.HasPrefix(line, "+") {
+			continue
+		}
+		body := strings.TrimPrefix(strings.TrimPrefix(line, " "), "-")
+		if strings.TrimSpace(body) == "" {
+			continue
+		}
+		for _, re := range placeholderMarkers {
+			if m := re.FindString(body); m != "" {
+				return strings.TrimSpace(m), true
+			}
+		}
+	}
+	return "", false
 }
 
 func wouldShrinkDrastically(old, neu []byte) bool {
