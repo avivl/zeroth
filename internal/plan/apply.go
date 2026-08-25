@@ -102,7 +102,9 @@ func resultFrom(p Plan, applied []Applied, through int, ck CheckpointRef) Result
 }
 
 // Executor applies rows and reports the live world. Observe must not
-// write. Execute is idempotent by Row.IdempotencyKey. Seen lets a retry
+// write. Execute is idempotent by Row.IdempotencyKey, which is scoped to
+// the session (retries within one run skip a row that already landed;
+// a different run with the same bytes is a new apply). Seen lets a retry
 // skip precondition checks for keys that already landed, so the
 // postcondition is not mistaken for drift.
 type Executor interface {

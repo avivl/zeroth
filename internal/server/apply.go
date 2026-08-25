@@ -76,6 +76,12 @@ func (s *Server) applyApproved(ctx context.Context, sess store.Session, p plan.P
 		if err := s.publishApplied(ctx, sess, sid, p, world, root); err != nil {
 			return result, "", err
 		}
+		// File effects that did not produce a PR must not look like a
+		// successful apply. "In Review" is a trust signal; an empty
+		// publish is not a PR.
+		if planNeedsGitPublish(p) && strings.TrimSpace(s.peekPR(sess.ID.String())) == "" {
+			return result, "", fmt.Errorf("server apply publish: no pull request opened for file effects")
+		}
 	}
 	return result, aud.lastID, nil
 }
@@ -101,10 +107,16 @@ func (s *Server) applyWorkspace(ctx context.Context, id session.ID, sess store.S
 	return src, nil
 }
 
+const (
+	publishOutcomePublished        = "published"
+	publishOutcomeNothingToPublish = "nothing_to_publish"
+	publishOutcomeAlreadyPublished = "already_published"
+)
+
 func (s *Server) publishApplied(ctx context.Context, sess store.Session, sid session.ID, p plan.Plan, world *applyWorld, root string) error {
 	targets := world.targets()
 	if len(targets) == 0 {
-		return nil
+		return s.publishEmptyTargets(ctx, sess, sid, p)
 	}
 	issue := s.trackerKey(sid)
 	req := ApplyPublish{
@@ -127,12 +139,66 @@ func (s *Server) publishApplied(ctx context.Context, sess store.Session, sid ses
 	if u := strings.TrimSpace(ref.PullRequest); u != "" {
 		s.rememberPR(sess.ID.String(), u)
 	}
+	if err := s.recordApplyPublish(ctx, sess, p, publishOutcomePublished, ref.PullRequest); err != nil {
+		return err
+	}
 	s.log.Info("apply opened pull request",
 		zap.String("run", sid.String()),
 		zap.String("branch", ref.Branch),
 		zap.String("commit", ref.Commit),
 		zap.String("pr", ref.PullRequest),
 	)
+	return nil
+}
+
+// publishEmptyTargets is the defense behind session-scoped idempotency
+// keys. World.Seen skipping Execute leaves wrote empty; treating that as
+// a successful publish moved tracker issues to In Review with no PR.
+func (s *Server) publishEmptyTargets(ctx context.Context, sess store.Session, sid session.ID, p plan.Plan) error {
+	if !planNeedsGitPublish(p) {
+		return s.recordApplyPublish(ctx, sess, p, publishOutcomeNothingToPublish, "")
+	}
+	if pr := strings.TrimSpace(s.peekPR(sid.String())); pr != "" {
+		return s.recordApplyPublish(ctx, sess, p, publishOutcomeAlreadyPublished, pr)
+	}
+	return fmt.Errorf("server apply publish: plan has file effects but no workspace targets were written")
+}
+
+func planNeedsGitPublish(p plan.Plan) bool {
+	for _, row := range p.Rows {
+		if row.Op == plan.OpMemoryProposal {
+			continue
+		}
+		if skipGitTarget(row.Target) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func (s *Server) recordApplyPublish(ctx context.Context, sess store.Session, p plan.Plan, outcome, pr string) error {
+	if s.audit == nil {
+		return fmt.Errorf("server apply publish audit: nil audit log")
+	}
+	target := p.ID.String()
+	if u := strings.TrimSpace(pr); u != "" {
+		target = u
+	}
+	_, err := s.audit.Append(ctx, audit.Entry{
+		Action:        audit.ActionPlanApplyPublish,
+		Target:        target,
+		PlanHash:      string(p.Hash),
+		Postcondition: outcome,
+		Approver:      audit.ApproverOperator,
+		AgentID:       sess.AgentID,
+		SessionID:     sess.ID,
+		ResourceType:  "plan",
+		ResourceID:    p.ID.String(),
+	})
+	if err != nil {
+		return fmt.Errorf("server apply publish audit: %w", err)
+	}
 	return nil
 }
 
@@ -188,6 +254,10 @@ type applyWorld struct {
 }
 
 func newApplyWorld(root string) *applyWorld {
+	// applied is in-memory for this Apply call. The store persists the
+	// key on the plan row but has no global seen-set. Keys are scoped to
+	// the session so a later persistent Seen map still cannot collide
+	// across unrelated runs.
 	return &applyWorld{root: root, applied: make(map[string]string)}
 }
 

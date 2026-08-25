@@ -174,7 +174,7 @@ func rowFrom(d Draft, i int, e Proposed) (Row, error) {
 		Payload:        payload,
 		Lease:          lease,
 		Precondition:   pre,
-		IdempotencyKey: idempotencyKey(op, target, payload),
+		IdempotencyKey: idempotencyKey(d.SessionID, op, target, payload),
 		Postcondition:  post,
 	}, nil
 }
@@ -220,8 +220,13 @@ func postcondition(op Op, payload string, original []byte) (string, error) {
 	return Digest(result), nil
 }
 
-func idempotencyKey(op Op, target, payload string) string {
-	return Digest([]byte(string(op) + "\n" + target + "\n" + payload))
+// idempotencyKey is unique per session for a given (op, target, payload).
+// Retries of the same run keep the same digest so Apply can skip a row
+// that already landed. Unrelated runs that happen to propose byte-identical
+// content must not collide: a global key would let World.Seen short-circuit
+// Execute, leave git publish with no targets, and still report success.
+func idempotencyKey(sessionID session.ID, op Op, target, payload string) string {
+	return Digest([]byte(sessionID.String() + "\n" + string(op) + "\n" + target + "\n" + payload))
 }
 
 func normalizeTarget(p string) string {
