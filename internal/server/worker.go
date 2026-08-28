@@ -9,6 +9,7 @@ import (
 
 	"github.com/avivl/zeroth/internal/harness"
 	"github.com/avivl/zeroth/internal/session"
+	"github.com/avivl/zeroth/internal/store"
 	"github.com/avivl/zeroth/internal/tracker"
 	"go.uber.org/zap"
 )
@@ -141,11 +142,24 @@ func (s *Server) runHarnessTurn(ctx context.Context, l *liveRun) {
 		zap.String("tracker", s.trackerKey(l.id)),
 	)
 
+	// A run that already has a vendor session is one whose turn was cut
+	// short, almost always by a daemon restart. Resume it rather than
+	// spending the turn again from the prompt (42-78). An empty id is a
+	// genuinely new run and behaves exactly as before.
+	resume := s.harnessSessionOf(ctx, l.id)
+	if resume != "" {
+		s.log.Info("resuming harness turn",
+			zap.String("run", l.id.String()),
+			zap.String("vendor_session", resume),
+		)
+	}
+
 	// Host subprocess against the overlay cwd, not sandbox.Exec (ADR-Z-0010).
 	handle, err := s.harness.Start(ctx, harness.Spec{
 		Workspace: ws,
 		Prompt:    prompt,
 		Env:       harnessEnv(),
+		Resume:    harness.Checkpoint{VendorSession: resume},
 	})
 	if err != nil {
 		s.failRun(l.id, fmt.Sprintf("harness start: %v", err))
@@ -168,6 +182,7 @@ func (s *Server) runHarnessTurn(ctx context.Context, l *liveRun) {
 	defer timer.Stop()
 
 	drafted := false
+	captured := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -188,6 +203,12 @@ func (s *Server) runHarnessTurn(ctx context.Context, l *liveRun) {
 				}
 				return
 			}
+			if !captured {
+				// The vendor session id rides the stream's first line, so
+				// it is knowable now. Persist it before the turn can be
+				// killed, not at the end (42-78).
+				captured = s.rememberHarnessSession(ctx, l.id, handle.ID)
+			}
 			if err := s.handleHarnessEvent(ctx, l.id, ws, ev, &drafted); err != nil {
 				if ctx.Err() != nil {
 					return
@@ -200,6 +221,56 @@ func (s *Server) runHarnessTurn(ctx context.Context, l *liveRun) {
 			}
 		}
 	}
+}
+
+// harnessSessionOf returns the vendor session stored for a run, or "" when
+// the run has none yet.
+func (s *Server) harnessSessionOf(ctx context.Context, id session.ID) string {
+	sid, err := store.ParseSessionID(id.String())
+	if err != nil {
+		return ""
+	}
+	sess, err := s.store.GetSession(ctx, sid)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(sess.HarnessSession)
+}
+
+// rememberHarnessSession persists the driver's vendor session so a restart
+// can resume the turn. It reports whether there is nothing left to capture,
+// so the caller stops asking: either the id landed, or the driver has no
+// id to give and will not grow one later in this turn.
+func (s *Server) rememberHarnessSession(ctx context.Context, id session.ID, hid harness.ID) bool {
+	ck, err := s.harness.Checkpoint(ctx, hid)
+	if err != nil {
+		s.log.Debug("harness checkpoint", zap.String("run", id.String()), zap.Error(err))
+		return false
+	}
+	vendor := strings.TrimSpace(ck.VendorSession)
+	if vendor == "" {
+		return false
+	}
+	sid, err := store.ParseSessionID(id.String())
+	if err != nil {
+		return true
+	}
+	s.sessMu.Lock()
+	defer s.sessMu.Unlock()
+	sess, err := s.store.GetSession(ctx, sid)
+	if err != nil {
+		return true
+	}
+	if strings.TrimSpace(sess.HarnessSession) == vendor {
+		return true
+	}
+	sess.HarnessSession = vendor
+	sess.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateSession(ctx, sess); err != nil {
+		s.log.Debug("remember harness session", zap.String("run", id.String()), zap.Error(err))
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleHarnessEvent(ctx context.Context, id session.ID, workspace string, ev harness.Event, drafted *bool) error {

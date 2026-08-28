@@ -10,7 +10,7 @@ import (
 	"github.com/avivl/zeroth/internal/store"
 )
 
-const sessionCols = `id, agent_id, plan_id, status, prompt, tracker_ref, workspace_json, autonomy_tier, pull_request, retract_reason, created_at_unix_nano, updated_at_unix_nano, finished_at_unix_nano, retracted_at_unix_nano`
+const sessionCols = `id, agent_id, plan_id, status, prompt, tracker_ref, workspace_json, autonomy_tier, pull_request, retract_reason, harness_session, created_at_unix_nano, updated_at_unix_nano, finished_at_unix_nano, retracted_at_unix_nano`
 
 func (s *Store) CreateSession(ctx context.Context, sess store.Session) error {
 	if err := s.guard(); err != nil {
@@ -23,9 +23,9 @@ func (s *Store) CreateSession(ctx context.Context, sess store.Session) error {
 	if err != nil {
 		return wrap("create session", err)
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO sessions (`+sessionCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = s.db.ExecContext(ctx, `INSERT INTO sessions (`+sessionCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID.String(), sess.AgentID.String(), sess.PlanID.String(), sess.Status, sess.Prompt, sess.TrackerRef,
-		ws, sess.AutonomyTier, sess.PullRequest, sess.RetractReason, nano(sess.CreatedAt), nano(sess.UpdatedAt),
+		ws, sess.AutonomyTier, sess.PullRequest, sess.RetractReason, sess.HarnessSession, nano(sess.CreatedAt), nano(sess.UpdatedAt),
 		toNullNano(sess.FinishedAt), toNullNano(sess.RetractedAt),
 	)
 	if err != nil {
@@ -57,16 +57,20 @@ func (s *Store) UpdateSession(ctx context.Context, sess store.Session) error {
 	}
 	planID := sess.PlanID.String()
 	// A zero PlanID is a status-only sync. Keep the attached plan if one
-	// exists so a concurrent draft cannot lose the row.
+	// exists so a concurrent draft cannot lose the row. An empty
+	// HarnessSession is the same hazard: most callers never set it, and a
+	// status sync must not wipe the id a live turn just recorded (42-78).
+	hs := sess.HarnessSession
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE sessions SET agent_id = ?,
 			plan_id = CASE WHEN ? = '' THEN plan_id ELSE ? END,
 			status = ?, prompt = ?, tracker_ref = ?,
 			workspace_json = ?, autonomy_tier = ?, pull_request = ?, retract_reason = ?,
+			harness_session = CASE WHEN ? = '' THEN harness_session ELSE ? END,
 			updated_at_unix_nano = ?, finished_at_unix_nano = ?, retracted_at_unix_nano = ?
 		WHERE id = ?`,
 		sess.AgentID.String(), planID, planID, sess.Status, sess.Prompt, sess.TrackerRef, ws,
-		sess.AutonomyTier, sess.PullRequest, sess.RetractReason, nano(sess.UpdatedAt),
+		sess.AutonomyTier, sess.PullRequest, sess.RetractReason, hs, hs, nano(sess.UpdatedAt),
 		toNullNano(sess.FinishedAt), toNullNano(sess.RetractedAt), sess.ID.String(),
 	)
 	if err != nil {
@@ -122,7 +126,7 @@ func scanSession(row *sql.Row, op string) (store.Session, error) {
 	var created, updated int64
 	var finished, retracted sql.NullInt64
 	err := row.Scan(&id, &agent, &plan, &sess.Status, &sess.Prompt, &sess.TrackerRef, &ws, &sess.AutonomyTier,
-		&sess.PullRequest, &sess.RetractReason, &created, &updated, &finished, &retracted)
+		&sess.PullRequest, &sess.RetractReason, &sess.HarnessSession, &created, &updated, &finished, &retracted)
 	if err != nil {
 		return store.Session{}, wrap(op, err)
 	}
@@ -137,7 +141,7 @@ func scanSessions(rows *sql.Rows) ([]store.Session, error) {
 		var created, updated int64
 		var finished, retracted sql.NullInt64
 		if err := rows.Scan(&id, &agent, &plan, &sess.Status, &sess.Prompt, &sess.TrackerRef, &ws, &sess.AutonomyTier,
-			&sess.PullRequest, &sess.RetractReason, &created, &updated, &finished, &retracted); err != nil {
+			&sess.PullRequest, &sess.RetractReason, &sess.HarnessSession, &created, &updated, &finished, &retracted); err != nil {
 			return nil, wrap("list sessions", err)
 		}
 		sess, err := finishSession(sess, id, agent, plan, ws, created, updated, finished, retracted, "list sessions")
