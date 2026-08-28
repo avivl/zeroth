@@ -101,10 +101,57 @@ func (s *Server) applyWorkspace(ctx context.Context, id session.ID, sess store.S
 	return src, nil
 }
 
+// rowsExpectingPublish counts the rows whose apply should leave something
+// for git to commit. memory_proposal rows never touch the worktree, and
+// compiled memory artifacts are deliberately kept out of git
+// (skipGitTarget), so a plan made only of those publishes nothing by
+// design. Anything else that publishes nothing did not happen (42-77).
+func rowsExpectingPublish(p plan.Plan) int {
+	n := 0
+	for _, row := range p.Rows {
+		if row.Op == plan.OpMemoryProposal {
+			continue
+		}
+		if skipGitTarget(row.Target) {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
+// publishAppliedTargets decides whether an empty publish is legitimate. An
+// approved plan that wrote files but produced no targets never reached git:
+// no branch, no commit, no PR. Reporting that as StatusApplied moved the
+// tracker issue to "In Review" with nothing to review, which is the trust
+// signal the whole plan-then-apply model rests on (42-77).
+func (s *Server) publishAppliedTargets(p plan.Plan, targets []string) error {
+	if len(targets) > 0 {
+		return nil
+	}
+	if want := rowsExpectingPublish(p); want > 0 {
+		return fmt.Errorf("server apply publish: plan applied %d file row(s) but wrote nothing to publish; no branch, commit, or pull request was created", want)
+	}
+	return errNothingToPublish
+}
+
+// errNothingToPublish marks the legitimate empty publish so the caller can
+// tell it apart from a real one without a second nil-versus-nil check.
+var errNothingToPublish = errors.New("nothing to publish")
+
 func (s *Server) publishApplied(ctx context.Context, sess store.Session, sid session.ID, p plan.Plan, world *applyWorld, root string) error {
 	targets := world.targets()
 	if len(targets) == 0 {
-		return nil
+		err := s.publishAppliedTargets(p, targets)
+		if errors.Is(err, errNothingToPublish) {
+			s.log.Info("apply published nothing; plan has no git-publishable rows",
+				zap.String("run", sid.String()),
+				zap.String("plan", p.ID.String()),
+				zap.Int("rows", len(p.Rows)),
+			)
+			return nil
+		}
+		return err
 	}
 	issue := s.trackerKey(sid)
 	req := ApplyPublish{
