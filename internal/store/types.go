@@ -14,10 +14,14 @@ type Session struct {
 	AutonomyTier  string
 	PullRequest   string
 	RetractReason string
-	RetractedAt   time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	FinishedAt    time.Time
+	// HarnessSession is the vendor session id of the run's harness turn.
+	// It is persisted so a daemon restart can resume the turn rather than
+	// start it over from the prompt (42-78).
+	HarnessSession string
+	RetractedAt    time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	FinishedAt     time.Time
 }
 
 // WorkspaceSource is the repo a session checks out.
