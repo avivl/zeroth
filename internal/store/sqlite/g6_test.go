@@ -13,13 +13,29 @@ import (
 
 // G6 from the BA-6 spike: 5 concurrent sessions appending. A stall is one
 // Append (or one batched AppendEvents commit). The spike bar was 50 ms on a
-// quiet machine. Race-instrumented CI runs this package in parallel with
-// live Docker conformance, which has jittered to 52 ms; 100 ms still fails
-// a multi-hundred-ms stall and stays inside the job budget.
-const g6StallLimit = 100 * time.Millisecond
+// quiet machine, recorded at p50=0.089 ms max=5.714 ms.
+//
+// Two bounds, because they catch different things (42-80). g6SustainedLimit
+// is p95: if most writes are slow, the store regressed. g6SpikeLimit is the
+// single worst sample, and it is deliberately loose, because max of 100
+// wall-clock samples on shared CI is the least stable statistic available
+// and one scheduling artifact should not fail an unrelated PR. A real
+// multi-hundred-ms stall, which is what the original gate was written to
+// catch, still trips it.
+//
+// Gating on max alone failed PR #75, a branch touching no store code:
+// p50=5.8 ms p95=89.7 ms p99=126 ms max=126 ms. Same commit passed on main
+// minutes later. Locally this test sees max 8-19 ms with the whole package
+// running.
+const (
+	g6SustainedLimit = 100 * time.Millisecond
+	g6SpikeLimit     = 500 * time.Millisecond
+)
 
+// Deliberately not t.Parallel: this measures wall-clock latency, and Go
+// runs non-parallel tests outside the parallel phase, so it is not competing
+// with every other test in this package for the same cores.
 func TestG6WriteStall(t *testing.T) {
-	t.Parallel()
 	s := openTest(t)
 	ctx := t.Context()
 	agent := store.Agent{ID: mustAID(t, "g6-agent"), Name: "n", Harness: "h", Status: "ready"}
@@ -77,10 +93,13 @@ func TestG6WriteStall(t *testing.T) {
 	p95 := stalls[len(stalls)*95/100]
 	p99 := stalls[len(stalls)*99/100]
 	max := stalls[len(stalls)-1]
-	t.Logf("G6 write stall n=%d p50=%s p95=%s p99=%s max=%s (spike gate: max <= %s, recorded p50=0.089ms max=5.714ms)",
-		len(stalls), p50, p95, p99, max, g6StallLimit)
-	if max > g6StallLimit {
-		t.Fatalf("G6 max stall %s, want <= %s", max, g6StallLimit)
+	t.Logf("G6 write stall n=%d p50=%s p95=%s p99=%s max=%s (gates: p95 <= %s, max <= %s; recorded p50=0.089ms max=5.714ms)",
+		len(stalls), p50, p95, p99, max, g6SustainedLimit, g6SpikeLimit)
+	if p95 > g6SustainedLimit {
+		t.Fatalf("G6 p95 stall %s, want <= %s (writes are slow across the board, not one hiccup)", p95, g6SustainedLimit)
+	}
+	if max > g6SpikeLimit {
+		t.Fatalf("G6 max stall %s, want <= %s", max, g6SpikeLimit)
 	}
 }
 
